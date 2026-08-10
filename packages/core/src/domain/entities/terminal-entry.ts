@@ -107,7 +107,11 @@ export class TerminalEntry {
     return closedAtMs === null ? null : new Date(closedAtMs);
   }
 
-  /** Optimistic concurrency for `record.json`. Advanced by the repository on write, never here. */
+  /**
+   * Optimistic concurrency for `record.json`. Advanced by the repository on
+   * write -- and by `adoptedBy`, which is the one change to this record that
+   * IS the compare-and-swap. See the note there.
+   */
   public get revision(): number {
     return this._state.revision;
   }
@@ -208,6 +212,14 @@ export class TerminalEntry {
    * What can be checked here is checked: a living owner is never displaced,
    * including by itself, so re-adopting under the same owner id is refused
    * rather than silently producing a new instance.
+   *
+   * The revision advances HERE rather than in the repository, unlike every
+   * other write. Adoption is the compare-and-swap itself -- a caller reads
+   * revision R, adopts with `expected: R`, and stores the result. Leave the
+   * number alone and two windows adopting the same abandoned terminal both pass
+   * their check and both start `claude --resume` on one conversation. The rule
+   * belongs where it cannot be forgotten by the next implementation of the
+   * repository, and that is here.
    */
   public adoptedBy(next: OwnerRef): TerminalEntry {
     if (this._state.owner.ownerId.equals(next.ownerId)) {
@@ -215,7 +227,7 @@ export class TerminalEntry {
         details: { ownerId: next.ownerId.value },
       });
     }
-    return this._withState({ owner: next });
+    return this._withState({ owner: next, revision: this._state.revision + 1 });
   }
 
   /** Idempotent: the first close wins, so a second one cannot move the timestamp. */

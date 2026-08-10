@@ -10,6 +10,8 @@ import {
   TerminalId,
   type CreateTerminalEntryParams,
   type IdGenerator,
+  type OwnerIdentity,
+  type TerminalSpec,
 } from '../../packages/core/src/index.js';
 
 export const TERMINAL_UUID = '550e8400-e29b-41d4-a716-446655440000';
@@ -92,6 +94,28 @@ export function makeObserved(): ObservedState {
     contextWindow: null,
     pid: null,
   });
+}
+
+export function makeOwnerIdentity(ownerId = 'window-activation-1'): OwnerIdentity {
+  return {
+    ownerId: OwnerId.fromString(ownerId),
+    kind: 'window',
+    pid: 4242,
+    editorKind: 'vscode',
+    editorVersion: '1.132.0',
+    workspaceFolders: ['D:/Projects/foo'],
+  };
+}
+
+export function makeTerminalSpec(): TerminalSpec {
+  return {
+    terminalId: TerminalId.fromString(TERMINAL_UUID),
+    name: 'auth-refactor',
+    cwd: 'D:/Projects/foo',
+    env: { GRIPTERM_TOKEN: 'secret' },
+    shellPath: 'C:/Users/x/.local/bin/claude.exe',
+    shellArgs: ['--session-id', TERMINAL_UUID],
+  };
 }
 
 export function makeEntry(overrides: Partial<CreateTerminalEntryParams> = {}): TerminalEntry {

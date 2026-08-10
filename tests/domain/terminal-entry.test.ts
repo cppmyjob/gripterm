@@ -187,7 +187,18 @@ describe('adoptedBy', () => {
 
     expect(adopted.owner.ownerId.value).toBe('window-activation-2');
     expect(entry.owner.ownerId.value).toBe('window-activation-1');
-    expect(adopted.revision).toBe(entry.revision);
+  });
+
+  it('advances the revision, unlike every other change to the record', () => {
+    // Adoption IS the compare-and-swap: a caller reads revision R, adopts with
+    // `expected: R` and stores the result. Leave the number where it was and
+    // two windows adopting the same abandoned terminal both pass their check
+    // and both start `claude --resume` on one conversation. Found while wiring
+    // the repository in M1.5 -- the comment on `revision` promised a mechanism
+    // the aggregate did not have.
+    const entry = makeEntry({ revision: 7 });
+
+    expect(entry.adoptedBy(makeOwnerRef('window-activation-2')).revision).toBe(8);
   });
 
   it('refuses the current owner, living owners included -- even itself', () => {

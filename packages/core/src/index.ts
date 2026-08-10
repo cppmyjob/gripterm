@@ -23,6 +23,27 @@ export {
 } from './domain/errors/gripterm-error.js';
 
 export { type IdGenerator } from './domain/ports/id-generator.js';
+export { type Clock } from './domain/ports/clock.js';
+export { type Disposable } from './domain/ports/disposable.js';
+export {
+  type TerminalExit,
+  type TerminalGateway,
+  type TerminalHandle,
+  type TerminalSpec,
+} from './domain/ports/terminal-gateway.js';
+export {
+  type OwnerIdentity,
+  type OwnerLiveness,
+  type OwnerPresence,
+} from './domain/ports/owner-presence.js';
+export {
+  type AdoptOptions,
+  type RepositoryListener,
+  type TerminalRepository,
+} from './domain/repositories/terminal-repository.js';
+
+export { InMemoryTerminalRepository } from './infrastructure/store/in-memory-terminal-repository.js';
+export { InMemoryOwnerPresence } from './infrastructure/store/in-memory-owner-presence.js';
 
 export { TerminalId } from './domain/entities/terminal-id.js';
 export { SessionId } from './domain/entities/session-id.js';
