@@ -47,3 +47,40 @@ export {
   TerminalEntry,
   type CreateTerminalEntryParams,
 } from './domain/entities/terminal-entry.js';
+
+export {
+  isHookEvent,
+  launchExitedNonZero,
+  processGone,
+  resumeExitedNonZero,
+  resumeTimedOut,
+  terminalClosed,
+  type CwdChangedEvent,
+  type HookEvent,
+  type HookEventContext,
+  type LaunchExitedNonZeroEvent,
+  type NotificationEvent,
+  type NotificationType,
+  type PermissionRequestEvent,
+  type PostToolUseEvent,
+  type PostToolUseFailureEvent,
+  type PreToolUseEvent,
+  type ProcessGoneEvent,
+  type ResumeExitedNonZeroEvent,
+  type ResumeTimedOutEvent,
+  type SessionEndEvent,
+  type SessionEndReason,
+  type SessionStartEvent,
+  type SessionStartSource,
+  type StopEvent,
+  type StopFailureEvent,
+  type SyntheticEvent,
+  type TerminalClosedEvent,
+  type TerminalEvent,
+  type UserPromptSubmitEvent,
+} from './domain/events/terminal-event.js';
+
+export {
+  HookEventParser,
+  type HookEventParseResult,
+} from './domain/events/hook-event-parser.js';
