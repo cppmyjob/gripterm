@@ -42,9 +42,11 @@ export {
   type TerminalRepository,
 } from './domain/repositories/terminal-repository.js';
 
+export { FileSessionSettingsStore } from './infrastructure/store/file-session-settings-store.js';
 export { InMemoryTerminalRepository } from './infrastructure/store/in-memory-terminal-repository.js';
 export { InMemoryOwnerPresence } from './infrastructure/store/in-memory-owner-presence.js';
 
+export { ListeningAddress } from './domain/entities/listening-address.js';
 export { TerminalId } from './domain/entities/terminal-id.js';
 export { SessionId } from './domain/entities/session-id.js';
 export { OwnerId } from './domain/entities/owner-id.js';
@@ -105,6 +107,25 @@ export {
   HookEventParser,
   type HookEventParseResult,
 } from './domain/events/hook-event-parser.js';
+
+export {
+  HOOK_EVENT_PATH_PREFIX,
+  hookEventUrl,
+  parseHookEventPath,
+} from './domain/services/hook-endpoint.js';
+
+export {
+  SessionSettingsBuilder,
+  TOKEN_ENV_VAR,
+  type CommandHookConfig,
+  type ForwarderScript,
+  type HookConfig,
+  type HookEventName,
+  type HookRegistration,
+  type HttpHookConfig,
+  type SessionSettingsDocument,
+  type SessionSettingsParams,
+} from './domain/services/session-settings-builder.js';
 
 export {
   TerminalStateMachine,
