@@ -84,3 +84,12 @@ export {
   HookEventParser,
   type HookEventParseResult,
 } from './domain/events/hook-event-parser.js';
+
+export {
+  TerminalStateMachine,
+  type AttentionSignal,
+  type IgnoredTransition,
+  type MovedTransition,
+  type StateTransition,
+  type StayedTransition,
+} from './domain/services/terminal-state-machine.js';
