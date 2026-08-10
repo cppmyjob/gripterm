@@ -1,7 +1,7 @@
-import type { TerminalEntry } from '../entities/terminal-entry.js';
-import type { OwnerId } from '../entities/owner-id.js';
-import type { TerminalId } from '../entities/terminal-id.js';
-import type { Disposable } from '../ports/disposable.js';
+import type { TerminalEntry } from '../entities/terminal-entry';
+import type { OwnerId } from '../entities/owner-id';
+import type { TerminalId } from '../entities/terminal-id';
+import type { Disposable } from '../ports/disposable';
 
 export interface AdoptOptions {
   /**

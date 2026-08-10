@@ -1,4 +1,4 @@
-import { ValidationError } from '../errors/gripterm-error.js';
+import { ValidationError } from '../errors/gripterm-error';
 
 /**
  * The one host this extension ever listens on. Fixed rather than passed in:

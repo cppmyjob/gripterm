@@ -1,4 +1,4 @@
-import { ValidationError } from '../errors/gripterm-error.js';
+import { ValidationError } from '../errors/gripterm-error';
 
 /**
  * A line the human wrote about a terminal. Claude Code never touches it and

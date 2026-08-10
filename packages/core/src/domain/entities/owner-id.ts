@@ -1,4 +1,4 @@
-import { ValidationError } from '../errors/gripterm-error.js';
+import { ValidationError } from '../errors/gripterm-error';
 
 /**
  * Identifies an ACTIVATION, not a window in general: the same window reopened

@@ -1,5 +1,5 @@
-import { ValidationError } from '../errors/gripterm-error.js';
-import type { OwnerId } from './owner-id.js';
+import { ValidationError } from '../errors/gripterm-error';
+import type { OwnerId } from './owner-id';
 
 /**
  * `'window'` throughout the MVP, and no branch reads it otherwise. It exists

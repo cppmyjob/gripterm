@@ -4,13 +4,13 @@ import {
   TerminalId,
   ValidationError,
   isErrorOfCode,
-} from '../../packages/core/src/index.js';
+} from '../../packages/core/src/index';
 import {
   SESSION_UUID,
   TERMINAL_UUID,
   captureError,
   stubIdGenerator,
-} from '../helpers/domain-fixtures.js';
+} from '../helpers/domain-fixtures';
 
 describe('TerminalId', () => {
   it('accepts a UUID', () => {

@@ -1,5 +1,5 @@
-import type { TerminalId } from '../entities/terminal-id.js';
-import type { Disposable } from './disposable.js';
+import type { TerminalId } from '../entities/terminal-id';
+import type { Disposable } from './disposable';
 
 /**
  * Everything the editor needs in order to create the terminal.

@@ -1,5 +1,5 @@
-import type { IdGenerator } from '../ports/id-generator.js';
-import { parseUuid } from './uuid.js';
+import type { IdGenerator } from '../ports/id-generator';
+import { parseUuid } from './uuid';
 
 /**
  * Our address for a terminal, machine-wide and permanent.

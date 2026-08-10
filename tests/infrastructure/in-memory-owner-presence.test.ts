@@ -2,8 +2,8 @@ import {
   ConflictError,
   InMemoryOwnerPresence,
   OwnerId,
-} from '../../packages/core/src/index.js';
-import { makeOwnerIdentity } from '../helpers/domain-fixtures.js';
+} from '../../packages/core/src/index';
+import { makeOwnerIdentity } from '../helpers/domain-fixtures';
 
 const US = makeOwnerIdentity();
 const STRANGER = OwnerId.fromString('window-activation-9');

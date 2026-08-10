@@ -12,7 +12,7 @@ import {
   type IdGenerator,
   type OwnerIdentity,
   type TerminalSpec,
-} from '../../packages/core/src/index.js';
+} from '../../packages/core/src/index';
 
 export const TERMINAL_UUID = '550e8400-e29b-41d4-a716-446655440000';
 export const SESSION_UUID = 'ac2d74d7-1f3b-4c5e-9a80-0d1e2f3a4b5c';

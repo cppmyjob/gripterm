@@ -6,13 +6,13 @@ import {
   SessionId,
   TerminalId,
   ValidationError,
-} from '../../packages/core/src/index.js';
+} from '../../packages/core/src/index';
 import {
   NEXT_SESSION_UUID,
   TERMINAL_UUID,
   makeEntry,
   makeOwnerRef,
-} from '../helpers/domain-fixtures.js';
+} from '../helpers/domain-fixtures';
 
 const OURS = makeOwnerRef();
 const THEIRS = makeOwnerRef('window-activation-2');

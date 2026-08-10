@@ -10,8 +10,8 @@ import {
   PERMISSION_MODES,
   ValidationError,
   isPermissionMode,
-} from '../../packages/core/src/index.js';
-import { CREATED_AT, OBSERVED_AT, makeOwnerRef } from '../helpers/domain-fixtures.js';
+} from '../../packages/core/src/index';
+import { CREATED_AT, OBSERVED_AT, makeOwnerRef } from '../helpers/domain-fixtures';
 
 describe('Note', () => {
   it('trims its text and refuses to be empty', () => {

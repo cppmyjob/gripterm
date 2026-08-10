@@ -12,8 +12,8 @@ import {
   type PersistedTerminalState,
   type StateTransition,
   type TerminalEvent,
-} from '../../packages/core/src/index.js';
-import { SESSION_UUID } from '../helpers/domain-fixtures.js';
+} from '../../packages/core/src/index';
+import { SESSION_UUID } from '../helpers/domain-fixtures';
 
 const CONTEXT: HookEventContext = {
   sessionId: SessionId.fromString(SESSION_UUID),

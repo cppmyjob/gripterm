@@ -1,10 +1,10 @@
-import { ConflictError } from '../../domain/errors/gripterm-error.js';
-import type { OwnerId } from '../../domain/entities/owner-id.js';
+import { ConflictError } from '../../domain/errors/gripterm-error';
+import type { OwnerId } from '../../domain/entities/owner-id';
 import type {
   OwnerIdentity,
   OwnerLiveness,
   OwnerPresence,
-} from '../../domain/ports/owner-presence.js';
+} from '../../domain/ports/owner-presence';
 
 /**
  * Presence for a base that no other process can reach.

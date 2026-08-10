@@ -1,5 +1,5 @@
-import { ValidationError } from '../errors/gripterm-error.js';
-import type { PermissionMode } from './permission-mode.js';
+import { ValidationError } from '../errors/gripterm-error';
+import type { PermissionMode } from './permission-mode';
 
 export interface LaunchRecipeParams {
   readonly cwd: string;

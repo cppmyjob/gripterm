@@ -3,8 +3,8 @@ import {
   SessionId,
   type HookEvent,
   type HookEventParseResult,
-} from '../../packages/core/src/index.js';
-import { SESSION_UUID } from '../helpers/domain-fixtures.js';
+} from '../../../packages/core/src/index';
+import { SESSION_UUID } from '../../helpers/domain-fixtures';
 
 const parser = new HookEventParser();
 

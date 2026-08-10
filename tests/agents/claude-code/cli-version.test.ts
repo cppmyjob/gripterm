@@ -2,7 +2,7 @@ import {
   SUPPORTED_CLI_VERSION,
   isSupportedCliVersion,
   parseCliVersion,
-} from '../../packages/core/src/domain/services/cli-version.js';
+} from '../../../packages/core/src/domain/agents/claude-code/cli-version';
 
 describe('parseCliVersion', () => {
   it('reads the version out of the real --version output', () => {

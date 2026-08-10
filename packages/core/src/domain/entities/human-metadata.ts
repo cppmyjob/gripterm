@@ -1,5 +1,5 @@
-import { ValidationError } from '../errors/gripterm-error.js';
-import type { Note } from './note.js';
+import { ValidationError } from '../errors/gripterm-error';
+import type { Note } from './note';
 
 export interface HumanMetadataParams {
   readonly displayName: string;

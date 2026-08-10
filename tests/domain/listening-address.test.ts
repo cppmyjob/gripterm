@@ -1,5 +1,5 @@
-import { ListeningAddress, ValidationError } from '../../packages/core/src/index.js';
-import { captureError } from '../helpers/domain-fixtures.js';
+import { ListeningAddress, ValidationError } from '../../packages/core/src/index';
+import { captureError } from '../helpers/domain-fixtures';
 
 /**
  * The address is the one literal in `settings.json` that cannot be interpolated

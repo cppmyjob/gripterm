@@ -1,9 +1,9 @@
 import { posix, win32 } from 'node:path';
-import { ValidationError } from '../errors/gripterm-error.js';
-import { hookEventUrl } from './hook-endpoint.js';
-import type { ListeningAddress } from '../entities/listening-address.js';
-import type { TerminalId } from '../entities/terminal-id.js';
-import type { HookEvent } from '../events/terminal-event.js';
+import { ValidationError } from '../../errors/gripterm-error';
+import { hookEventUrl } from '../../services/hook-endpoint';
+import type { ListeningAddress } from '../../entities/listening-address';
+import type { TerminalId } from '../../entities/terminal-id';
+import type { HookEvent } from '../../events/terminal-event';
 
 /**
  * The name -- never the value -- of the per-activation token. It reaches the

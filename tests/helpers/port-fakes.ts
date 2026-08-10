@@ -7,7 +7,7 @@ import type {
   TerminalHandle,
   TerminalId,
   TerminalSpec,
-} from '../../packages/core/src/index.js';
+} from '../../packages/core/src/index';
 
 /**
  * Test doubles for the ports whose real implementation is not `packages/core`'s

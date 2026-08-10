@@ -1,4 +1,4 @@
-import { ValidationError } from '../errors/gripterm-error.js';
+import { ValidationError } from '../errors/gripterm-error';
 
 /**
  * What a session has cost so far.

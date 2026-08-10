@@ -1,8 +1,8 @@
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { StorageError } from '../../domain/errors/gripterm-error.js';
-import type { SessionSettingsDocument } from '../../domain/services/session-settings-builder.js';
-import type { TerminalId } from '../../domain/entities/terminal-id.js';
+import { StorageError } from '../../domain/errors/gripterm-error';
+import type { SessionSettingsDocument } from '../../domain/agents/claude-code/session-settings-builder';
+import type { TerminalId } from '../../domain/entities/terminal-id';
 
 const TERMINALS_DIRECTORY = 'terminals';
 const SETTINGS_FILE = 'settings.json';

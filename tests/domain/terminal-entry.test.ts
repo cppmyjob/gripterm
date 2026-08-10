@@ -7,7 +7,7 @@ import {
   TerminalEntry,
   TerminalId,
   ValidationError,
-} from '../../packages/core/src/index.js';
+} from '../../packages/core/src/index';
 import {
   CREATED_AT,
   NEXT_SESSION_UUID,
@@ -17,7 +17,7 @@ import {
   makeEntry,
   makeObserved,
   makeOwnerRef,
-} from '../helpers/domain-fixtures.js';
+} from '../helpers/domain-fixtures';
 
 const CLOSED_AT = new Date('2026-08-10T11:00:00.000Z');
 

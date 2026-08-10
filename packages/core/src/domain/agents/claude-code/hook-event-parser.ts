@@ -1,12 +1,12 @@
-import { SessionId } from '../entities/session-id.js';
-import { isGriptermError } from '../errors/gripterm-error.js';
+import { SessionId } from '../../entities/session-id';
+import { isGriptermError } from '../../errors/gripterm-error';
 import type {
   HookEvent,
   HookEventContext,
   NotificationType,
   SessionEndReason,
   SessionStartSource,
-} from './terminal-event.js';
+} from '../../events/terminal-event';
 
 /**
  * The outcome of reading one HTTP body.

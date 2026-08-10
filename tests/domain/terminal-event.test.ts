@@ -8,8 +8,8 @@ import {
   resumeTimedOut,
   terminalClosed,
   type TerminalEvent,
-} from '../../packages/core/src/index.js';
-import { SESSION_UUID } from '../helpers/domain-fixtures.js';
+} from '../../packages/core/src/index';
+import { SESSION_UUID } from '../helpers/domain-fixtures';
 
 describe('the synthetic half of the union', () => {
   it('exists because four states have no hook that produces them', () => {

@@ -106,6 +106,16 @@ export default tseslint.config(
       // finds all three. Config files are exempt below: their frameworks require
       // a default export.
       'import-x/no-default-export': 'error',
+
+      // NOT `import-x/extensions: 'never'`, which would be the obvious way to
+      // enforce decision №33 (no `.js` on a relative specifier). It was tried in
+      // two spellings, both with a planted `'../errors/gripterm-error.js'` to
+      // check it could fail, and it stayed silent in both -- the TypeScript
+      // resolver hands the rule the resolved `.ts` file, and the written suffix
+      // never reaches it. A rule that cannot fail is worse than no rule: it
+      // claims an enforcement that does not exist. The convention is therefore
+      // stated in §3.4 of the plan and held by review, and that limit is said
+      // out loud rather than papered over.
     },
   },
 
@@ -346,6 +356,40 @@ export default tseslint.config(
     },
   },
 
+  {
+    // The second boundary, and it is younger than the first: everything under
+    // `domain/agents/<name>/` knows ONE agent CLI -- its settings file, its
+    // payload field names, its version pin. The rest of the domain must not,
+    // because the states, the aggregate and the state machine are about an
+    // agent running in a terminal and not about which agent it is. Composition
+    // and infrastructure may of course name one; they are where concrete
+    // choices belong.
+    //
+    // A directory, not an interface. A port shaped from a second agent we have
+    // only READ about would be the kind of work that gets redone; the boundary
+    // says where the seam runs without promising its form.
+    files: ['packages/core/src/domain/**/*.ts'],
+    ignores: ['packages/core/src/domain/agents/**/*.ts'],
+    rules: {
+      // Both patterns are repeated here on purpose. A later config object
+      // REPLACES the options of the same rule rather than merging with them, so
+      // omitting the `vscode` entry would quietly switch the first boundary off
+      // for exactly the files it matters most for.
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            { group: ['vscode'], message: 'core must not depend on the editor API' },
+            {
+              group: ['**/agents/**'],
+              message: 'the neutral domain must not know which agent CLI it is observing',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   // --- the specs --------------------------------------------------------------
   {
     files: ['tests/**/*.ts'],
@@ -361,7 +405,8 @@ export default tseslint.config(
     // suites alone: `tests/integration` runs under Mocha inside a real VS Code,
     // where `suite` and `test` are Mocha's and these rules would read them as
     // Jest's.
-    files: ['tests/domain/**/*.ts', 'tests/infrastructure/**/*.ts'],
+    files: ['tests/**/*.ts'],
+    ignores: ['tests/integration/**/*.ts'],
     ...jest.configs['flat/recommended'],
     rules: {
       ...jest.configs['flat/recommended'].rules,

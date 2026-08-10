@@ -1,5 +1,5 @@
-import { ValidationError } from '../errors/gripterm-error.js';
-import type { SessionId } from '../entities/session-id.js';
+import { ValidationError } from '../errors/gripterm-error';
+import type { SessionId } from '../entities/session-id';
 
 /**
  * Everything that can move a terminal's state.

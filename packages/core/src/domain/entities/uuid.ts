@@ -1,4 +1,4 @@
-import { ValidationError } from '../errors/gripterm-error.js';
+import { ValidationError } from '../errors/gripterm-error';
 
 /**
  * Deliberately shape-only: eight-four-four-four-twelve hexadecimal digits, case

@@ -1,7 +1,7 @@
-import { ValidationError } from '../errors/gripterm-error.js';
-import type { ContextWindowSnapshot } from './context-window-snapshot.js';
-import type { CostSnapshot } from './cost-snapshot.js';
-import type { PersistedTerminalState } from './terminal-state.js';
+import { ValidationError } from '../errors/gripterm-error';
+import type { ContextWindowSnapshot } from './context-window-snapshot';
+import type { CostSnapshot } from './cost-snapshot';
+import type { PersistedTerminalState } from './terminal-state';
 
 export interface ObservedStateParams {
   readonly state: PersistedTerminalState;

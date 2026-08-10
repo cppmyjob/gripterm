@@ -1,5 +1,5 @@
-import type { IdGenerator } from '../ports/id-generator.js';
-import { parseUuid } from './uuid.js';
+import type { IdGenerator } from '../ports/id-generator';
+import { parseUuid } from './uuid';
 
 /**
  * The Claude Code CLI's identifier for a conversation. Ours to carry, not ours

@@ -1,5 +1,5 @@
-import { TerminalId } from '../entities/terminal-id.js';
-import type { ListeningAddress } from '../entities/listening-address.js';
+import { TerminalId } from '../entities/terminal-id';
+import type { ListeningAddress } from '../entities/listening-address';
 
 /**
  * The route hook payloads arrive on. Short on purpose: the whole URL is a

@@ -1,6 +1,6 @@
-import { ValidationError } from '../errors/gripterm-error.js';
-import type { PersistedTerminalState } from '../entities/terminal-state.js';
-import type { NotificationType, TerminalEvent } from '../events/terminal-event.js';
+import { ValidationError } from '../errors/gripterm-error';
+import type { PersistedTerminalState } from '../entities/terminal-state';
+import type { NotificationType, TerminalEvent } from '../events/terminal-event';
 
 /**
  * What the attention notifier reacts to on entry into a state.

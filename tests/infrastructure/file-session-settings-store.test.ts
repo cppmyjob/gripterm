@@ -7,8 +7,8 @@ import {
   SessionSettingsBuilder,
   StorageError,
   TerminalId,
-} from '../../packages/core/src/index.js';
-import { NEXT_SESSION_UUID, TERMINAL_UUID } from '../helpers/domain-fixtures.js';
+} from '../../packages/core/src/index';
+import { NEXT_SESSION_UUID, TERMINAL_UUID } from '../helpers/domain-fixtures';
 
 /**
  * The one file M1 puts on disk (§5), and the only reason the extension is

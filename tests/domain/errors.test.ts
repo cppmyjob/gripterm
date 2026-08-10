@@ -11,7 +11,7 @@ import {
   isErrorOfCode,
   isGriptermError,
   type ErrorCode,
-} from '../../packages/core/src/index.js';
+} from '../../packages/core/src/index';
 
 type ErrorFactory = (message: string) => GriptermError;
 

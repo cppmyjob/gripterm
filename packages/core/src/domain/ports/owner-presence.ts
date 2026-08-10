@@ -1,5 +1,5 @@
-import type { EditorKind, OwnerKind } from '../entities/owner-ref.js';
-import type { OwnerId } from '../entities/owner-id.js';
+import type { EditorKind, OwnerKind } from '../entities/owner-ref';
+import type { OwnerId } from '../entities/owner-id';
 
 /**
  * Who a window is, as other windows read it.

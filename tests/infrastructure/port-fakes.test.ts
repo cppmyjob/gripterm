@@ -1,10 +1,10 @@
-import { SessionId, TerminalId } from '../../packages/core/src/index.js';
-import { CREATED_AT, makeTerminalSpec } from '../helpers/domain-fixtures.js';
+import { SessionId, TerminalId } from '../../packages/core/src/index';
+import { CREATED_AT, makeTerminalSpec } from '../helpers/domain-fixtures';
 import {
   FixedClock,
   InMemoryTerminalGateway,
   SequentialIdGenerator,
-} from '../helpers/port-fakes.js';
+} from '../helpers/port-fakes';
 
 /**
  * The fakes are tested too. A broken double does not fail loudly -- it agrees

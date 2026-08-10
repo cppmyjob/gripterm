@@ -1,10 +1,10 @@
-import { ValidationError } from '../errors/gripterm-error.js';
-import type { HumanMetadata } from './human-metadata.js';
-import type { LaunchRecipe } from './launch-recipe.js';
-import type { ObservedState } from './observed-state.js';
-import type { OwnerRef } from './owner-ref.js';
-import type { SessionId } from './session-id.js';
-import type { TerminalId } from './terminal-id.js';
+import { ValidationError } from '../errors/gripterm-error';
+import type { HumanMetadata } from './human-metadata';
+import type { LaunchRecipe } from './launch-recipe';
+import type { ObservedState } from './observed-state';
+import type { OwnerRef } from './owner-ref';
+import type { SessionId } from './session-id';
+import type { TerminalId } from './terminal-id';
 
 const INITIAL_REVISION = 0;
 

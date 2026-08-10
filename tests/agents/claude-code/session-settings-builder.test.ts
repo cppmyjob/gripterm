@@ -9,8 +9,8 @@ import {
   parseHookEventPath,
   type HookConfig,
   type SessionSettingsDocument,
-} from '../../packages/core/src/index.js';
-import { NEXT_SESSION_UUID, TERMINAL_UUID, captureError } from '../helpers/domain-fixtures.js';
+} from '../../../packages/core/src/index';
+import { NEXT_SESSION_UUID, TERMINAL_UUID, captureError } from '../../helpers/domain-fixtures';
 
 /**
  * The oracle for `settings.json`.

@@ -1,13 +1,13 @@
-import { ConflictError, NotFoundError } from '../../domain/errors/gripterm-error.js';
-import type { Disposable } from '../../domain/ports/disposable.js';
-import type { OwnerId } from '../../domain/entities/owner-id.js';
-import type { OwnerRef } from '../../domain/entities/owner-ref.js';
-import type { TerminalEntry } from '../../domain/entities/terminal-entry.js';
-import type { TerminalId } from '../../domain/entities/terminal-id.js';
+import { ConflictError, NotFoundError } from '../../domain/errors/gripterm-error';
+import type { Disposable } from '../../domain/ports/disposable';
+import type { OwnerId } from '../../domain/entities/owner-id';
+import type { OwnerRef } from '../../domain/entities/owner-ref';
+import type { TerminalEntry } from '../../domain/entities/terminal-entry';
+import type { TerminalId } from '../../domain/entities/terminal-id';
 import type {
   RepositoryListener,
   TerminalRepository,
-} from '../../domain/repositories/terminal-repository.js';
+} from '../../domain/repositories/terminal-repository';
 
 /**
  * The M1 base: a map that lives as long as the window does.
