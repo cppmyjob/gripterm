@@ -368,6 +368,13 @@ export default tseslint.config(
     // A directory, not an interface. A port shaped from a second agent we have
     // only READ about would be the kind of work that gets redone; the boundary
     // says where the seam runs without promising its form.
+    //
+    // What this CANNOT catch, said here rather than discovered later: it sees
+    // imports, not shapes. `LaunchRecipe` imports nothing from `agents/` and so
+    // passes silently, while its fields -- addDirs, mcpConfigPaths,
+    // appendSystemPrompt, worktree, agent, permissionMode -- are one CLI's flag
+    // list. An entity built in the shape of an agent is invisible to a rule
+    // about dependencies, and review is the only thing that sees it.
     files: ['packages/core/src/domain/**/*.ts'],
     ignores: ['packages/core/src/domain/agents/**/*.ts'],
     rules: {
