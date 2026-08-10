@@ -1,43 +1,278 @@
+import comments from '@eslint-community/eslint-plugin-eslint-comments/configs';
+import js from '@eslint/js';
+import stylistic from '@stylistic/eslint-plugin';
+import globals from 'globals';
+import importX from 'eslint-plugin-import-x';
+import jest from 'eslint-plugin-jest';
+import regexp from 'eslint-plugin-regexp';
+import tseslint from 'typescript-eslint';
+import { createTypeScriptImportResolver } from 'eslint-import-resolver-typescript';
+
 /**
- * ESLint configuration.
+ * Lint rules for Gripterm.
  *
- * Base rules come from the planner conventions; the type-checked block below is
- * the same set. One rule is ours and is the reason this file matters more than
- * style: `packages/core` may not import the editor API. That boundary is the
- * central architectural invariant, and it is checked by a machine here and by
- * the type system separately (@types/vscode is only visible to the extension
- * package).
+ * The ruleset is taken from `trudocker/artifacts/test-scripts`, by owner's
+ * decision. Each rule that project switched on is either switched on here for
+ * the reason it stated, or named below as a deviation -- because a difference
+ * nobody wrote down is a difference nobody can review.
+ *
+ * The BASE is type-aware `strictTypeChecked`, as there. The argument carries
+ * over unchanged: this extension is almost entirely asynchronous -- terminal
+ * lifecycle events, process spawning, file watching -- and a dropped promise is
+ * the defect class `tsc` cannot see, since it accepts a floating promise
+ * anywhere a statement is allowed.
+ *
+ * Five deviations, each with its reason stated at the rule below:
+ *   1. the parser gets an explicit `project`, not `projectService`;
+ *   2. the Playwright block becomes a Jest block -- the analogue by meaning;
+ *   3. `no-extraneous-class` stays ON: the source turns it off for a reason
+ *      (classes that are namespaces of static selectors) that does not hold here;
+ *   4. `no-require-imports` is off for CommonJS `.js` files, which have no
+ *      `import` to prefer;
+ *   5. four rules of this project's own survive alongside the imported set, and
+ *      one of them -- `explicit-function-return-type` -- replaces the source's
+ *      weaker `explicit-module-boundary-types`, which is therefore not carried.
+ *
+ * Every `off` names its reason. A disabled rule without one is a decision
+ * nobody can review later, and this file is exactly where such decisions hide.
  */
-import { baseRules, eslintRecommended, tseslint, importPlugin } from './eslint.config.base.mjs';
 
 export default tseslint.config(
-  eslintRecommended,
+  {
+    ignores: [
+      'node_modules/**',
+      'dist/**',
+      'out/**',
+      'packages/*/dist/**',
+      'packages/*/out/**',
+      // Jest coverage and the downloaded VS Code used by the integration run.
+      '.test-output/**',
+      '.vscode-test/**',
+    ],
+  },
+
+  js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
+  comments.recommended,
+  regexp.configs['flat/recommended'],
+
   {
     languageOptions: {
+      // NOT `projectService: true`, which is what the source project uses. There
+      // a single flat tsconfig covers every linted file. Here the build is three
+      // projects (core, extension, the integration suite) behind a solution-style
+      // root tsconfig whose `files` is empty, so the service would resolve
+      // `tests/**` to a project that includes nothing and refuse to type them.
+      // `tsconfig.eslint.json` is the one description of the union ESLint needs.
       parserOptions: {
         project: './tsconfig.eslint.json',
         tsconfigRootDir: import.meta.dirname,
       },
     },
+    linterOptions: {
+      // A disable that stopped being needed is a lie nobody notices: the rule no
+      // longer fires, and the comment still claims it does. This is the expiry
+      // date on every workaround in the package, and it is enforced rather than
+      // remembered.
+      reportUnusedDisableDirectives: 'error',
+    },
   },
+
+  // --- the dependency graph ---------------------------------------------------
+  //
+  // The plugin's own TypeScript preset, not a hand-wired `plugins` entry:
+  // `no-cycle` needs the preset's parser settings to read the IMPORTED files,
+  // and without them it walks an empty graph and passes.
+  importX.flatConfigs.typescript,
   {
-    plugins: { import: importPlugin },
+    files: ['packages/**/src/**/*.ts', 'tests/**/*.ts'],
+    settings: {
+      'import-x/resolver-next': [
+        createTypeScriptImportResolver({ project: './tsconfig.eslint.json' }),
+      ],
+    },
     rules: {
-      ...baseRules,
-      '@typescript-eslint/no-unsafe-argument': 'error',
-      '@typescript-eslint/no-unsafe-assignment': 'error',
-      '@typescript-eslint/no-unsafe-call': 'error',
-      '@typescript-eslint/no-unsafe-member-access': 'error',
-      '@typescript-eslint/no-unsafe-return': 'error',
-      '@typescript-eslint/no-non-null-assertion': 'error',
-      '@typescript-eslint/non-nullable-type-assertion-style': 'off',
-      '@typescript-eslint/prefer-nullish-coalescing': 'error',
-      '@typescript-eslint/switch-exhaustiveness-check': 'error',
-      '@typescript-eslint/no-floating-promises': 'error',
-      '@typescript-eslint/require-await': 'error',
-      '@typescript-eslint/dot-notation': 'error',
+      // The layers are a directed graph by design: extension depends on core,
+      // never the reverse. A cycle means two modules are really one, and it also
+      // decides module initialisation order at runtime, which nobody wants to
+      // reason about.
+      'import-x/no-cycle': ['error', { ignoreExternal: true }],
+      'import-x/no-self-import': 'error',
+
+      // Only named exports, as in the planner conventions this project started
+      // from. A default export renames itself at every import site, so the same
+      // module arrives under three names and neither grep nor a rename refactor
+      // finds all three. Config files are exempt below: their frameworks require
+      // a default export.
+      'import-x/no-default-export': 'error',
+    },
+  },
+
+  {
+    // Every silenced rule states why, in the directive itself.
+    rules: { '@eslint-community/eslint-comments/require-description': 'error' },
+  },
+
+  // --- everything TypeScript --------------------------------------------------
+  {
+    files: ['**/*.ts'],
+    plugins: { '@stylistic': stylistic },
+    rules: {
+      // A class says who may touch each member, and members appear in one order.
+      // Every member states its visibility, ACCESSORS INCLUDED.
+      //
+      // The constructor is the single exception, and `no-public` rather than
+      // `off`: writing `public constructor` says nothing a bare `constructor`
+      // does not, while `private` and `protected` there change what the class
+      // permits and must still be written. `off` would merely stop looking.
+      '@typescript-eslint/explicit-member-accessibility': [
+        'error',
+        { accessibility: 'explicit', overrides: { constructors: 'no-public' } },
+      ],
+      '@typescript-eslint/member-ordering': 'error',
+
+      '@typescript-eslint/naming-convention': [
+        'error',
+        // An interface is a type, not a Hungarian-notation slot. The `I` prefix
+        // encodes in the name what the declaration already says, and it is the
+        // one thing that has to change when an interface becomes a type alias.
+        { selector: 'interface', format: ['PascalCase'], custom: { regex: '^I[A-Z]', match: false } },
+        { selector: 'typeLike', format: ['PascalCase'] },
+        { selector: 'enumMember', format: ['PascalCase'] },
+        { selector: 'variable', modifiers: ['const'], format: ['UPPER_CASE', 'camelCase', 'PascalCase'] },
+        // A private member carries a leading underscore. The accessibility
+        // keyword states the same thing at the declaration; the underscore states
+        // it at every USE, which is where a reader meets the member and where
+        // nothing else would tell them.
+        {
+          selector: ['memberLike', 'variableLike'],
+          modifiers: ['private'],
+          format: ['UPPER_CASE', 'camelCase', 'PascalCase'],
+          leadingUnderscore: 'require',
+        },
+      ],
+
+      // Numbers in prose are the point: a pinned CLI version, a terminal count, a
+      // millisecond budget all get formatted into log lines and notifications.
+      // Left ON for objects and `any`, which stringify to `[object Object]` and
+      // are always a mistake.
+      '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
+
+      // `||` and `??` differ on the empty string, and the empty string is exactly
+      // the case these fall through on: an environment variable set to nothing, a
+      // terminal name the user cleared. `??` would keep it and the fallback would
+      // never fire. Left ON for every other type, where `||` also swallows `0`
+      // and `false`.
+      '@typescript-eslint/prefer-nullish-coalescing': [
+        'error',
+        { ignorePrimitives: { string: true } },
+      ],
+
+      // Asynchrony, beyond what the presets already switch on
+      // (`no-floating-promises`, `no-misused-promises`, `await-thenable`):
+
+      // A variable read before an `await` and written after it is the one race a
+      // single-threaded language still has -- and this extension holds a mutable
+      // registry of terminals across awaits by design.
+      'require-atomic-updates': 'error',
+
+      // `async f() { return p; }` drops `f` from the stack trace when `p`
+      // rejects, and the `async` earns nothing. `always` rather than the preset's
+      // error-handling-only setting: the log channel is the only window into a
+      // failed activation, and that is exactly when the missing frame costs most.
+      '@typescript-eslint/return-await': ['error', 'always'],
+
+      // Every function that hands back a promise says so with `async`, so the two
+      // ways of writing the same signature stop coexisting. It also removes the
+      // one asymmetry a caller cannot see: a non-async function can throw BEFORE
+      // returning its promise, so `f().catch(...)` misses that error while
+      // `await f()` catches it.
+      '@typescript-eslint/promise-function-async': 'error',
+
+      // A leading underscore already means "deliberately private" here; on a
+      // parameter it means "the signature requires it, the body does not".
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
+
+      // `if (x) return;` on one line is intentional and dense; a body spanning
+      // lines must be braced, which is where the dangling-statement bug lives.
+      curly: ['error', 'multi-line'],
+      eqeqeq: ['error', 'smart'],
+      'object-shorthand': 'error',
+      'one-var': ['error', 'never'],
+      'no-throw-literal': 'error',
+      radix: 'error',
+
+      '@typescript-eslint/require-array-sort-compare': 'error', // [3, 10, 2].sort() sorts as text
+      '@typescript-eslint/prefer-readonly': 'error', // a private never reassigned says so
+      '@typescript-eslint/no-shadow': 'error',
+      '@typescript-eslint/default-param-last': 'error',
+      '@typescript-eslint/no-unnecessary-parameter-property-assignment': 'error',
+      'no-param-reassign': 'error',
+      'prefer-const': 'error',
+      'no-else-return': 'error',
+      'guard-for-in': 'error',
+
+      // What disappears at build time is stated, not inferred -- the extension is
+      // bundled by esbuild, which strips types per-file and cannot infer that an
+      // import was only ever a type. The options differ from the source only in
+      // the shape of the autofix: inline, so a module supplying both values and
+      // types -- which every port here does -- keeps arriving in one statement
+      // rather than two.
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        { prefer: 'type-imports', fixStyle: 'inline-type-imports' },
+      ],
+      '@typescript-eslint/no-import-type-side-effects': 'error',
+      '@typescript-eslint/method-signature-style': 'error',
+
+      // Taken verbatim from the source project, by owner's decision, and its
+      // reach is stated rather than assumed. On its defaults -- which is what a
+      // bare `'error'` selects -- the rule allows `allowString` and `allowNumber`.
+      // Measured on a probe file: `if (name)` and `if (count)` on a plain string
+      // and a plain number produce NO diagnostic; `if (maybe)` on a
+      // `string | undefined` produces one.
+      //
+      // So what this rule guards here is the nullable case: the value that is
+      // absent versus the value that is empty. Distinguishing an empty string
+      // from a filled one, or a zero from a count, remains a matter of review.
+      '@typescript-eslint/strict-boolean-expressions': 'error',
+
+      // Not `default-case`: that rule predates types and asks for an unreachable
+      // branch on a switch the compiler already proved exhaustive. This one
+      // catches what actually goes wrong -- a union member nobody handled, which
+      // for a state machine driven by CLI hook events is the whole risk.
+      '@typescript-eslint/switch-exhaustiveness-check': [
+        'error',
+        { considerDefaultExhaustiveForUnions: true },
+      ],
+
+      // KEPT from this project's own conventions, absent from the source set:
+
+      // A return type is the one part of a signature a reader needs and inference
+      // hides. `explicit-module-boundary-types`, which the source project uses,
+      // would check only exported functions; here every function says what it
+      // returns. Expressions and callbacks stay exempt -- there the contextual
+      // type IS the declaration.
+      '@typescript-eslint/explicit-function-return-type': [
+        'error',
+        {
+          allowExpressions: true,
+          allowTypedFunctionExpressions: true,
+          allowHigherOrderFunctions: true,
+        },
+      ],
+
+      // A bare number in a branch is a decision with no name. The exemptions are
+      // the numbers that are their own name: an index, a count of none or one, a
+      // pair, a percentage.
       '@typescript-eslint/no-magic-numbers': [
         'error',
         {
@@ -49,26 +284,60 @@ export default tseslint.config(
           ignoreReadonlyClassProperties: true,
         },
       ],
-      '@typescript-eslint/prefer-readonly': 'error',
-      '@typescript-eslint/no-unnecessary-condition': 'error',
-      '@typescript-eslint/strict-boolean-expressions': [
+
+      // OFF, with reasons:
+
+      // An `async` method with no `await` is how a port satisfies an asynchronous
+      // interface it does not yet need to suspend on -- the storage and CLI ports
+      // are both shaped that way. The autofix strips `async`, which changes a
+      // signature to match its current body rather than its contract.
+      '@typescript-eslint/require-await': 'off',
+
+      // `as string` after an indexed read is the shape `noUncheckedIndexedAccess`
+      // forces; the rule prefers `!`, which hides the same assumption behind less
+      // text. Neither is safer, so the more visible one stays -- and `!` is banned
+      // outright by `no-non-null-assertion` from the strict preset.
+      '@typescript-eslint/non-nullable-type-assertion-style': 'off',
+
+      // NOT taken from the source project: `no-extraneous-class` is `off` there
+      // because its domain classes are deliberately namespaces of static
+      // selectors. Nothing here is shaped that way, so the strict preset's
+      // setting stands.
+
+      '@stylistic/quotes': ['error', 'single', { allowTemplateLiterals: 'always' }],
+      '@stylistic/semi': ['error', 'always'],
+      '@stylistic/eol-last': 'error',
+      '@stylistic/no-trailing-spaces': 'error',
+      '@stylistic/no-multiple-empty-lines': ['error', { max: 1 }],
+      '@stylistic/arrow-parens': ['error', 'always'],
+      '@stylistic/object-curly-spacing': ['error', 'always'],
+      '@stylistic/space-before-blocks': 'error',
+      '@stylistic/spaced-comment': ['error', 'always'],
+      '@stylistic/member-delimiter-style': [
         'error',
         {
-          allowString: false,
-          allowNumber: false,
-          allowNullableObject: true,
-          allowNullableBoolean: false,
-          allowNullableString: false,
-          allowNullableNumber: false,
+          multiline: { delimiter: 'semi', requireLast: true },
+          singleline: { delimiter: 'comma', requireLast: false },
         },
       ],
+      // No `max-len`: the long lines here are doc comments, where a wrap costs
+      // more than it buys. Width is a formatter's job, and this package has no
+      // formatter by choice.
     },
   },
+
+  // --- the architectural boundary ---------------------------------------------
   {
-    // The architectural boundary: the domain must not know the editor exists.
     files: ['packages/core/**/*.ts'],
     rules: {
-      'no-restricted-imports': [
+      // The domain must not know the editor exists. This is the central
+      // invariant of the design, and it is checked twice: here, and by the type
+      // system separately, since `@types/vscode` is visible only to the extension
+      // package. `@typescript-eslint/no-restricted-imports` rather than the base
+      // rule, because it also catches `import type ... from 'vscode'` -- a type
+      // import erases at build time but couples the domain to the editor's model
+      // just as firmly.
+      '@typescript-eslint/no-restricted-imports': [
         'error',
         {
           patterns: [{ group: ['vscode'], message: 'core must not depend on the editor API' }],
@@ -76,24 +345,67 @@ export default tseslint.config(
       ],
     },
   },
+
+  // --- the specs --------------------------------------------------------------
   {
     files: ['tests/**/*.ts'],
     rules: {
+      // A test is a table of literal inputs and expected outputs. Naming each of
+      // them would turn the table into a glossary and hide what is being tested.
       '@typescript-eslint/no-magic-numbers': 'off',
     },
   },
+
   {
-    ignores: [
-      'dist/',
-      'out/',
-      'node_modules/',
-      'packages/*/dist/',
-      'packages/*/out/',
-      '.test-output/',
-      '**/*.js',
-      '**/*.mjs',
-      '!eslint.config.mjs',
-      '!eslint.config.base.mjs',
-    ],
+    // The analogue of the source project's Playwright block. Scoped to the Jest
+    // suites alone: `tests/integration` runs under Mocha inside a real VS Code,
+    // where `suite` and `test` are Mocha's and these rules would read them as
+    // Jest's.
+    files: ['tests/domain/**/*.ts', 'tests/infrastructure/**/*.ts'],
+    ...jest.configs['flat/recommended'],
+    rules: {
+      ...jest.configs['flat/recommended'].rules,
+      // Raised from the preset's `warn`. `pnpm lint` runs with `--max-warnings
+      // 0`, so a warning already fails the build; leaving these at `warn` would
+      // describe a leniency that does not exist, and would quietly become real
+      // the day someone drops the flag.
+      //
+      // All three name the same defect: a test that does not run, or runs and
+      // cannot fail, while the suite still reports green.
+      'jest/expect-expect': 'error',
+      'jest/no-disabled-tests': 'error',
+      'jest/no-commented-out-tests': 'error',
+    },
+  },
+
+  // --- the config files themselves --------------------------------------------
+  {
+    // Not part of any TypeScript program -- they are the scripts that define the
+    // programs -- so the type-aware rules have no program to ask and would report
+    // a parse error instead of nothing.
+    files: ['**/*.js', '**/*.mjs', '**/*.cjs'],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      globals: globals.node,
+    },
+    rules: {
+      // A `.js` file in a CommonJS package IS a CommonJS module, so `require`
+      // there is the module system rather than a style choice. The rule aims at
+      // TypeScript, where `import` exists and `require` throws the types away.
+      '@typescript-eslint/no-require-imports': 'off',
+
+      // Jest, esbuild and @vscode/test-cli each read a default export or a
+      // `module.exports`; the named-exports rule above is scoped away from here
+      // rather than disabled, so it keeps applying where it can.
+      '@stylistic/quotes': ['error', 'single', { allowTemplateLiterals: 'always' }],
+      '@stylistic/semi': ['error', 'always'],
+      '@stylistic/eol-last': 'error',
+      '@stylistic/no-trailing-spaces': 'error',
+    },
+    plugins: { '@stylistic': stylistic },
+  },
+  {
+    files: ['**/*.js', '**/*.cjs'],
+    languageOptions: { sourceType: 'commonjs' },
   }
 );
