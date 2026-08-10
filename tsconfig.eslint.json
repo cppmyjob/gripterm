@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true,
+    "types": ["node", "jest", "vscode", "mocha"]
+  },
+  "include": ["packages/**/src/**/*.ts", "tests/**/*.ts"]
+}

@@ -1,0 +1,36 @@
+{
+  "name": "gripterm",
+  "displayName": "Gripterm",
+  "description": "Observe, name and restore your Claude Code terminals.",
+  "version": "0.0.1",
+  "publisher": "gripterm-placeholder",
+  "private": true,
+  "license": "Apache-2.0",
+  "engines": {
+    "vscode": "^1.94.0"
+  },
+  "categories": ["Other"],
+  "main": "./dist/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Terminals are observed and restored, but no workflow script from the folder is executed until the folder is trusted."
+    }
+  },
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "commands": [
+      {
+        "command": "gripterm.showLogs",
+        "title": "Gripterm: Show Logs"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "bundle": "node esbuild.js"
+  },
+  "dependencies": {
+    "@gripterm/core": "workspace:*"
+  }
+}

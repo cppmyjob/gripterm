@@ -1,0 +1,43 @@
+{
+  "name": "gripterm-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Workspace root for the Gripterm extension. Not published.",
+  "packageManager": "pnpm@10.26.1",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "build:extension": "node packages/extension/esbuild.js",
+    "clean": "tsc --build --clean",
+    "typecheck": "tsc --build",
+    "lint": "eslint packages tests --max-warnings 0",
+    "lint:fix": "eslint packages tests --fix",
+    "test": "jest",
+    "test:coverage": "jest --coverage",
+    "build:integration": "tsc -p tsconfig.integration.json",
+    "test:integration": "pnpm run build:extension && pnpm run build:integration && vscode-test",
+    "package": "pnpm run build && pnpm run build:extension && vsce package --no-dependencies"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/jest": "^29.5.14",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.17.0",
+    "@types/vscode": "~1.94.0",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.1",
+    "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.24.0",
+    "eslint": "^9.39.1",
+    "eslint-plugin-import": "^2.32.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "typescript": "~5.6.3",
+    "typescript-eslint": "^8.49.0"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "npm",
+      "script": "build:extension",
+      "problemMatcher": "$esbuild",
+      "group": "build",
+      "label": "npm: build:extension"
+    },
+    {
+      "type": "npm",
+      "script": "build",
+      "problemMatcher": "$tsc",
+      "group": "build",
+      "label": "npm: build"
+    }
+  ]
+}

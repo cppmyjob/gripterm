@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "rootDir": ".",
+    "outDir": "out",
+    "types": ["node", "vscode", "mocha"]
+  },
+  "include": ["tests/integration/**/*.ts"]
+}

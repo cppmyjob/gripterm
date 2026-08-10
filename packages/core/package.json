@@ -1,0 +1,11 @@
+{
+  "name": "@gripterm/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Domain and infrastructure of Gripterm. Knows nothing about the editor API.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --build"
+  }
+}
