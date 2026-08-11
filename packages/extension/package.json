@@ -27,6 +27,10 @@
       {
         "command": "gripterm.showLogs",
         "title": "Gripterm: Show Logs"
+      },
+      {
+        "command": "gripterm.focusTerminal",
+        "title": "Gripterm: Show Terminal"
       }
     ],
     "views": {
@@ -37,6 +41,35 @@
           "contextualTitle": "Gripterm"
         }
       ]
+    },
+    "configuration": {
+      "title": "Gripterm",
+      "properties": {
+        "gripterm.notify.toastStates": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "waiting_permission",
+              "waiting_input",
+              "launch_failed",
+              "resume_failed",
+              "turn_failed",
+              "ended",
+              "orphaned",
+              "degraded",
+              "idle",
+              "working",
+              "launching"
+            ]
+          },
+          "default": [
+            "waiting_permission",
+            "launch_failed"
+          ],
+          "markdownDescription": "States that raise a notification when a terminal ENTERS them. An empty list turns notifications off."
+        }
+      }
     }
   },
   "scripts": {

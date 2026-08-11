@@ -1,14 +1,18 @@
 import * as vscode from 'vscode';
 import {
+  AttentionNotifier,
   HookEventParser,
   SUPPORTED_CLI_VERSION,
   SessionRegistry,
   SystemClock,
   TerminalStateMachine,
 } from '@gripterm/core';
+import { registerFocusTerminal } from './commands/focus-terminal';
+import { readToastSignals } from './settings';
 import { VsCodeLogger } from './adapters/vscode-logger';
 import { VsCodeTerminalGateway } from './adapters/vscode-terminal-gateway';
 import { StatusBarPresenter } from './ui/status-bar-presenter';
+import { VsCodeAttentionPresenter } from './ui/vscode-attention-presenter';
 import { TERMINALS_VIEW_ID, TerminalTreeDataProvider } from './ui/terminal-tree';
 
 /**
@@ -53,6 +57,15 @@ export function activate(context: vscode.ExtensionContext): GriptermApi {
     vscode.window.createTreeView(TERMINALS_VIEW_ID, { treeDataProvider: tree })
   );
   context.subscriptions.push(new StatusBarPresenter(registry));
+
+  context.subscriptions.push(
+    new AttentionNotifier({
+      registry,
+      presenter: new VsCodeAttentionPresenter(logger),
+      signals: readToastSignals(logger),
+    })
+  );
+  context.subscriptions.push(registerFocusTerminal(gateway, logger));
 
   logger.info('Gripterm activated', {
     trustedWorkspace: vscode.workspace.isTrusted,

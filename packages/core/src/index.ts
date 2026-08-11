@@ -29,6 +29,11 @@ export { type Disposable } from './domain/ports/disposable';
 export { type Logger } from './domain/ports/logger';
 export { type HookEventSink } from './domain/ports/hook-event-sink';
 export {
+  type AttentionAction,
+  type AttentionPresenter,
+  type AttentionRequest,
+} from './domain/ports/attention-presenter';
+export {
   type TerminalExit,
   type TerminalGateway,
   type TerminalHandle,
@@ -176,6 +181,16 @@ export {
 } from './domain/services/shell-quoting';
 
 export { describeDetails } from './domain/services/log-details';
+
+export {
+  ATTENTION_SIGNALS,
+  AttentionNotifier,
+  DEFAULT_TOAST_SIGNALS,
+  isAttentionSignal,
+  FOCUS_TERMINAL_COMMAND,
+  SHOW_LOGS_COMMAND,
+  type AttentionNotifierOptions,
+} from './domain/services/attention-notifier';
 
 export {
   summariseTerminals,
