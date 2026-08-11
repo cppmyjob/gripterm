@@ -1,7 +1,9 @@
 import type {
   Clock,
   Disposable,
+  ErrorDetails,
   IdGenerator,
+  Logger,
   TerminalExit,
   TerminalGateway,
   TerminalHandle,
@@ -135,4 +137,28 @@ export class InMemoryTerminalGateway implements TerminalGateway {
   public forget(terminalId: TerminalId): void {
     this._handles.delete(terminalId.value);
   }
+}
+
+/** Keeps every line, so a test can ask what was said rather than watch a console. */
+export class RecordingLogger implements Logger {
+  public readonly infos: LoggedLine[] = [];
+  public readonly warnings: LoggedLine[] = [];
+  public readonly errors: LoggedLine[] = [];
+
+  public info(message: string, details?: ErrorDetails): void {
+    this.infos.push({ message, details });
+  }
+
+  public warn(message: string, details?: ErrorDetails): void {
+    this.warnings.push({ message, details });
+  }
+
+  public error(message: string, details?: ErrorDetails): void {
+    this.errors.push({ message, details });
+  }
+}
+
+export interface LoggedLine {
+  readonly message: string;
+  readonly details: ErrorDetails | undefined;
 }

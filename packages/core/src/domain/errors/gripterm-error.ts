@@ -22,7 +22,8 @@ export type ErrorCode =
   | 'MIGRATION_ERROR'
   | 'LAUNCH_ERROR'
   | 'RESUME_FAILED'
-  | 'CLAUDE_CLI_ERROR';
+  | 'CLAUDE_CLI_ERROR'
+  | 'LISTEN_ERROR';
 
 /** Structured context. Never a formatted sentence -- that is what `message` is. */
 export type ErrorDetails = Readonly<Record<string, unknown>>;
@@ -127,6 +128,22 @@ export class ResumeFailedError extends GriptermError {
 export class ClaudeCliError extends GriptermError {
   constructor(message: string, options?: GriptermErrorOptions) {
     super('ClaudeCliError', 'CLAUDE_CLI_ERROR', message, options);
+  }
+}
+
+/**
+ * The receiver could not take a port, so nothing will be observed at all.
+ *
+ * Its own class rather than a `LaunchError`, because the two fail at different
+ * scales and call for different words: a launch that fails costs one terminal,
+ * while a port that cannot be bound costs the whole window its eyes. It is also
+ * the failure with the least obvious cause -- on Windows a FREE loopback port
+ * can be refused outright by a WinNAT reservation (measured 2026-08-11), so the
+ * message a person sees must not read as "something is already running".
+ */
+export class ListenError extends GriptermError {
+  constructor(message: string, options?: GriptermErrorOptions) {
+    super('ListenError', 'LISTEN_ERROR', message, options);
   }
 }
 

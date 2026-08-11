@@ -27,9 +27,14 @@ export function hookEventUrl(address: ListeningAddress, terminalId: TerminalId):
  *
  * Returns `null` for anything it does not recognise -- an unknown path is a
  * request to answer 404, never a reason to throw inside a request handler.
+ *
+ * `undefined` is accepted for the same reason, and not as politeness: Node types
+ * `IncomingMessage.url` as optional, and the receiver would otherwise carry a
+ * `?? ''` that no test can reach. An unrecognisable path and an absent one call
+ * for the identical answer, so they are answered in one place.
  */
-export function parseHookEventPath(pathname: string): TerminalId | null {
-  if (!pathname.startsWith(HOOK_EVENT_PATH_PREFIX)) {
+export function parseHookEventPath(pathname: string | undefined): TerminalId | null {
+  if (pathname?.startsWith(HOOK_EVENT_PATH_PREFIX) !== true) {
     return null;
   }
   try {

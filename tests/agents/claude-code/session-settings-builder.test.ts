@@ -167,11 +167,16 @@ describe('SessionSettingsBuilder', () => {
       expect(parseHookEventPath(url.pathname)?.equals(TERMINAL)).toBe(true);
     });
 
-    it.each([
+    it.each<readonly [string, string | undefined]>([
       ['a path that is not ours', '/other/550e8400-e29b-41d4-a716-446655440000'],
       ['a path with no id at all', HOOK_EVENT_PATH_PREFIX],
       ['an id that is not a UUID', `${HOOK_EVENT_PATH_PREFIX}not-a-uuid`],
       ['a deeper path', `${HOOK_EVENT_PATH_PREFIX}${TERMINAL_UUID}/extra`],
+      // Node types `IncomingMessage.url` as optional, so the receiver hands it
+      // over as it comes. An absent path and an unrecognisable one deserve the
+      // same 404, and answering both here keeps a `?? ''` out of the server
+      // that no test could ever reach.
+      ['no path at all', undefined],
     ])('reads back nothing from %s', (_why, pathname) => {
       expect(parseHookEventPath(pathname)).toBeNull();
     });

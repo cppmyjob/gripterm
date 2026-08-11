@@ -3,6 +3,7 @@ import {
   ConflictError,
   GriptermError,
   LaunchError,
+  ListenError,
   MigrationError,
   NotFoundError,
   ResumeFailedError,
@@ -24,7 +25,28 @@ const HIERARCHY: readonly (readonly [string, ErrorCode, ErrorFactory])[] = [
   ['LaunchError', 'LAUNCH_ERROR', (m): GriptermError => new LaunchError(m)],
   ['ResumeFailedError', 'RESUME_FAILED', (m): GriptermError => new ResumeFailedError(m)],
   ['ClaudeCliError', 'CLAUDE_CLI_ERROR', (m): GriptermError => new ClaudeCliError(m)],
+  ['ListenError', 'LISTEN_ERROR', (m): GriptermError => new ListenError(m)],
 ];
+
+/**
+ * Exhaustiveness, checked by the COMPILER rather than by a count.
+ *
+ * The suite used to assert only that the table had no duplicates, which is true
+ * of a table missing an entry as well. A code added to the union without a class
+ * would have passed silently -- and a code with no class is an error nobody can
+ * throw, discovered by whoever needed it.
+ */
+const EVERY_CODE: Readonly<Record<ErrorCode, true>> = {
+  VALIDATION_ERROR: true,
+  NOT_FOUND: true,
+  CONFLICT: true,
+  STORAGE_ERROR: true,
+  MIGRATION_ERROR: true,
+  LAUNCH_ERROR: true,
+  RESUME_FAILED: true,
+  CLAUDE_CLI_ERROR: true,
+  LISTEN_ERROR: true,
+};
 
 describe('the error hierarchy', () => {
   it.each(HIERARCHY)('%s carries the code %s and its own name', (name, code, make) => {
@@ -49,6 +71,10 @@ describe('the error hierarchy', () => {
   it('covers every declared code exactly once', () => {
     const codes = HIERARCHY.map(([, code]) => code);
     expect(new Set(codes).size).toBe(codes.length);
+    // `EVERY_CODE` fails to COMPILE when a member of the union has no entry;
+    // this line closes the other direction -- a class in the table whose code
+    // is no longer part of the union.
+    expect([...codes].sort()).toStrictEqual(Object.keys(EVERY_CODE).sort());
   });
 });
 

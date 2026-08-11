@@ -14,6 +14,7 @@ export {
   LaunchError,
   ResumeFailedError,
   ClaudeCliError,
+  ListenError,
   isGriptermError,
   isErrorOfCode,
   type ErrorCode,
@@ -25,6 +26,8 @@ export {
 export { type IdGenerator } from './domain/ports/id-generator';
 export { type Clock } from './domain/ports/clock';
 export { type Disposable } from './domain/ports/disposable';
+export { type Logger } from './domain/ports/logger';
+export { type HookEventSink } from './domain/ports/hook-event-sink';
 export {
   type TerminalExit,
   type TerminalGateway,
@@ -42,6 +45,18 @@ export {
   type TerminalRepository,
 } from './domain/repositories/terminal-repository';
 
+export { type EventJournal } from './domain/ports/event-journal';
+export { type HookDelivery } from './domain/entities/hook-delivery';
+
+export {
+  HookEventServer,
+  bindOnce,
+  listenWithRetry,
+  portOf,
+  type HookEventServerOptions,
+} from './infrastructure/http/hook-event-server';
+
+export { FileEventJournal } from './infrastructure/store/file-event-journal';
 export { FileSessionSettingsStore } from './infrastructure/store/file-session-settings-store';
 export { InMemoryTerminalRepository } from './infrastructure/store/in-memory-terminal-repository';
 export { InMemoryOwnerPresence } from './infrastructure/store/in-memory-owner-presence';
@@ -134,6 +149,11 @@ export {
   type SessionSettingsDocument,
   type SessionSettingsParams,
 } from './domain/agents/claude-code/session-settings-builder';
+
+export {
+  RequestAuthenticator,
+  newActivationToken,
+} from './domain/services/request-authenticator';
 
 export {
   LAUNCH_MODES,
