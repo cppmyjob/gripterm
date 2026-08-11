@@ -20,7 +20,7 @@ async function packagedFiles(): Promise<readonly string[]> {
       { cwd: EXTENSION_DIR, shell: true, timeout: TIMEOUT_MS },
       (error: unknown, stdout: string) => {
         if (error !== null) {
-          reject(new Error(`vsce ls failed: ${String(error)}`));
+          reject(new Error('vsce ls could not list the package contents', { cause: error }));
           return;
         }
         resolve(
