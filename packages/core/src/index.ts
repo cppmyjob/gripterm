@@ -187,6 +187,13 @@ export { type AgentCommandFactory } from './domain/ports/agent-command-factory';
 
 export { defaultTerminalName } from './domain/services/terminal-naming';
 
+export {
+  identifyEditor,
+  identifyWindow,
+  ownerRefFor,
+  type WindowFacts,
+} from './domain/services/owner-identity';
+
 export { terminalIdFrom } from './domain/services/terminal-target';
 
 export {

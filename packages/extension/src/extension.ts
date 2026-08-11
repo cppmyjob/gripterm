@@ -2,8 +2,6 @@ import * as vscode from 'vscode';
 import {
   AttentionNotifier,
   HookEventParser,
-  OwnerId,
-  OwnerRef,
   ProcessLaunchStrategy,
   SUPPORTED_CLI_VERSION,
   SessionRegistry,
@@ -11,7 +9,9 @@ import {
   SystemIdGenerator,
   TerminalLifecycleService,
   TerminalStateMachine,
+  ownerRefFor,
 } from '@gripterm/core';
+import type { OwnerIdentity } from '@gripterm/core';
 import { registerCloseTerminal } from './commands/close-terminal';
 import { registerFocusTerminal } from './commands/focus-terminal';
 import { registerNewTerminal } from './commands/new-terminal';
@@ -19,6 +19,7 @@ import { readToastSignals } from './settings';
 import { PendingAgentCommandFactory } from './adapters/pending-agent-command-factory';
 import { VsCodeLogger } from './adapters/vscode-logger';
 import { VsCodeTerminalGateway } from './adapters/vscode-terminal-gateway';
+import { windowIdentity } from './adapters/vscode-window-identity';
 import { StatusBarPresenter } from './ui/status-bar-presenter';
 import { VsCodeAttentionPresenter } from './ui/vscode-attention-presenter';
 import { TERMINALS_VIEW_ID, TerminalTreeDataProvider } from './ui/terminal-tree';
@@ -35,6 +36,7 @@ export interface GriptermApi {
   readonly registry: SessionRegistry;
   readonly gateway: VsCodeTerminalGateway;
   readonly lifecycle: TerminalLifecycleService;
+  readonly identity: OwnerIdentity;
 }
 
 /**
@@ -45,9 +47,8 @@ export interface GriptermApi {
  * implementation each port gets, so that the activation path stays readable at
  * a glance.
  *
- * Three of those choices are provisional and named as such, all three belonging
- * to M1.14: the owner identity is minted here rather than detected (M1.13), the
- * launch strategy is the default `process` mode rather than what
+ * Two of those choices are provisional and named as such, both belonging to
+ * M1.14: the launch strategy is the default `process` mode rather than what
  * `gripterm.launch.mode` says, and the agent command factory is a refusal.
  */
 export function activate(context: vscode.ExtensionContext): GriptermApi {
@@ -57,6 +58,7 @@ export function activate(context: vscode.ExtensionContext): GriptermApi {
 
   const clock = new SystemClock();
   const ids = new SystemIdGenerator();
+  const identity = windowIdentity(ids);
   const registry = new SessionRegistry({
     stateMachine: new TerminalStateMachine(),
     reader: new HookEventParser(),
@@ -74,7 +76,7 @@ export function activate(context: vscode.ExtensionContext): GriptermApi {
     strategy: new ProcessLaunchStrategy(),
     ids,
     clock,
-    owner: thisWindow(ids),
+    owner: ownerRefFor(identity),
     logger,
   });
   context.subscriptions.push(lifecycle);
@@ -97,9 +99,18 @@ export function activate(context: vscode.ExtensionContext): GriptermApi {
   context.subscriptions.push(registerFocusTerminal(gateway, logger));
   context.subscriptions.push(registerCloseTerminal(lifecycle, registry, logger));
 
+  // `appName` is logged beside the kind we made of it, unconditionally. An
+  // editor we do not recognise then names itself in the one place a person can
+  // send us -- which is how the list in `identifyEditor` grows from evidence
+  // rather than from guesses.
   logger.info('Gripterm activated', {
     trustedWorkspace: vscode.workspace.isTrusted,
     pinnedCli: SUPPORTED_CLI_VERSION,
+    ownerId: identity.ownerId.value,
+    editorKind: identity.editorKind,
+    editorVersion: identity.editorVersion,
+    appName: vscode.env.appName,
+    workspaceFolders: identity.workspaceFolders.length,
   });
 
   context.subscriptions.push(
@@ -108,25 +119,7 @@ export function activate(context: vscode.ExtensionContext): GriptermApi {
     })
   );
 
-  return { registry, gateway, lifecycle };
-}
-
-/**
- * This window, as it will be written on every record it creates.
- *
- * A fresh id per activation, deliberately: ownership is about who may WRITE a
- * record now, and a window that has been restarted is a different writer with
- * different terminals. Detecting which editor this actually is -- Cursor calls
- * itself something else -- is M1.13; until then the honest answer is the one we
- * can check, and `vscode` is what this build runs in.
- */
-function thisWindow(ids: SystemIdGenerator): OwnerRef {
-  return OwnerRef.create({
-    kind: 'window',
-    ownerId: OwnerId.fromString(ids.newUuid()),
-    editorKind: 'vscode',
-    workspaceFolder: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null,
-  });
+  return { registry, gateway, lifecycle, identity };
 }
 
 export function deactivate(): void {
