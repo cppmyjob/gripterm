@@ -1,9 +1,13 @@
 import * as vscode from 'vscode';
-import { DEFAULT_TOAST_SIGNALS, isAttentionSignal } from '@gripterm/core';
-import type { AttentionSignal, Logger } from '@gripterm/core';
+import { DEFAULT_TOAST_SIGNALS, LAUNCH_MODES, isAttentionSignal } from '@gripterm/core';
+import type { AttentionSignal, LaunchMode, Logger } from '@gripterm/core';
 
 const SECTION = 'gripterm';
 const TOAST_STATES = 'notify.toastStates';
+const LAUNCH_MODE = 'launch.mode';
+
+/** `process`, on the strength of A13: the TUI comes up as a pty process with no shell under it. */
+const DEFAULT_LAUNCH_MODE: LaunchMode = 'process';
 
 /**
  * Which states get a notification, as the person configured them.
@@ -31,4 +35,32 @@ export function readToastSignals(logger: Logger): readonly AttentionSignal[] {
     });
   }
   return known;
+}
+
+/**
+ * How a terminal is started, as the person configured it.
+ *
+ * The two modes are not interchangeable and the difference is not cosmetic:
+ * `process` makes `claude` the terminal's own process, with no shell to quote
+ * for and no readiness race; `shell` types a command line into the person's
+ * shell, which is what a machine whose PATH is set up by a profile needs, and
+ * pays for it with A11 and A12 (§4.4). An unreadable value falls back to the
+ * default AND says so -- a typo that silently changed how terminals start would
+ * be discovered by its consequences.
+ */
+export function readLaunchMode(logger: Logger): LaunchMode {
+  const configured = vscode.workspace.getConfiguration(SECTION).get<string>(LAUNCH_MODE);
+  if (configured === undefined) {
+    return DEFAULT_LAUNCH_MODE;
+  }
+  if ((LAUNCH_MODES as readonly string[]).includes(configured)) {
+    return configured as LaunchMode;
+  }
+
+  logger.warn('the configured launch mode is not one this build knows', {
+    setting: `${SECTION}.${LAUNCH_MODE}`,
+    configured,
+    using: DEFAULT_LAUNCH_MODE,
+  });
+  return DEFAULT_LAUNCH_MODE;
 }

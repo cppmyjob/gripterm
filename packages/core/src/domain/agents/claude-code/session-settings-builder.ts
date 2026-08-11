@@ -92,7 +92,15 @@ export interface ForwarderScript {
 export interface SessionSettingsParams {
   readonly terminalId: TerminalId;
   readonly address: ListeningAddress;
-  readonly sessionStart: ForwarderScript;
+  /**
+   * `null` when this machine has no interpreter to run the forwarder with
+   * (C5-2), and the direction of that refusal is chosen rather than defaulted:
+   * ten events keep arriving over HTTP and one is lost. What is lost with it is
+   * named in §8.2 -- the `/clear` rename and `ObservedState.pid`, whose only
+   * channel is a command hook (A16) -- because a terminal we cannot start at
+   * all is worse than a terminal we see slightly less of.
+   */
+  readonly sessionStart: ForwarderScript | null;
 }
 
 /**
@@ -114,7 +122,13 @@ export class SessionSettingsBuilder {
         // The only event that cannot travel over HTTP: build 2.1.225 filters it
         // unconditionally (`Skipping HTTP hook ... not supported for ...`), so
         // an HTTP registration here would cost no error and no event either.
-        SessionStart: [{ hooks: [forwarderHook(params.sessionStart, url)] }],
+        // An empty list rather than an absent key when there is no forwarder:
+        // the record is total, so a reader of this document never has to ask
+        // whether a missing event means "not registered" or "we forgot".
+        SessionStart:
+          params.sessionStart === null
+            ? []
+            : [{ hooks: [forwarderHook(params.sessionStart, url)] }],
         SessionEnd: httpRegistration(url),
         UserPromptSubmit: httpRegistration(url),
         PreToolUse: httpRegistration(url),

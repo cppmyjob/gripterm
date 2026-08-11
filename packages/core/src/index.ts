@@ -1,8 +1,17 @@
 export {
   SUPPORTED_CLI_VERSION,
+  describeCliVersion,
   parseCliVersion,
   isSupportedCliVersion,
+  type CliVersionAnswer,
+  type CliVersionReport,
 } from './domain/agents/claude-code/cli-version';
+
+export {
+  launchReadiness,
+  type LaunchInputs,
+  type LaunchReadiness,
+} from './domain/services/launch-readiness';
 
 export {
   GriptermError,
@@ -25,6 +34,7 @@ export {
 
 export { type IdGenerator } from './domain/ports/id-generator';
 export { type Clock } from './domain/ports/clock';
+export { type Scheduler } from './domain/ports/scheduler';
 export { type Disposable } from './domain/ports/disposable';
 export { type Logger } from './domain/ports/logger';
 export { type HookEventSink } from './domain/ports/hook-event-sink';
@@ -62,10 +72,16 @@ export {
 } from './infrastructure/http/hook-event-server';
 
 export { SystemClock } from './infrastructure/system-clock';
+export { SystemScheduler } from './infrastructure/system-scheduler';
 export { findExecutable, type ExecutableSearch } from './infrastructure/executable-lookup';
+export { probeVersionOutput, type VersionProbe } from './infrastructure/cli-probe';
 export { SystemIdGenerator } from './infrastructure/system-id-generator';
 export { FileEventJournal } from './infrastructure/store/file-event-journal';
 export { FileSessionSettingsStore } from './infrastructure/store/file-session-settings-store';
+export {
+  readClaudeSettings,
+  type ClaudeSettingsRead,
+} from './infrastructure/store/claude-settings-reader';
 export { InMemoryTerminalRepository } from './infrastructure/store/in-memory-terminal-repository';
 export { InMemoryOwnerPresence } from './infrastructure/store/in-memory-owner-presence';
 
@@ -147,6 +163,25 @@ export {
 } from './domain/agents/claude-code/launch-command-builder';
 
 export {
+  ClaudeCodeCommandFactory,
+  type ClaudeCodeCommandFactoryOptions,
+  type SessionSettingsStore,
+} from './domain/agents/claude-code/command-factory';
+
+export {
+  reviewHookPolicies,
+  type ClaudeSettingsSource,
+  type HookPolicyContext,
+  type HookPolicyFinding,
+} from './domain/agents/claude-code/hook-policies';
+
+export {
+  claudeSettingsLocations,
+  type SettingsLocationFacts,
+  type SettingsLocations,
+} from './domain/agents/claude-code/settings-locations';
+
+export {
   SessionSettingsBuilder,
   TOKEN_ENV_VAR,
   type CommandHookConfig,
@@ -173,6 +208,15 @@ export {
   type LaunchPlanParams,
   type LaunchStrategy,
 } from './domain/services/launch-strategy';
+
+export {
+  DEFAULT_SILENCE_MS,
+  ObservabilityWatch,
+  type ObservabilityWatchOptions,
+  type SilentTerminal,
+} from './domain/services/observability-watch';
+
+export { shellKindFor } from './domain/services/shell-selection';
 
 export {
   SHELL_KINDS,

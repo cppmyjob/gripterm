@@ -1,10 +1,24 @@
 import * as assert from 'node:assert/strict';
-import * as os from 'node:os';
 import * as vscode from 'vscode';
-import { CONTEXT_LIVE, CONTEXT_OVER, LaunchRecipe } from '../../packages/core/src/index';
+import { isAbsolute } from 'node:path';
+import { request as httpRequest } from 'node:http';
+import { statSync } from 'node:fs';
+import { CONTEXT_LIVE, CONTEXT_OVER } from '../../packages/core/src/index';
 import type { GriptermApi } from '../../packages/extension/src/extension';
 
-type LaunchRequest = Parameters<GriptermApi['lifecycle']['launch']>[0];
+const TERMINAL_UUID = '550e8400-e29b-41d4-a716-446655440000';
+
+/** A POST to our own receiver, with no token: the shape any process on this machine can send. */
+async function post(url: string): Promise<number> {
+  return await new Promise<number>((resolve, reject) => {
+    const sent = httpRequest(url, { method: 'POST' }, (response) => {
+      response.resume();
+      resolve(response.statusCode ?? 0);
+    });
+    sent.on('error', reject);
+    sent.end('{}');
+  });
+}
 
 interface MenuItem {
   readonly command: string;
@@ -25,23 +39,6 @@ function menuItems(): readonly MenuItem[] {
     contributes: { menus: Record<string, MenuItem[]> };
   };
   return manifest.contributes.menus['view/item/context'] ?? [];
-}
-
-function request(): LaunchRequest {
-  return {
-    displayName: 'gripterm-pending',
-    recipe: LaunchRecipe.create({
-      cwd: os.tmpdir(),
-      addDirs: [],
-      permissionMode: null,
-      agent: null,
-      model: null,
-      worktree: null,
-      mcpConfigPaths: [],
-      appendSystemPrompt: null,
-      extraEnv: {},
-    }),
-  };
 }
 
 suite('the lifecycle commands', () => {
@@ -77,23 +74,62 @@ suite('the lifecycle commands', () => {
   });
 });
 
-suite('starting a terminal', () => {
+suite('the launch pipeline', () => {
   /**
-   * **This test goes red in M1.14, and that is its job.**
+   * The successor of the test that guarded workaround C4.
    *
-   * `PendingAgentCommandFactory` is a refusal standing in for the launch
-   * pipeline -- finding `claude`, the hook server's address, the per-terminal
-   * `settings.json`. Composing the real one turns both assertions below false at
-   * once, which is how the placeholder gets removed rather than discovered.
+   * Until M1.14 this suite asserted a REFUSAL naming the milestone, so that
+   * composing the pipeline would turn it red rather than leave a placeholder to
+   * be found years later. It is now the other half of that promise: the same
+   * situation, asserted from the other side.
    */
-  test('refuses until the launch pipeline is composed (M1.14)', async () => {
-    const { lifecycle, registry } = await api();
-    const held = registry.list().length;
+  test('is composed, so nothing refuses by construction any more', async () => {
+    const { readiness } = await api();
 
-    await assert.rejects(lifecycle.launch(request()), /M1\.14/u);
+    assert.equal(readiness.refusal, null, readiness.refusal ?? '');
+    assert.ok(readiness.address, 'no hook receiver is listening');
+    assert.notEqual(readiness.cliPath, null, 'claude was not found');
+  });
 
-    // And no record is left behind. A launch that never produced a terminal must
-    // not leave a row stuck in `launching` for the life of the window.
-    assert.equal(registry.list().length, held);
+  test('found the Claude Code this machine will actually run', async () => {
+    // Machine-dependent ON PURPOSE. A machine without `claude` cannot run the
+    // acceptance of M1.15 either, so a red line here is a true statement about
+    // where the suite is running -- not a test that should have adapted.
+    const { readiness } = await api();
+
+    const { cliPath } = readiness;
+    assert.notEqual(cliPath, null, 'claude was not found on PATH');
+    assert.ok(isAbsolute(cliPath ?? ''), `${cliPath ?? ''} is not an absolute path`);
+    // The version is read by running the binary, never by reading the update
+    // journal -- which reported an upgrade twice while the binary stayed the
+    // same. A null here means `claude --version` did not answer at all.
+    assert.notEqual(readiness.cliVersion, null, 'claude did not say which version it is');
+  });
+
+  test('ships the hook forwarder inside the installation', async () => {
+    // The one failure this catches is ours: a packaging change that drops
+    // `assets/`. It would cost every terminal its `SessionStart` -- silently,
+    // because a failed hook is non-blocking.
+    const { readiness } = await api();
+
+    assert.ok(readiness.forwarder, 'no forwarder was composed (is node on PATH?)');
+    assert.ok(isAbsolute(readiness.forwarder.scriptPath));
+    assert.ok(isAbsolute(readiness.forwarder.interpreterPath));
+    assert.ok(statSync(readiness.forwarder.scriptPath).isFile(), 'the forwarder script is missing');
+  });
+
+  test('answers on the port it wrote into every settings file', async () => {
+    // The receiver, reached the way the CLI reaches it: over a socket, from
+    // outside. Nothing else in the suite proves the port is open rather than
+    // merely allocated.
+    const { readiness } = await api();
+    assert.ok(readiness.address);
+
+    const answered = await post(`${readiness.address.origin}/ev/${TERMINAL_UUID}`);
+
+    // 401 and not 404: an unauthenticated caller is turned away BEFORE the
+    // terminal is looked up, and before a body is read (§4.7). Any process on
+    // this machine can reach a loopback port.
+    assert.equal(answered, 401);
   });
 });

@@ -128,6 +128,18 @@ describe('SessionSettingsBuilder', () => {
       }
     );
 
+    it('registers no SessionStart at all when there is nothing to run the forwarder with', () => {
+      // No `node` on this machine's PATH means no interpreter for the command
+      // hook (C5-2). The direction of the refusal is chosen and stated: one
+      // event is lost, ten keep arriving. Refusing to launch instead would cost
+      // the person a terminal over a channel that carries `/clear` renames and
+      // the pid -- valuable, and not the whole of observation (§4.7).
+      const document = build({ sessionStart: null });
+
+      expect(document.hooks.SessionStart).toEqual([]);
+      expect(document.hooks.Stop).toHaveLength(1);
+    });
+
     it('gives the command hook an argument list, so no shell parses our paths', () => {
       // `args` present => "`command` is resolved as an executable and spawned
       // directly ... no shell" [binary 2.1.225]. Without it the command string

@@ -112,6 +112,19 @@
             "launch_failed"
           ],
           "markdownDescription": "States that raise a notification when a terminal ENTERS them. An empty list turns notifications off."
+        },
+        "gripterm.launch.mode": {
+          "type": "string",
+          "enum": [
+            "process",
+            "shell"
+          ],
+          "enumDescriptions": [
+            "Claude Code is the terminal's own process. No shell runs, so no shell profile is applied.",
+            "The command is typed into your configured shell. Use this if `claude` is only on your PATH after your shell profile has run."
+          ],
+          "default": "process",
+          "markdownDescription": "How a Gripterm terminal is started."
         }
       }
     }
