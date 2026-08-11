@@ -60,11 +60,13 @@ export class SequentialIdGenerator implements IdGenerator {
 /**
  * A terminal that records what was done to it.
  *
- * `dispose()` deliberately does NOT fire the close listeners. Whether the
- * platform raises `onDidCloseTerminal` for a terminal the extension disposed
- * itself has not been measured, and a fake that guessed would make every test
- * built on it agree with the guess. A test that cares about a close says so by
- * calling `close`.
+ * `dispose()` DOES fire the close listeners, with no exit code. That is not a
+ * convenience: it is A15, measured on 2026-08-11 in a real VS Code 1.132.0 by
+ * the integration suite, after being carried as an open question since M1.5.
+ * The platform reports a terminal we destroyed ourselves exactly as it reports
+ * one a person closed -- `exitStatus.code` is `undefined` either way -- so the
+ * lifecycle service (M1.12) cannot tell the two apart from the event and must
+ * know from the intent it acted on.
  */
 export class FakeTerminalHandle implements TerminalHandle {
   public readonly terminalId: TerminalId;
@@ -88,7 +90,11 @@ export class FakeTerminalHandle implements TerminalHandle {
   }
 
   public dispose(): void {
+    if (this.disposed) {
+      return;
+    }
     this.disposed = true;
+    this.close(undefined);
   }
 
   public onDidClose(listener: (exit: TerminalExit) => void): Disposable {

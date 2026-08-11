@@ -56,6 +56,7 @@ export {
   type HookEventServerOptions,
 } from './infrastructure/http/hook-event-server';
 
+export { SystemClock } from './infrastructure/system-clock';
 export { FileEventJournal } from './infrastructure/store/file-event-journal';
 export { FileSessionSettingsStore } from './infrastructure/store/file-session-settings-store';
 export { InMemoryTerminalRepository } from './infrastructure/store/in-memory-terminal-repository';
@@ -173,6 +174,8 @@ export {
   shellCommandLine,
   type ShellKind,
 } from './domain/services/shell-quoting';
+
+export { describeDetails } from './domain/services/log-details';
 
 export {
   SessionRegistry,

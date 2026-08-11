@@ -116,10 +116,32 @@ describe('FakeTerminalHandle', () => {
     expect(seen).toStrictEqual([1, undefined]);
   });
 
-  it('does not pretend to know whether disposing raises a close', async () => {
-    // Unmeasured on the platform. A fake that guessed would make every test
-    // built on it agree with the guess, so the test that cares says which
-    // happened.
+  it('reports a close when it is disposed, the way the platform does', async () => {
+    // A15, measured 2026-08-11 in a real VS Code 1.132.0 (integration suite):
+    // disposing our own terminal DOES raise `onDidCloseTerminal`, and
+    // `exitStatus.code` is `undefined` -- the same shape as a person closing
+    // it, because nothing exited on its own.
+    //
+    // The fake refused to guess this until it was measured. Now that it is, the
+    // fake follows: a double that keeps a retired guess is worse than one that
+    // never had it, because every test built on it agrees with something we
+    // know to be false.
+    const gateway = new InMemoryTerminalGateway();
+    const spec = makeTerminalSpec();
+    await gateway.create(spec);
+    const handle = gateway.handleFor(spec.terminalId);
+    const seen: (number | undefined)[] = [];
+    handle.onDidClose((exit) => {
+      seen.push(exit.code);
+    });
+
+    handle.dispose();
+
+    expect(handle.disposed).toBe(true);
+    expect(seen).toStrictEqual([undefined]);
+  });
+
+  it('reports that close once, however many times it is disposed', async () => {
     const gateway = new InMemoryTerminalGateway();
     const spec = makeTerminalSpec();
     await gateway.create(spec);
@@ -130,8 +152,8 @@ describe('FakeTerminalHandle', () => {
     });
 
     handle.dispose();
+    handle.dispose();
 
-    expect(handle.disposed).toBe(true);
-    expect(closes).toBe(0);
+    expect(closes).toBe(1);
   });
 });
