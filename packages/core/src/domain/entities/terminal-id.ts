@@ -35,6 +35,23 @@ export class TerminalId {
     return new TerminalId(parseUuid(raw, 'terminalId'));
   }
 
+  /**
+   * The same, for a string that has no business being an id in the first place
+   * -- a command argument, a file name, a query parameter.
+   *
+   * It exists so that callers outside the domain do not each grow their own
+   * `try`/`catch` around `fromString`, where the catch inevitably widens until
+   * it hides something. Here there is nothing to hide: parsing is the only
+   * thing that happens, so anything thrown by it is the refusal.
+   */
+  public static tryFromString(raw: string): TerminalId | null {
+    try {
+      return TerminalId.fromString(raw);
+    } catch {
+      return null;
+    }
+  }
+
   public equals(other: TerminalId): boolean {
     return this.value === other.value;
   }

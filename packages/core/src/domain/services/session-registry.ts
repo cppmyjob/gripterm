@@ -7,6 +7,7 @@ import type { HookEvent, TerminalEvent } from '../events/terminal-event';
 import type { HookEventReader } from '../ports/hook-event-reader';
 import type { HookEventSink } from '../ports/hook-event-sink';
 import type { Logger } from '../ports/logger';
+import type { PersistedTerminalState } from '../entities/terminal-state';
 import type { SessionId } from '../entities/session-id';
 import type { StateTransition, TerminalStateMachine } from './terminal-state-machine';
 import type { TerminalEntry } from '../entities/terminal-entry';
@@ -28,7 +29,8 @@ export interface SessionRegistryOptions {
  * that diffed two entries could not recover the difference, and the attention
  * notifier of M1.11a is built on exactly that distinction.
  *
- * `transition` is null when the entry entered the registry rather than moved.
+ * `transition` is null when the entry did not move: it was registered, or
+ * amended by this window rather than by an event.
  */
 export interface RegistryChange {
   readonly entry: TerminalEntry;
@@ -141,12 +143,46 @@ export class SessionRegistry implements HookEventSink {
     this._notify({ entry, transition: null });
   }
 
+  /**
+   * A change this window made to a record it already holds -- `closedAt`
+   * (M1.12), a rename, a note (M2.7). Not an event, so no transition.
+   *
+   * Separate from `register`, because the two want opposite things when the id
+   * is not there. Registering an unheld entry is how a terminal joins this
+   * window; amending one is a caller talking about a terminal that has already
+   * gone, and creating the record back would resurrect something this window
+   * stopped owning. So this one refuses, and says so.
+   */
+  public amend(next: TerminalEntry): void {
+    if (!this._entries.has(next.terminalId.value)) {
+      this._options.logger.warn('an amendment named a terminal this window does not hold', {
+        terminalId: next.terminalId.value,
+      });
+      return;
+    }
+    this._entries.set(next.terminalId.value, next);
+    this._notify({ entry: next, transition: null });
+  }
+
   public get(terminalId: TerminalId): TerminalEntry | undefined {
     return this._entries.get(terminalId.value);
   }
 
   public list(): readonly TerminalEntry[] {
     return [...this._entries.values()];
+  }
+
+  /**
+   * The state of a terminal this window holds, or `null` when it holds none.
+   *
+   * It exists so that the one caller who needs the state and not the record --
+   * the lifecycle service, deciding what a closing terminal means -- does not
+   * have to carry a branch for a case it cannot reach. Here that branch is one
+   * call away from a test; there it would be unreachable code, which is the
+   * kind that quietly stops being true.
+   */
+  public stateOf(terminalId: TerminalId): PersistedTerminalState | null {
+    return this._entries.get(terminalId.value)?.observed.state ?? null;
   }
 
   public subscribe(listener: RegistryListener): Disposable {

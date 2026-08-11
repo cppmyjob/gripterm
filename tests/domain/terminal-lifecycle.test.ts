@@ -1,0 +1,540 @@
+import {
+  ConflictError,
+  HookEventParser,
+  ProcessLaunchStrategy,
+  SessionRegistry,
+  ShellLaunchStrategy,
+  TerminalId,
+  TerminalLifecycleService,
+  TerminalStateMachine,
+  type AgentCommand,
+  type AgentCommandFactory,
+  type LaunchIntent,
+  type LaunchRequest,
+  type LaunchStrategy,
+  type RegistryChange,
+  type TerminalEntry,
+  type TerminalGateway,
+  type TerminalHandle,
+  type TerminalSpec,
+} from '../../packages/core/src/index';
+import { makeEntry, makeOwnerRef, makeRecipe } from '../helpers/domain-fixtures';
+import {
+  FixedClock,
+  InMemoryTerminalGateway,
+  RecordingLogger,
+  SequentialIdGenerator,
+} from '../helpers/port-fakes';
+
+/**
+ * The service is driven through its real registry and its real state machine
+ * everywhere below, because the two questions it exists to answer -- "what does
+ * a closing terminal mean" and "what is `closedAt` for" -- are both about the
+ * record that results, not about the calls it made.
+ *
+ * The exit-code cases are the substance. A terminal that dies is reported by the
+ * editor in exactly one shape whether the process failed, the person closed it
+ * or we destroyed it ourselves (A15, measured 2026-08-11), so every distinction
+ * below is drawn from something this service knew BEFORE the terminal closed.
+ */
+
+const STARTED_AT = new Date('2026-08-11T12:00:00.000Z');
+const EXECUTABLE = 'C:/Users/x/.local/bin/claude.exe';
+
+class StubAgentCommands implements AgentCommandFactory {
+  public readonly asked: { readonly terminalId: string, readonly intent: LaunchIntent }[] = [];
+  public failure: Error | null = null;
+
+  public async commandFor(entry: TerminalEntry, intent: LaunchIntent): Promise<AgentCommand> {
+    this.asked.push({ terminalId: entry.terminalId.value, intent });
+    if (this.failure !== null) {
+      throw this.failure;
+    }
+    return {
+      executable: EXECUTABLE,
+      args: ['--session-id', entry.sessionId.value],
+      env: { GRIPTERM_TOKEN: 'secret' },
+    };
+  }
+}
+
+/** The editor refusing to open a terminal at all -- a bad cwd, an exhausted handle table. */
+class RefusingGateway implements TerminalGateway {
+  public async create(_spec: TerminalSpec): Promise<TerminalHandle> {
+    throw new Error('the editor refused');
+  }
+
+  public listKnown(): readonly TerminalHandle[] {
+    return [];
+  }
+}
+
+interface Stand {
+  readonly clock: FixedClock;
+  readonly logger: RecordingLogger;
+  readonly registry: SessionRegistry;
+  readonly gateway: InMemoryTerminalGateway;
+  readonly commands: StubAgentCommands;
+  readonly lifecycle: TerminalLifecycleService;
+}
+
+function stand(strategy: LaunchStrategy = new ProcessLaunchStrategy()): Stand {
+  const clock = new FixedClock(STARTED_AT);
+  const logger = new RecordingLogger();
+  const registry = new SessionRegistry({
+    stateMachine: new TerminalStateMachine(),
+    reader: new HookEventParser(),
+    clock,
+    logger,
+  });
+  const gateway = new InMemoryTerminalGateway();
+  const commands = new StubAgentCommands();
+  const lifecycle = new TerminalLifecycleService({
+    registry,
+    gateway,
+    commands,
+    strategy,
+    ids: new SequentialIdGenerator(),
+    clock,
+    owner: makeOwnerRef(),
+    logger,
+  });
+  return { clock, logger, registry, gateway, commands, lifecycle };
+}
+
+function request(displayName = 'auth-refactor'): LaunchRequest {
+  return { displayName, recipe: makeRecipe() };
+}
+
+/** Every change the registry announced, in order, as the two facts each case is about. */
+function trail(registry: SessionRegistry): { readonly closed: boolean, readonly state: string }[] {
+  const seen: { closed: boolean, state: string }[] = [];
+  registry.subscribe((change: RegistryChange) => {
+    seen.push({ closed: change.entry.closedAt !== null, state: change.entry.observed.state });
+  });
+  return seen;
+}
+
+/**
+ * The event the service produced for each close, in order.
+ *
+ * Read from the log rather than from a spy, because the log line is a shipped
+ * artefact: it is what somebody reads when a terminal ended and nobody knows
+ * why. Two rules are invisible in the resulting STATE and visible only here --
+ * a late failure is an ordinary end, and one close produces one event.
+ */
+function closeEvents(logger: RecordingLogger): unknown[] {
+  return logger.infos
+    .filter((line) => line.message === 'a terminal closed')
+    .map((line) => line.details?.event);
+}
+
+function signals(registry: SessionRegistry): string[] {
+  const seen: string[] = [];
+  registry.subscribe((change: RegistryChange) => {
+    if (change.transition?.kind === 'moved') {
+      seen.push(change.transition.signal);
+    }
+  });
+  return seen;
+}
+
+describe('TerminalLifecycleService starts a terminal', () => {
+  it('puts the record in the list only once the terminal exists', async () => {
+    const { lifecycle, registry } = stand();
+
+    const entry = await lifecycle.launch(request());
+
+    expect(registry.list()).toHaveLength(1);
+    expect(registry.get(entry.terminalId)?.observed.state).toBe('launching');
+  });
+
+  it('gives the terminal and the conversation different ids', async () => {
+    // `--session-id` is us telling the CLI which conversation this is, so the
+    // record and the process agree on it before the process exists -- and the
+    // two identifiers are separate by construction (§4.6).
+    const { lifecycle } = stand();
+
+    const entry = await lifecycle.launch(request());
+
+    expect(entry.sessionId.value).not.toBe(entry.terminalId.value);
+  });
+
+  it('hands the editor what the strategy planned', async () => {
+    const { lifecycle, gateway } = stand();
+
+    const entry = await lifecycle.launch(request());
+
+    expect(gateway.specs).toStrictEqual([
+      {
+        terminalId: entry.terminalId,
+        name: 'auth-refactor',
+        cwd: 'D:/Projects/foo',
+        env: { GRIPTERM_TOKEN: 'secret' },
+        shellPath: EXECUTABLE,
+        shellArgs: ['--session-id', entry.sessionId.value],
+      },
+    ]);
+  });
+
+  it('asks the agent for a launch, not a restore', async () => {
+    const { lifecycle, commands } = stand();
+
+    const entry = await lifecycle.launch(request());
+
+    expect(commands.asked).toStrictEqual([{ terminalId: entry.terminalId.value, intent: 'launch' }]);
+  });
+
+  it('takes the focus, because somebody asked for a terminal', async () => {
+    const { lifecycle, gateway } = stand();
+
+    const entry = await lifecycle.launch(request());
+
+    expect(gateway.handleFor(entry.terminalId).shownWith).toStrictEqual([false]);
+  });
+
+  it('types nothing when the agent IS the terminal process', async () => {
+    const { lifecycle, gateway } = stand();
+
+    const entry = await lifecycle.launch(request());
+
+    expect(gateway.handleFor(entry.terminalId).sent).toStrictEqual([]);
+  });
+
+  it('types the command line when a shell is underneath', async () => {
+    const { lifecycle, gateway } = stand(new ShellLaunchStrategy('powershell'));
+
+    const entry = await lifecycle.launch(request());
+    const handle = gateway.handleFor(entry.terminalId);
+
+    expect(handle.sent).toHaveLength(1);
+    expect(handle.sent[0]?.text).toContain(EXECUTABLE);
+    expect(handle.sent[0]?.execute).toBe(true);
+  });
+
+  it('stamps the record with the clock, not with a second source of now', async () => {
+    const { lifecycle } = stand();
+
+    const entry = await lifecycle.launch(request());
+
+    expect(entry.createdAt).toStrictEqual(STARTED_AT);
+    expect(entry.observed.lastEventAt).toStrictEqual(STARTED_AT);
+    expect(entry.closedAt).toBeNull();
+  });
+
+  it('leaves no record behind when the agent command cannot be built', async () => {
+    // A settings file that could not be written, an executable that is gone.
+    // A row stuck in `launching` for the life of the window would be worse than
+    // the error the caller is about to show.
+    const { lifecycle, registry, commands } = stand();
+    commands.failure = new Error('no settings file');
+
+    await expect(lifecycle.launch(request())).rejects.toThrow('no settings file');
+
+    expect(registry.list()).toStrictEqual([]);
+  });
+
+  it('leaves no record behind when the editor refuses the terminal', async () => {
+    const clock = new FixedClock(STARTED_AT);
+    const logger = new RecordingLogger();
+    const registry = new SessionRegistry({
+      stateMachine: new TerminalStateMachine(),
+      reader: new HookEventParser(),
+      clock,
+      logger,
+    });
+    const lifecycle = new TerminalLifecycleService({
+      registry,
+      gateway: new RefusingGateway(),
+      commands: new StubAgentCommands(),
+      strategy: new ProcessLaunchStrategy(),
+      ids: new SequentialIdGenerator(),
+      clock,
+      owner: makeOwnerRef(),
+      logger,
+    });
+
+    await expect(lifecycle.launch(request())).rejects.toThrow('the editor refused');
+
+    expect(registry.list()).toStrictEqual([]);
+  });
+
+  it('refuses to start one conversation twice', async () => {
+    // Two processes on one conversation is the failure the whole ownership
+    // design exists to prevent; inside one window it is cheap to refuse.
+    const { lifecycle, gateway } = stand();
+    const entry = await lifecycle.launch(request());
+
+    await expect(lifecycle.start(entry, 'launch')).rejects.toBeInstanceOf(ConflictError);
+
+    expect(gateway.specs).toHaveLength(1);
+  });
+
+  it('carries a restore through the same path', async () => {
+    const { lifecycle, commands, gateway } = stand();
+    const entry = await lifecycle.launch(request());
+    gateway.handleFor(entry.terminalId).close(undefined);
+
+    await lifecycle.start(entry, 'resume');
+
+    expect(commands.asked.at(-1)).toStrictEqual({
+      terminalId: entry.terminalId.value,
+      intent: 'resume',
+    });
+    expect(gateway.specs).toHaveLength(2);
+  });
+});
+
+describe('TerminalLifecycleService closes a terminal', () => {
+  it('is the only thing that ever sets closedAt', async () => {
+    const { lifecycle, registry, clock } = stand();
+    const entry = await lifecycle.launch(request());
+    clock.advance(60_000);
+
+    lifecycle.close(entry.terminalId);
+
+    expect(registry.get(entry.terminalId)?.closedAt).toStrictEqual(
+      new Date(STARTED_AT.getTime() + 60_000)
+    );
+  });
+
+  it('destroys the terminal and ends the record', async () => {
+    const { lifecycle, registry, gateway } = stand();
+    const entry = await lifecycle.launch(request());
+
+    lifecycle.close(entry.terminalId);
+
+    expect(gateway.handleFor(entry.terminalId).disposed).toBe(true);
+    expect(registry.get(entry.terminalId)?.observed.state).toBe('ended');
+  });
+
+  it('closes the record before announcing that it ended', async () => {
+    // Persistence subscribes here (M2). Announcing the end first would make one
+    // act arrive as two, the first of which describes a terminal that is over
+    // and still restorable.
+    const { lifecycle, registry } = stand();
+    const entry = await lifecycle.launch(request());
+    const seen = trail(registry);
+
+    lifecycle.close(entry.terminalId);
+
+    expect(seen).toStrictEqual([
+      { closed: true, state: 'launching' },
+      { closed: true, state: 'ended' },
+    ]);
+  });
+
+  it('keeps the first closing time when asked twice', async () => {
+    const { lifecycle, registry, clock } = stand();
+    const entry = await lifecycle.launch(request());
+    lifecycle.close(entry.terminalId);
+    clock.advance(60_000);
+
+    lifecycle.close(entry.terminalId);
+
+    expect(registry.get(entry.terminalId)?.closedAt).toStrictEqual(STARTED_AT);
+  });
+
+  it('ends a record this window never started', () => {
+    // The M2 case, and the reason the branch exists: a restored record is in the
+    // list with no process of ours behind it. Nothing else would ever bring it
+    // to an end state -- there is no terminal to raise a close event.
+    const { lifecycle, registry } = stand();
+    const entry = makeEntry();
+    registry.register(entry);
+
+    lifecycle.close(entry.terminalId);
+
+    expect(registry.get(entry.terminalId)?.observed.state).toBe('ended');
+    expect(registry.get(entry.terminalId)?.closedAt).toStrictEqual(STARTED_AT);
+  });
+
+  it('closes the record of a terminal that is already gone', async () => {
+    // There is no handle to destroy -- the process died, or the record was
+    // restored into the list without being started (M2). Nothing else would
+    // bring such a record to an end state, so this does.
+    const { lifecycle, registry, gateway } = stand();
+    const entry = await lifecycle.launch(request());
+    gateway.handleFor(entry.terminalId).close(undefined);
+    expect(registry.get(entry.terminalId)?.observed.state).toBe('ended');
+
+    lifecycle.close(entry.terminalId);
+
+    expect(registry.get(entry.terminalId)?.closedAt).toStrictEqual(STARTED_AT);
+  });
+
+  it('says so when asked to close a terminal it does not hold', () => {
+    // Not an exception: the tree offers only records this window has, so
+    // getting here means one was dropped between the click and the call.
+    const { lifecycle, logger, registry } = stand();
+
+    lifecycle.close(TerminalId.fromString('11111111-2222-4333-8444-555555555555'));
+
+    expect(registry.list()).toStrictEqual([]);
+    expect(logger.warnings.map((line) => line.message)).toStrictEqual([
+      'close was asked for a terminal this window does not hold',
+    ]);
+  });
+});
+
+describe('TerminalLifecycleService reads a terminal that went away', () => {
+  async function closing(exit: number | undefined, intent: LaunchIntent): Promise<{
+    readonly state: string;
+    readonly signals: readonly string[];
+    readonly restorable: boolean;
+    readonly event: unknown;
+  }> {
+    const { lifecycle, registry, gateway, logger } = stand();
+    const entry = await lifecycle.launch(request());
+    if (intent === 'resume') {
+      // The first terminal is over, and the record is being restored -- which
+      // is the only way `launching` is ever reached under `resume`.
+      gateway.handleFor(entry.terminalId).close(undefined);
+      await lifecycle.start(entry, 'resume');
+    }
+    const seen = signals(registry);
+
+    gateway.handleFor(entry.terminalId).close(exit);
+
+    const after = registry.get(entry.terminalId);
+    return {
+      state: after?.observed.state ?? 'gone',
+      signals: seen,
+      restorable: after?.isRestorable() ?? false,
+      event: closeEvents(logger).at(-1),
+    };
+  }
+
+  it('calls a non-zero exit during a launch a failed launch', async () => {
+    expect(await closing(1, 'launch')).toMatchObject({
+      state: 'ended',
+      signals: ['launch_failed'],
+      event: 'LaunchExitedNonZero',
+    });
+  });
+
+  it('calls a non-zero exit during a restore a failed restore', async () => {
+    // The same state, the same event shape, a different outcome. The only thing
+    // separating them is what this service was asked to do, which is why the
+    // producer names the event and the state machine does not (§4.3).
+    expect(await closing(1, 'resume')).toMatchObject({
+      state: 'resume_failed',
+      signals: ['resume_failed'],
+      event: 'ResumeExitedNonZero',
+    });
+  });
+
+  it('calls a clean exit an ordinary end', async () => {
+    // `/exit` gives code 0. A person leaving is not a failure to report.
+    expect(await closing(0, 'launch')).toMatchObject({
+      state: 'ended',
+      signals: ['ended'],
+      event: 'TerminalClosed',
+    });
+  });
+
+  it('calls a terminal the person closed an ordinary end', async () => {
+    // `undefined` is what the platform reports both for a person closing the
+    // terminal and for us destroying it (A15). Neither is a failed launch.
+    expect(await closing(undefined, 'launch')).toMatchObject({
+      state: 'ended',
+      signals: ['ended'],
+      event: 'TerminalClosed',
+    });
+  });
+
+  it('keeps a terminal restorable when its process died on its own', async () => {
+    // Our terminals are transient, so every editor shutdown kills them all.
+    // Tying `closedAt` to a process exit would declare the whole base rubbish
+    // at the first restart (§4.2).
+    expect(await closing(1, 'launch')).toMatchObject({ restorable: true });
+  });
+
+  it('does not call a late failure a failed launch', async () => {
+    // A process that ran for an hour and then died is not a launch that never
+    // got going. The state machine would come to the same conclusion about the
+    // STATE on its own -- but the record of what happened would then say
+    // `LaunchExitedNonZero` about a session that had been talking for an hour,
+    // and that record is what M2 persists.
+    const { lifecycle, registry, gateway, logger } = stand();
+    const entry = await lifecycle.launch(request());
+    registry.ingest(entry.terminalId, {
+      kind: 'Stop',
+      sessionId: entry.sessionId,
+      lastAssistantMessage: null,
+      promptId: null,
+      cwd: null,
+      transcriptPath: null,
+    });
+    const seen = signals(registry);
+
+    gateway.handleFor(entry.terminalId).close(1);
+
+    expect(registry.get(entry.terminalId)?.observed.state).toBe('ended');
+    expect(seen).toStrictEqual(['ended']);
+    expect(closeEvents(logger)).toStrictEqual(['TerminalClosed']);
+  });
+
+  it('ends a terminal whose process died without a single hook', async () => {
+    // The CLI cannot report its own death, so the editor's word is the only
+    // evidence there will ever be. Without this subscription the row would sit
+    // in `launching` for the life of the window.
+    const { lifecycle, registry, gateway } = stand();
+    const entry = await lifecycle.launch(request());
+
+    gateway.handleFor(entry.terminalId).close(undefined);
+
+    expect(registry.get(entry.terminalId)?.observed.state).toBe('ended');
+  });
+
+  it('hears a terminal close only once', async () => {
+    // The state would hide a second hearing: the machine refuses a second death
+    // for one terminal, so only the event count shows it. A subscription that
+    // outlived its terminal is how a listener leak starts.
+    const { lifecycle, registry, gateway, logger } = stand();
+    const entry = await lifecycle.launch(request());
+    const handle = gateway.handleFor(entry.terminalId);
+    const seen = signals(registry);
+
+    handle.close(undefined);
+    handle.close(undefined);
+
+    expect(seen).toStrictEqual(['ended']);
+    expect(closeEvents(logger)).toStrictEqual(['TerminalClosed']);
+  });
+});
+
+describe('TerminalLifecycleService lets go', () => {
+  it('stops listening to the terminals it started', async () => {
+    const { lifecycle, registry, gateway } = stand();
+    const entry = await lifecycle.launch(request());
+    const seen = signals(registry);
+
+    lifecycle.dispose();
+    gateway.handleFor(entry.terminalId).close(1);
+
+    expect(seen).toStrictEqual([]);
+  });
+
+  it('does not destroy anybody, because deactivating is not a decision about a conversation', async () => {
+    const { lifecycle, gateway } = stand();
+    const entry = await lifecycle.launch(request());
+
+    lifecycle.dispose();
+
+    expect(gateway.handleFor(entry.terminalId).disposed).toBe(false);
+  });
+});
+
+describe('one terminal closing is one terminal closing', () => {
+  it('leaves the others alone', async () => {
+    const { lifecycle, registry, gateway } = stand();
+    const first = await lifecycle.launch(request('one'));
+    const second = await lifecycle.launch(request('two'));
+
+    gateway.handleFor(first.terminalId).close(1);
+
+    expect(registry.get(second.terminalId)?.observed.state).toBe('launching');
+    expect(registry.get(first.terminalId)?.observed.state).toBe('ended');
+  });
+});

@@ -25,6 +25,7 @@ import {
   type UserPromptSubmitEvent,
 } from '../../packages/core/src/index';
 import {
+  CREATED_AT,
   NEXT_SESSION_UUID,
   SESSION_UUID,
   TERMINAL_UUID,
@@ -177,6 +178,44 @@ describe('SessionRegistry holds this window terminals', () => {
     expect(logger.infos.map((line) => line.message)).toContain(
       'a registration replaced an entry this window already held'
     );
+  });
+
+  it('answers the state of a terminal it holds, and null for one it does not', () => {
+    // The lifecycle service asks this, and only this, when a terminal closes:
+    // whether the record was still `launching` is what separates a failed
+    // launch from an ordinary end.
+    const { registry } = stand();
+
+    expect(registry.stateOf(TERMINAL)).toBe('idle');
+    expect(registry.stateOf(OTHER_TERMINAL)).toBeNull();
+  });
+
+  it('amends an entry it holds, and announces it as no movement', () => {
+    // A change this window made to its own record -- `closedAt` (M1.12), a
+    // rename (M2.7). Not an event, so nothing moved and nobody is interrupted.
+    const { registry, changes } = stand(null);
+    registry.register(makeEntry());
+    const closed = makeEntry().withClosed(CREATED_AT);
+
+    registry.amend(closed);
+
+    expect(registry.get(TERMINAL)?.closedAt).toStrictEqual(CREATED_AT);
+    expect(changes.at(-1)?.transition).toBeNull();
+    expect(changes).toHaveLength(2);
+  });
+
+  it('refuses to amend a terminal it does not hold', () => {
+    // Where `register` would take it in, this one must not: amending is a
+    // caller talking about a record that has already gone, and creating it back
+    // would resurrect something this window stopped owning.
+    const { registry, logger } = stand(null);
+
+    registry.amend(makeEntry());
+
+    expect(registry.list()).toStrictEqual([]);
+    expect(logger.warnings.map((line) => line.message)).toStrictEqual([
+      'an amendment named a terminal this window does not hold',
+    ]);
   });
 
   it('stops calling a listener that unsubscribed', () => {

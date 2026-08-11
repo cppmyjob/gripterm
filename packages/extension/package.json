@@ -25,14 +25,58 @@
   "contributes": {
     "commands": [
       {
+        "command": "gripterm.newTerminal",
+        "title": "Gripterm: New Terminal",
+        "icon": "$(add)"
+      },
+      {
+        "command": "gripterm.closeTerminal",
+        "title": "Gripterm: Close Terminal",
+        "icon": "$(trash)"
+      },
+      {
         "command": "gripterm.showLogs",
-        "title": "Gripterm: Show Logs"
+        "title": "Gripterm: Show Logs",
+        "icon": "$(output)"
       },
       {
         "command": "gripterm.focusTerminal",
-        "title": "Gripterm: Show Terminal"
+        "title": "Gripterm: Show Terminal",
+        "icon": "$(terminal)"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "gripterm.newTerminal",
+          "when": "view == gripterm.terminals",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "gripterm.focusTerminal",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.live",
+          "group": "inline"
+        },
+        {
+          "command": "gripterm.closeTerminal",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.live",
+          "group": "1_act"
+        },
+        {
+          "command": "gripterm.showLogs",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.over",
+          "group": "1_act"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "gripterm.focusTerminal",
+          "when": "false"
+        }
+      ]
+    },
     "views": {
       "explorer": [
         {

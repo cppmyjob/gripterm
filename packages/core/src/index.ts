@@ -62,6 +62,7 @@ export {
 } from './infrastructure/http/hook-event-server';
 
 export { SystemClock } from './infrastructure/system-clock';
+export { SystemIdGenerator } from './infrastructure/system-id-generator';
 export { FileEventJournal } from './infrastructure/store/file-event-journal';
 export { FileSessionSettingsStore } from './infrastructure/store/file-session-settings-store';
 export { InMemoryTerminalRepository } from './infrastructure/store/in-memory-terminal-repository';
@@ -181,6 +182,18 @@ export {
 } from './domain/services/shell-quoting';
 
 export { describeDetails } from './domain/services/log-details';
+
+export { type AgentCommandFactory } from './domain/ports/agent-command-factory';
+
+export { defaultTerminalName } from './domain/services/terminal-naming';
+
+export { terminalIdFrom } from './domain/services/terminal-target';
+
+export {
+  TerminalLifecycleService,
+  type LaunchRequest,
+  type TerminalLifecycleOptions,
+} from './domain/services/terminal-lifecycle';
 
 export {
   ATTENTION_SIGNALS,
