@@ -87,6 +87,11 @@ export { InMemoryOwnerPresence } from './infrastructure/store/in-memory-owner-pr
 
 export { requireAbsolutePath } from './domain/entities/absolute-path';
 export { LAUNCH_INTENTS, type LaunchIntent } from './domain/entities/launch-intent';
+export {
+  LAUNCH_LOCATIONS,
+  isLaunchLocation,
+  type LaunchLocation,
+} from './domain/entities/launch-location';
 export { type AgentCommand } from './domain/entities/agent-command';
 export { ListeningAddress } from './domain/entities/listening-address';
 export { TerminalId } from './domain/entities/terminal-id';

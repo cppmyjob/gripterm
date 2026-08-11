@@ -35,6 +35,7 @@ import type {
   AgentCommandFactory,
   ExecutableSearch,
   ForwarderScript,
+  LaunchLocation,
   LaunchMode,
   LaunchStrategy,
   ListeningAddress,
@@ -44,7 +45,7 @@ import type {
 import { registerCloseTerminal } from './commands/close-terminal';
 import { registerFocusTerminal } from './commands/focus-terminal';
 import { registerNewTerminal } from './commands/new-terminal';
-import { readLaunchMode, readToastSignals } from './settings';
+import { readLaunchLocation, readLaunchMode, readToastSignals } from './settings';
 import { UnavailableAgentCommandFactory } from './adapters/unavailable-agent-command-factory';
 import { VsCodeLogger } from './adapters/vscode-logger';
 import { VsCodeTerminalGateway } from './adapters/vscode-terminal-gateway';
@@ -87,6 +88,7 @@ export interface Readiness {
   readonly forwarder: ForwarderScript | null;
   readonly address: ListeningAddress | null;
   readonly mode: LaunchMode;
+  readonly location: LaunchLocation;
   /** Why a launch would be refused, or `null` when it would not. */
   readonly refusal: string | null;
 }
@@ -148,7 +150,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     logger,
   });
 
-  const gateway = new VsCodeTerminalGateway();
+  const location = readLaunchLocation(logger);
+  const gateway = new VsCodeTerminalGateway(location);
   context.subscriptions.push({ dispose: () => { gateway.dispose(); } });
 
   const storage = join(homedir(), STORAGE_DIRECTORY);
@@ -230,6 +233,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     forwarder: forwarder === null ? null : forwarder.scriptPath,
     listeningOn: address === null ? null : address.origin,
     launchMode: mode,
+    launchLocation: location,
     storage,
   });
   if (readiness.kind === 'refused') {
@@ -250,6 +254,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
       forwarder,
       address,
       mode,
+      location,
       refusal: readiness.kind === 'refused' ? readiness.reason : null,
     },
   };

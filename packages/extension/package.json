@@ -125,6 +125,19 @@
           ],
           "default": "process",
           "markdownDescription": "How a Gripterm terminal is started."
+        },
+        "gripterm.launch.location": {
+          "type": "string",
+          "enum": [
+            "editor",
+            "panel"
+          ],
+          "enumDescriptions": [
+            "In the editor area, as a tab. The panel and its list of terminals stay out of the way, and the tab carries the terminal's Gripterm name.",
+            "In the terminal panel, alongside your ordinary terminals."
+          ],
+          "default": "editor",
+          "markdownDescription": "Where a Gripterm terminal is opened."
         }
       }
     }

@@ -40,6 +40,24 @@ async function api(): Promise<GriptermApi> {
   return await extension.activate();
 }
 
+/** Waits for something the editor does on its own schedule, or gives up saying what it wanted. */
+async function waitFor(what: string, ready: () => boolean, ms = 5000): Promise<void> {
+  const until = Date.now() + ms;
+  while (!ready()) {
+    if (Date.now() > until) {
+      throw new Error(`gave up waiting for ${what}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+/** The tabs of every editor group, which is where a terminal-in-the-editor appears. */
+function terminalTabs(): readonly vscode.Tab[] {
+  return vscode.window.tabGroups.all
+    .flatMap((group) => group.tabs)
+    .filter((tab) => tab.input instanceof vscode.TabInputTerminal);
+}
+
 /** Resolves with the exit the gateway reported, or rejects if the terminal outlives the wait. */
 async function closeOf(handle: Handle, ms = 20000): Promise<Exit> {
   return await new Promise<Exit>((resolve, reject) => {
@@ -124,6 +142,46 @@ suite('VsCodeTerminalGateway', () => {
    * has to emit `TerminalClosed` itself instead of waiting for an event that
    * never comes.
    */
+  /**
+   * A21, opened when the owner asked for the panel's furniture to go away: does
+   * a terminal opened in the EDITOR area behave like the one in the panel?
+   *
+   * Everything M1 rests on -- A3 (`isTransient`), A15 (our own dispose raises
+   * the close event) -- was measured on panel terminals. The mechanism is also
+   * the one the roadmap names for the workflow view of M5 ("2 таба"): a canvas
+   * webview BESIDE the terminal, which a terminal living in the panel has no
+   * room for.
+   */
+  test('A21: a terminal opens as an editor tab, not in the panel', async () => {
+    const { gateway, readiness } = await api();
+    assert.equal(readiness.location, 'editor', 'the default is no longer the editor area');
+    const before = terminalTabs().length;
+
+    const handle = await gateway.create({
+      terminalId: TERMINAL_ID,
+      name: 'gripterm-a21',
+      cwd: os.tmpdir(),
+      env: {},
+      shellPath: null,
+      shellArgs: [],
+    });
+    handle.show(false);
+
+    await waitFor('a terminal tab in the editor area', () =>
+      terminalTabs().some((tab) => tab.label.includes('gripterm-a21'))
+    );
+    assert.ok(terminalTabs().length > before);
+
+    const closed = closeOf(handle);
+    handle.dispose();
+    // The same answer as A15 gave for the panel: `undefined`, because nothing
+    // exited on its own. Measured here rather than assumed to carry over.
+    assert.equal((await closed).code, undefined);
+    await waitFor('the tab to go with the terminal', () =>
+      terminalTabs().every((tab) => !tab.label.includes('gripterm-a21'))
+    );
+  });
+
   test('A15: disposing our own terminal still reports a close', async () => {
     const { gateway } = await api();
 

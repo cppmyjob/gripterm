@@ -1,12 +1,23 @@
 import * as vscode from 'vscode';
 import type {
   Disposable,
+  LaunchLocation,
   TerminalExit,
   TerminalGateway,
   TerminalHandle,
   TerminalId,
   TerminalSpec,
 } from '@gripterm/core';
+
+/**
+ * Our vocabulary against the editor's. Total over `LaunchLocation`, so a third
+ * place would fail the build here rather than fall back to a default nobody
+ * chose.
+ */
+const PLACES: Readonly<Record<LaunchLocation, vscode.TerminalLocation>> = {
+  editor: vscode.TerminalLocation.Editor,
+  panel: vscode.TerminalLocation.Panel,
+};
 
 /**
  * The `TerminalGateway` port on `vscode.window`.
@@ -25,12 +36,23 @@ import type {
  *     number when the process exited. That distinction is the only thing
  *     separating a failed launch from a deliberate close (M1.12), so it travels
  *     through the port untouched rather than being flattened into a boolean.
+ *
+ * WHERE the terminal lands is decided here and not in the domain, because it is
+ * a fact about this editor and about nothing else: the spec says what to run.
+ * The default is the editor area (`gripterm.launch.location`), which removes the
+ * panel's furniture -- its `TERMINAL / PORTS / PROBLEMS / OUTPUT` bar and its own
+ * list of terminals -- and puts our display name on the tab. It is also the
+ * carrier the roadmap already names for the workflow view of M5: the canvas is a
+ * webview tab BESIDE the terminal, and a terminal that lives in the panel has no
+ * beside.
  */
 export class VsCodeTerminalGateway implements TerminalGateway, Disposable {
   private readonly _handles = new Map<string, VsCodeTerminalHandle>();
   private readonly _closeSubscription: vscode.Disposable;
+  private readonly _location: LaunchLocation;
 
-  constructor() {
+  constructor(location: LaunchLocation) {
+    this._location = location;
     this._closeSubscription = vscode.window.onDidCloseTerminal((terminal) => {
       this._onClosed(terminal);
     });
@@ -42,6 +64,7 @@ export class VsCodeTerminalGateway implements TerminalGateway, Disposable {
       cwd: spec.cwd,
       env: { ...spec.env },
       shellArgs: [...spec.shellArgs],
+      location: PLACES[this._location],
       isTransient: true,
       // `null` means "run the person's own shell" (`gripterm.launch.mode:
       // shell`), and the editor spells that by the key being ABSENT. Writing

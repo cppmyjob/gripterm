@@ -1,13 +1,17 @@
 import * as vscode from 'vscode';
-import { DEFAULT_TOAST_SIGNALS, LAUNCH_MODES, isAttentionSignal } from '@gripterm/core';
-import type { AttentionSignal, LaunchMode, Logger } from '@gripterm/core';
+import { DEFAULT_TOAST_SIGNALS, LAUNCH_MODES, isAttentionSignal, isLaunchLocation } from '@gripterm/core';
+import type { AttentionSignal, LaunchLocation, LaunchMode, Logger } from '@gripterm/core';
 
 const SECTION = 'gripterm';
 const TOAST_STATES = 'notify.toastStates';
 const LAUNCH_MODE = 'launch.mode';
+const LAUNCH_LOCATION = 'launch.location';
 
 /** `process`, on the strength of A13: the TUI comes up as a pty process with no shell under it. */
 const DEFAULT_LAUNCH_MODE: LaunchMode = 'process';
+
+/** The editor area -- see `LaunchLocation` for why that is the default rather than the panel. */
+const DEFAULT_LAUNCH_LOCATION: LaunchLocation = 'editor';
 
 /**
  * Which states get a notification, as the person configured them.
@@ -63,4 +67,28 @@ export function readLaunchMode(logger: Logger): LaunchMode {
     using: DEFAULT_LAUNCH_MODE,
   });
   return DEFAULT_LAUNCH_MODE;
+}
+
+/**
+ * Where a terminal is opened, as the person configured it.
+ *
+ * Same rule as above and for the same reason: an unreadable value falls back
+ * AND says so. A setting that silently did nothing would be indistinguishable
+ * from a setting we forgot to implement.
+ */
+export function readLaunchLocation(logger: Logger): LaunchLocation {
+  const configured = vscode.workspace.getConfiguration(SECTION).get<string>(LAUNCH_LOCATION);
+  if (configured === undefined) {
+    return DEFAULT_LAUNCH_LOCATION;
+  }
+  if (isLaunchLocation(configured)) {
+    return configured;
+  }
+
+  logger.warn('the configured launch location is not one this build knows', {
+    setting: `${SECTION}.${LAUNCH_LOCATION}`,
+    configured,
+    using: DEFAULT_LAUNCH_LOCATION,
+  });
+  return DEFAULT_LAUNCH_LOCATION;
 }
