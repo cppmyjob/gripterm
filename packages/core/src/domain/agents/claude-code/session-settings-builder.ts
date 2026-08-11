@@ -1,5 +1,4 @@
-import { posix, win32 } from 'node:path';
-import { ValidationError } from '../../errors/gripterm-error';
+import { requireAbsolutePath } from '../../entities/absolute-path';
 import { hookEventUrl } from '../../services/hook-endpoint';
 import type { ListeningAddress } from '../../entities/listening-address';
 import type { TerminalId } from '../../entities/terminal-id';
@@ -147,26 +146,16 @@ function httpRegistration(url: string): readonly HookRegistration[] {
   ];
 }
 
+/**
+ * A hook runs with the TERMINAL's environment, not the editor's, and a bare
+ * `node` on that PATH is not guaranteed (C5-2) -- see `requireAbsolutePath`,
+ * which the launch path needs for the same reason.
+ */
 function forwarderHook(script: ForwarderScript, url: string): CommandHookConfig {
   return {
     type: 'command',
-    command: requireAbsolute(script.interpreterPath, 'interpreterPath'),
-    args: [requireAbsolute(script.scriptPath, 'scriptPath'), url],
+    command: requireAbsolutePath(script.interpreterPath, 'interpreterPath'),
+    args: [requireAbsolutePath(script.scriptPath, 'scriptPath'), url],
     timeout: COMMAND_HOOK_TIMEOUT_SECONDS,
   };
-}
-
-/**
- * A hook runs with the TERMINAL's environment, not the editor's, and a bare
- * `node` on that PATH is not guaranteed (C5-2). Both spellings of absolute are
- * accepted rather than the host platform's own: this builder writes a file, and
- * which machine reads it is not its business.
- */
-function requireAbsolute(value: string, field: string): string {
-  if (!win32.isAbsolute(value) && !posix.isAbsolute(value)) {
-    throw new ValidationError(`${field} must be an absolute path`, {
-      details: { field, value },
-    });
-  }
-  return value;
 }

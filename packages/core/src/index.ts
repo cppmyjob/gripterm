@@ -46,6 +46,9 @@ export { FileSessionSettingsStore } from './infrastructure/store/file-session-se
 export { InMemoryTerminalRepository } from './infrastructure/store/in-memory-terminal-repository';
 export { InMemoryOwnerPresence } from './infrastructure/store/in-memory-owner-presence';
 
+export { requireAbsolutePath } from './domain/entities/absolute-path';
+export { LAUNCH_INTENTS, type LaunchIntent } from './domain/entities/launch-intent';
+export { type AgentCommand } from './domain/entities/agent-command';
 export { ListeningAddress } from './domain/entities/listening-address';
 export { TerminalId } from './domain/entities/terminal-id';
 export { SessionId } from './domain/entities/session-id';
@@ -115,6 +118,11 @@ export {
 } from './domain/services/hook-endpoint';
 
 export {
+  LaunchCommandBuilder,
+  type LaunchCommandParams,
+} from './domain/agents/claude-code/launch-command-builder';
+
+export {
   SessionSettingsBuilder,
   TOKEN_ENV_VAR,
   type CommandHookConfig,
@@ -126,6 +134,24 @@ export {
   type SessionSettingsDocument,
   type SessionSettingsParams,
 } from './domain/agents/claude-code/session-settings-builder';
+
+export {
+  LAUNCH_MODES,
+  ProcessLaunchStrategy,
+  ShellLaunchStrategy,
+  type LaunchMode,
+  type LaunchPlan,
+  type LaunchPlanParams,
+  type LaunchStrategy,
+} from './domain/services/launch-strategy';
+
+export {
+  SHELL_KINDS,
+  isShellKind,
+  quoteForShell,
+  shellCommandLine,
+  type ShellKind,
+} from './domain/services/shell-quoting';
 
 export {
   TerminalStateMachine,
