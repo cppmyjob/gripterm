@@ -7,21 +7,7 @@ import type {
   SessionEndReason,
   SessionStartSource,
 } from '../../events/terminal-event';
-
-/**
- * The outcome of reading one HTTP body.
- *
- * Three outcomes rather than two, because "an event we do not model" and "this
- * is not a hook payload" call for opposite reactions. Claude Code emits well
- * over thirty event types and adds more between builds; subscribing to eleven
- * of them means the other twenty are ordinary, expected traffic. A payload that
- * is not a hook payload at all is a symptom -- of a wrong port, a proxy, a
- * changed contract -- and deserves a loud log.
- */
-export type HookEventParseResult =
-  | { readonly status: 'parsed', readonly event: HookEvent }
-  | { readonly status: 'ignored', readonly hookEventName: string }
-  | { readonly status: 'malformed', readonly reason: string };
+import type { HookEventParseResult, HookEventReader } from '../../ports/hook-event-reader';
 
 const SESSION_START_SOURCES: ReadonlySet<string> = new Set<SessionStartSource>([
   'startup',
@@ -70,7 +56,28 @@ const NOTIFICATION_TYPES: ReadonlySet<string> = new Set<NotificationType>([
  *      conversation -- and even then the terminal id in the URL still routes
  *      the request, so a malformed body degrades rather than blinds.
  */
-export class HookEventParser {
+export class HookEventParser implements HookEventReader {
+  /**
+   * The port method: a body, verbatim, as the receiver took it off the socket.
+   *
+   * That a hook body is JSON is a fact about THIS CLI's hook transport, so
+   * `JSON.parse` belongs on this side of the seam and not in the registry --
+   * which is also the only reason the registry can stay ignorant of which agent
+   * it observes (§4.6, decision №34).
+   */
+  public read(raw: string): HookEventParseResult {
+    let payload: unknown;
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      // Deliberately does not quote the body back. It reaches the journal
+      // verbatim already, and a log line carrying a megabyte of tool output is
+      // how a log stops being read.
+      return { status: 'malformed', reason: 'the body is not JSON' };
+    }
+    return this.parse(payload);
+  }
+
   public parse(payload: unknown): HookEventParseResult {
     if (!isRecord(payload)) {
       return { status: 'malformed', reason: 'the payload is not a JSON object' };

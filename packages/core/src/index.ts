@@ -121,10 +121,11 @@ export {
   type UserPromptSubmitEvent,
 } from './domain/events/terminal-event';
 
+export { HookEventParser } from './domain/agents/claude-code/hook-event-parser';
 export {
-  HookEventParser,
   type HookEventParseResult,
-} from './domain/agents/claude-code/hook-event-parser';
+  type HookEventReader,
+} from './domain/ports/hook-event-reader';
 
 export {
   HOOK_EVENT_PATH_PREFIX,
@@ -172,6 +173,14 @@ export {
   shellCommandLine,
   type ShellKind,
 } from './domain/services/shell-quoting';
+
+export {
+  SessionRegistry,
+  type IngestOutcome,
+  type RegistryChange,
+  type RegistryListener,
+  type SessionRegistryOptions,
+} from './domain/services/session-registry';
 
 export {
   TerminalStateMachine,

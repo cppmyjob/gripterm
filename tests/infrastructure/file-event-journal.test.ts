@@ -51,6 +51,7 @@ function entry(raw: string, at = '2026-08-11T09:00:00.000Z'): Parameters<FileEve
 }
 
 interface JournalLine {
+  readonly v: number;
   readonly at: string;
   readonly terminalId: string;
   readonly raw: string;
@@ -87,10 +88,23 @@ describe('FileEventJournal writes a journal, not a snapshot', () => {
 
     const [line] = await linesOf();
     expect(parseLine(line)).toStrictEqual({
+      v: 1,
       at: '2026-08-11T09:30:15.250Z',
       terminalId: TERMINAL_UUID,
       raw: '{"n":1}',
     });
+  });
+
+  it('stamps every line with the schema it was written under', async () => {
+    // §8.2 promises the schema will change and says the field exists. It was
+    // missing until M1.9 read the plan against the code -- a defect worth
+    // fixing before anyone has a history, because a line already on disk cannot
+    // be told apart from a later shape by anything except its own shape.
+    const j = journal();
+    await j.append(entry('{"n":1}'));
+    await j.append(entry('not json at all'));
+
+    expect((await linesOf()).map((line) => parseLine(line).v)).toStrictEqual([1, 1]);
   });
 
   it('gives each terminal its own journal', async () => {

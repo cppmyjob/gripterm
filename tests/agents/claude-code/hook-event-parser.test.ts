@@ -349,3 +349,45 @@ describe('the parsed event', () => {
     expect(event.sessionId.value).toBe(SESSION_UUID);
   });
 });
+
+describe('the parser as the reader port', () => {
+  it('reads a body the receiver took off the socket', () => {
+    const result = parser.read(JSON.stringify(payload()));
+
+    expect(result.status).toBe('parsed');
+  });
+
+  it('calls a body that is not JSON malformed rather than throwing', () => {
+    // `read` is called from the sink, after the response has already gone out.
+    // A throw there is reported to nobody, so a bad body has to come back as a
+    // value -- the same rule that governs `parse`.
+    for (const raw of ['', 'this is not json', '{"unclosed":', '{,}']) {
+      expect(parser.read(raw)).toStrictEqual({
+        status: 'malformed',
+        reason: 'the body is not JSON',
+      });
+    }
+  });
+
+  it('does not quote the body back in the reason', () => {
+    // The journal already has it verbatim. A log line carrying a megabyte of
+    // tool output is how a log stops being read at all.
+    const huge = `${'x'.repeat(4096)} not json`;
+
+    expect(parser.read(huge).status).toBe('malformed');
+    expect(JSON.stringify(parser.read(huge))).not.toContain('xxxx');
+  });
+
+  it('reads valid JSON that is not a hook payload as malformed too', () => {
+    expect(parser.read('null').status).toBe('malformed');
+    expect(parser.read('[]').status).toBe('malformed');
+    expect(parser.read('"a string"').status).toBe('malformed');
+  });
+
+  it('passes an event it does not model straight through as ignored', () => {
+    expect(parser.read(JSON.stringify(payload({ hook_event_name: 'PreCompact' })))).toStrictEqual({
+      status: 'ignored',
+      hookEventName: 'PreCompact',
+    });
+  });
+});

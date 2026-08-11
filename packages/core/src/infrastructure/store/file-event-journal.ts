@@ -7,6 +7,18 @@ import type { EventJournal } from '../../domain/ports/event-journal';
 const TERMINALS_DIRECTORY = 'terminals';
 const JOURNAL_FILE = 'events.ndjson';
 
+/**
+ * The schema this line was written under, stamped per LINE rather than per file.
+ *
+ * A journal is append-only by construction, so one file outlives several
+ * shapes: the version cannot live in a header, because the header would be
+ * written before the change and read after it. §8.2 promises the schema will
+ * move and does not promise compatibility -- which is only survivable if a
+ * reader can tell which shape it is holding without guessing from the fields
+ * that happen to be present.
+ */
+const LINE_VERSION = 1;
+
 /** Owner-only, as in `FileSessionSettingsStore`; a no-op on Windows and therefore not asserted. */
 const DIRECTORY_MODE = 0o700;
 
@@ -59,6 +71,7 @@ export class FileEventJournal implements EventJournal {
     const directory = join(this._baseDir, TERMINALS_DIRECTORY, delivery.terminalId.value);
     const file = join(directory, JOURNAL_FILE);
     const line = JSON.stringify({
+      v: LINE_VERSION,
       at: delivery.receivedAt.toISOString(),
       terminalId: delivery.terminalId.value,
       raw: delivery.raw,

@@ -1,0 +1,610 @@
+import {
+  ContextWindowSnapshot,
+  CostSnapshot,
+  HookEventParser,
+  ObservedState,
+  SessionId,
+  SessionRegistry,
+  TerminalId,
+  TerminalStateMachine,
+  processGone,
+  terminalClosed,
+  type HookEventContext,
+  type NotificationEvent,
+  type NotificationType,
+  type PermissionRequestEvent,
+  type PersistedTerminalState,
+  type PostToolUseEvent,
+  type PreToolUseEvent,
+  type RegistryChange,
+  type SessionEndEvent,
+  type SessionStartEvent,
+  type SessionStartSource,
+  type StopEvent,
+  type TerminalEntry,
+  type UserPromptSubmitEvent,
+} from '../../packages/core/src/index';
+import {
+  NEXT_SESSION_UUID,
+  SESSION_UUID,
+  TERMINAL_UUID,
+  makeEntry,
+  makeMetadata,
+} from '../helpers/domain-fixtures';
+import { FixedClock, RecordingLogger } from '../helpers/port-fakes';
+
+/**
+ * The registry is the only object in the system that decides what an event
+ * MEANS for a record, so this file is where §4.6's three unpleasant cases are
+ * settled -- and each of them is a way for the sidebar to start lying rather
+ * than to fail:
+ *
+ *   * an event for a terminal we do not hold must not CREATE one, or the
+ *     loopback port becomes a way to invent records from outside;
+ *   * an event whose `session_id` moved must rename the record, or the terminal
+ *     freezes at whatever it was doing when the user typed `/clear` (П1);
+ *   * an event from a session the terminal has already left must not be applied,
+ *     or a dead conversation gets to say what the live one is doing.
+ *
+ * The state machine is the real one, not a double. What is being checked here
+ * is the wiring -- which entry, which session, which observed field -- and a
+ * fake machine would let the wiring agree with a table nobody runs.
+ */
+
+const TERMINAL = TerminalId.fromString(TERMINAL_UUID);
+const OTHER_TERMINAL = TerminalId.fromString('11111111-2222-4333-8444-555555555555');
+const SESSION = SessionId.fromString(SESSION_UUID);
+const NEXT_SESSION = SessionId.fromString(NEXT_SESSION_UUID);
+const THIRD_SESSION = SessionId.fromString('7c9e6679-7425-40de-944b-e07fc1f90ae7');
+
+const NOW = new Date('2026-08-11T12:00:00.000Z');
+
+const CONTEXT: Omit<HookEventContext, 'sessionId'> = {
+  promptId: null,
+  cwd: null,
+  transcriptPath: null,
+};
+
+function sessionStart(
+  sessionId: SessionId,
+  source: SessionStartSource = 'startup'
+): SessionStartEvent {
+  return { kind: 'SessionStart', sessionId, source, ...CONTEXT };
+}
+
+function sessionEnd(sessionId: SessionId): SessionEndEvent {
+  return { kind: 'SessionEnd', sessionId, reason: 'clear', ...CONTEXT };
+}
+
+function userPromptSubmit(sessionId: SessionId): UserPromptSubmitEvent {
+  return { kind: 'UserPromptSubmit', sessionId, userInput: 'go on', ...CONTEXT };
+}
+
+function preToolUse(sessionId: SessionId, toolName: string | null): PreToolUseEvent {
+  return { kind: 'PreToolUse', sessionId, toolName, toolUseId: 'tu-1', ...CONTEXT };
+}
+
+function postToolUse(sessionId: SessionId, toolName: string | null): PostToolUseEvent {
+  return { kind: 'PostToolUse', sessionId, toolName, toolUseId: 'tu-1', ...CONTEXT };
+}
+
+function permissionRequest(sessionId: SessionId, toolName: string | null): PermissionRequestEvent {
+  return { kind: 'PermissionRequest', sessionId, toolName, permissionLevel: 'ask', ...CONTEXT };
+}
+
+function stop(sessionId: SessionId, lastAssistantMessage: string | null = null): StopEvent {
+  return { kind: 'Stop', sessionId, lastAssistantMessage, ...CONTEXT };
+}
+
+function notification(sessionId: SessionId, notificationType: NotificationType): NotificationEvent {
+  return { kind: 'Notification', sessionId, notificationType, message: null, ...CONTEXT };
+}
+
+function observedIn(state: PersistedTerminalState): ObservedState {
+  return ObservedState.create({
+    state,
+    lastEventAt: new Date('2026-08-11T09:00:00.000Z'),
+    currentTool: null,
+    lastAssistantMessage: null,
+    cost: null,
+    contextWindow: null,
+    pid: null,
+  });
+}
+
+interface Stand {
+  readonly registry: SessionRegistry;
+  readonly logger: RecordingLogger;
+  readonly clock: FixedClock;
+  readonly changes: RegistryChange[];
+}
+
+function stand(entry: TerminalEntry | null = makeEntry()): Stand {
+  const logger = new RecordingLogger();
+  const clock = new FixedClock(NOW);
+  const registry = new SessionRegistry({
+    stateMachine: new TerminalStateMachine(),
+    reader: new HookEventParser(),
+    clock,
+    logger,
+  });
+  if (entry !== null) {
+    registry.register(entry);
+  }
+  const changes: RegistryChange[] = [];
+  registry.subscribe((change) => {
+    changes.push(change);
+  });
+  return { registry, logger, clock, changes };
+}
+
+/** The entry as the registry holds it now. Fails loudly rather than returning undefined. */
+function current(registry: SessionRegistry, id: TerminalId = TERMINAL): TerminalEntry {
+  const entry = registry.get(id);
+  if (entry === undefined) {
+    throw new Error(`the registry does not hold ${id.value}`);
+  }
+  return entry;
+}
+
+describe('SessionRegistry holds this window terminals', () => {
+  it('knows a registered terminal and nothing else', () => {
+    const { registry } = stand();
+    expect(registry.knows(TERMINAL)).toBe(true);
+    expect(registry.knows(OTHER_TERMINAL)).toBe(false);
+  });
+
+  it('lists what it holds', () => {
+    const { registry } = stand();
+    expect(registry.list().map((entry) => entry.terminalId.value)).toStrictEqual([TERMINAL_UUID]);
+  });
+
+  it('announces a registration, carrying the entry and no transition', () => {
+    const { registry, changes } = stand(null);
+    registry.register(makeEntry());
+
+    expect(changes).toHaveLength(1);
+    expect(changes[0]?.entry.terminalId.value).toBe(TERMINAL_UUID);
+    expect(changes[0]?.transition).toBeNull();
+  });
+
+  it('says so when a registration replaces an entry it already held', () => {
+    // Silently dropping the previous instance would discard its observed state
+    // -- the state, the last message, the tool -- with nothing to read after.
+    const { registry, logger } = stand();
+    registry.register(makeEntry({ metadata: makeMetadata() }));
+
+    expect(logger.infos.map((line) => line.message)).toContain(
+      'a registration replaced an entry this window already held'
+    );
+  });
+
+  it('stops calling a listener that unsubscribed', () => {
+    // The listener RECORDS rather than throws. A throwing one proves nothing
+    // here: `_notify` catches it by design, so a `dispose` that did nothing at
+    // all would leave this test green -- which a mutant duly showed it did.
+    const { registry } = stand();
+    const heard: RegistryChange[] = [];
+    const subscription = registry.subscribe((change) => {
+      heard.push(change);
+    });
+
+    registry.ingest(TERMINAL, stop(SESSION));
+    subscription.dispose();
+    registry.ingest(TERMINAL, userPromptSubmit(SESSION));
+
+    expect(heard).toHaveLength(1);
+  });
+
+  it('keeps going, and says so, when a listener throws', () => {
+    // A listener is the tree view or a notifier. One of them failing to draw
+    // must not stop the other from drawing, and must not read afterwards as if
+    // the event had never arrived.
+    const { registry, logger } = stand();
+    const behind: RegistryChange[] = [];
+    registry.subscribe(() => {
+      throw new Error('the tree blew up');
+    });
+    registry.subscribe((change) => {
+      behind.push(change);
+    });
+
+    expect(() => registry.ingest(TERMINAL, stop(SESSION))).not.toThrow();
+    // The listener BEHIND the failing one still heard it.
+    expect(behind).toHaveLength(1);
+    expect(logger.errors.map((line) => line.message)).toContain(
+      'a registry listener threw while being told of a change'
+    );
+  });
+});
+
+describe('SessionRegistry §4.6 case 1: an event for a terminal we do not hold', () => {
+  it('is dropped rather than creating a record', () => {
+    const { registry, logger } = stand(null);
+
+    const outcome = registry.ingest(TERMINAL, stop(SESSION));
+
+    expect(outcome.kind).toBe('unknown-terminal');
+    expect(registry.list()).toHaveLength(0);
+    expect(logger.warnings.map((line) => line.message)).toContain(
+      'an event named a terminal this window does not hold'
+    );
+  });
+
+  it('tells no listener', () => {
+    const { registry, changes } = stand(null);
+    registry.ingest(TERMINAL, stop(SESSION));
+    expect(changes).toHaveLength(0);
+  });
+
+  it('drops an event addressed to another window terminal', () => {
+    // `knows` already answers this on the request path, so the receiver never
+    // gets here. It is checked anyway: a terminal can be dropped between the
+    // two calls, and the answer must not depend on that race.
+    const { registry } = stand();
+    expect(registry.ingest(OTHER_TERMINAL, stop(SESSION)).kind).toBe('unknown-terminal');
+  });
+});
+
+describe('SessionRegistry §4.6 case 2: the session id moved', () => {
+  it('follows a /clear onto the new session and keeps the metadata', () => {
+    const { registry } = stand(makeEntry({ observed: observedIn('ended') }));
+
+    const outcome = registry.ingest(TERMINAL, sessionStart(NEXT_SESSION, 'clear'));
+
+    expect(outcome.kind).toBe('accepted');
+    const entry = current(registry);
+    expect(entry.sessionId.value).toBe(NEXT_SESSION_UUID);
+    expect(entry.sessionIdHistory.map((past) => past.value)).toStrictEqual([SESSION_UUID]);
+    // The whole point of separating the two identifiers: a new conversation
+    // does not cost the human what they wrote about this terminal.
+    expect(entry.metadata.displayName).toBe('auth-refactor');
+    expect(entry.metadata.notes).toHaveLength(1);
+  });
+
+  it('comes back out of ended, so /clear does not strand the terminal', () => {
+    const { registry } = stand(makeEntry({ observed: observedIn('ended') }));
+    registry.ingest(TERMINAL, sessionStart(NEXT_SESSION, 'clear'));
+    expect(current(registry).observed.state).toBe('idle');
+  });
+
+  it('routes the whole /clear sequence, in the order the CLI emits it', () => {
+    // SessionEnd carries the OLD id and arrives first; SessionStart carries the
+    // new one. Getting this pair wrong is not a visible failure -- it is a
+    // terminal that stays `ended` while the person is talking to it.
+    const { registry } = stand();
+
+    registry.ingest(TERMINAL, sessionEnd(SESSION));
+    expect(current(registry).observed.state).toBe('ended');
+
+    registry.ingest(TERMINAL, sessionStart(NEXT_SESSION, 'clear'));
+    registry.ingest(TERMINAL, userPromptSubmit(NEXT_SESSION));
+
+    const entry = current(registry);
+    expect(entry.observed.state).toBe('working');
+    expect(entry.sessionId.value).toBe(NEXT_SESSION_UUID);
+  });
+
+  it('follows a SessionStart whatever source it names', () => {
+    // Wider than §4.6's `source: "clear"`, deliberately. `/resume` onto another
+    // conversation, `--fork-session` and `/compact` all begin a session with a
+    // new id under a different source, and `source` is a field we narrow to
+    // `other` whenever we do not recognise it -- so a rule keyed on its value
+    // would freeze the terminal on a label we failed to guess.
+    for (const source of ['resume', 'compact', 'fork', 'other'] as const) {
+      const { registry } = stand();
+      registry.ingest(TERMINAL, sessionStart(NEXT_SESSION, source));
+      expect(current(registry).sessionId.value).toBe(NEXT_SESSION_UUID);
+    }
+  });
+
+  it('does not rename on any event other than SessionStart', () => {
+    const { registry } = stand();
+    registry.ingest(TERMINAL, userPromptSubmit(NEXT_SESSION));
+    expect(current(registry).sessionId.value).toBe(SESSION_UUID);
+  });
+
+  it('leaves the id alone when a SessionStart names a session the terminal already used', () => {
+    // The aggregate refuses to make a past id current again -- that would leave
+    // one id both current and past and make the lookup ambiguous. So this is
+    // reported rather than forced, and the state still moves, because the
+    // terminal is demonstrably alive.
+    const { registry, logger } = stand();
+    registry.ingest(TERMINAL, sessionStart(NEXT_SESSION, 'clear'));
+
+    const outcome = registry.ingest(TERMINAL, sessionStart(SESSION, 'resume'));
+
+    expect(outcome.kind).toBe('accepted');
+    expect(current(registry).sessionId.value).toBe(NEXT_SESSION_UUID);
+    expect(logger.warnings.map((line) => line.message)).toContain(
+      'a terminal announced a session it had used before'
+    );
+  });
+});
+
+describe('SessionRegistry §4.6 case 3: an event from a session the terminal has left', () => {
+  it('is not applied, and does not create a second record', () => {
+    const { registry, logger } = stand();
+    registry.ingest(TERMINAL, sessionStart(NEXT_SESSION, 'clear'));
+    const before = current(registry);
+
+    const outcome = registry.ingest(TERMINAL, stop(SESSION));
+
+    expect(outcome.kind).toBe('stale-session');
+    expect(registry.list()).toHaveLength(1);
+    expect(current(registry)).toBe(before);
+    expect(logger.warnings.map((line) => line.message)).toContain(
+      'an event arrived from a session this terminal has left'
+    );
+  });
+
+  it('cannot make a dead conversation say what the live one is doing', () => {
+    // The reason the previous case is not simply "apply it to the same record".
+    // A `SessionEnd` still in flight from the session `/clear` replaced would
+    // otherwise kill the session that replaced it.
+    const { registry } = stand();
+    registry.ingest(TERMINAL, sessionStart(NEXT_SESSION, 'clear'));
+    registry.ingest(TERMINAL, userPromptSubmit(NEXT_SESSION));
+
+    registry.ingest(TERMINAL, sessionEnd(SESSION));
+
+    expect(current(registry).observed.state).toBe('working');
+  });
+
+  it('refuses a session this terminal never had', () => {
+    const { registry, logger } = stand();
+
+    const outcome = registry.ingest(TERMINAL, stop(THIRD_SESSION));
+
+    expect(outcome.kind).toBe('foreign-session');
+    expect(current(registry).observed.state).toBe('idle');
+    expect(logger.warnings.map((line) => line.message)).toContain(
+      'an event named a session this terminal never had'
+    );
+  });
+
+  it('checks the session id against the entry, never against the terminal id', () => {
+    // The two are different identifiers by construction, so comparing the body
+    // with the URL would be unequal ALWAYS rather than on drift -- every event
+    // refused, every terminal frozen. Stated as a test because it is the exact
+    // mistake §4.6 was written to prevent.
+    const asTerminal = SessionId.fromString(TERMINAL_UUID);
+    const { registry } = stand();
+
+    expect(registry.ingest(TERMINAL, stop(SESSION)).kind).toBe('accepted');
+    expect(registry.ingest(TERMINAL, stop(asTerminal)).kind).toBe('foreign-session');
+  });
+
+  it('tells no listener about either refusal', () => {
+    const { registry, changes } = stand();
+    registry.ingest(TERMINAL, sessionStart(NEXT_SESSION, 'clear'));
+    changes.length = 0;
+
+    registry.ingest(TERMINAL, stop(SESSION));
+    registry.ingest(TERMINAL, stop(THIRD_SESSION));
+
+    expect(changes).toHaveLength(0);
+  });
+});
+
+describe('SessionRegistry applies what the state machine says', () => {
+  it('moves the state and stamps the clock', () => {
+    const { registry, clock } = stand();
+    clock.advance(5000);
+
+    const outcome = registry.ingest(TERMINAL, preToolUse(SESSION, 'Read'));
+
+    expect(outcome.kind).toBe('accepted');
+    const entry = current(registry);
+    expect(entry.observed.state).toBe('working');
+    expect(entry.observed.lastEventAt).toStrictEqual(new Date(NOW.getTime() + 5000));
+  });
+
+  it('hands the transition to its listeners, signal and all', () => {
+    // The signal is the reason the listener gets the transition rather than a
+    // bare "something changed": `launch_failed` and `ended` are the same target
+    // state, and only the from-state tells them apart (§4.3). A listener that
+    // diffed entries could not recover it.
+    const { registry, changes } = stand(makeEntry({ observed: observedIn('launching') }));
+
+    registry.ingest(TERMINAL, permissionRequest(SESSION, 'Bash'));
+
+    expect(changes).toHaveLength(1);
+    expect(changes[0]?.transition).toStrictEqual({
+      kind: 'moved',
+      from: 'launching',
+      to: 'waiting_permission',
+      signal: 'waiting_permission',
+    });
+  });
+
+  it('still records an event that leaves the state where it was', () => {
+    const { registry, clock, changes } = stand();
+    clock.advance(1000);
+
+    const outcome = registry.ingest(TERMINAL, notification(SESSION, 'idle_prompt'));
+
+    expect(outcome.kind).toBe('accepted');
+    expect(current(registry).observed.lastEventAt).toStrictEqual(new Date(NOW.getTime() + 1000));
+    expect(changes).toHaveLength(1);
+  });
+
+  it('leaves the entry untouched when the machine ignores the event', () => {
+    // `ignored` is not `stayed`: the machine is saying it DROPPED something.
+    // Moving `lastEventAt` for an event we refused would make "nothing has
+    // happened here for ten minutes" unreadable.
+    const { registry, logger, changes } = stand(makeEntry({ observed: observedIn('ended') }));
+    const before = current(registry);
+
+    const outcome = registry.ingest(TERMINAL, stop(SESSION));
+
+    expect(outcome.kind).toBe('accepted');
+    expect(current(registry)).toBe(before);
+    expect(changes).toHaveLength(0);
+    expect(logger.infos.map((line) => line.message)).toContain('an event was not applied');
+  });
+
+  it('takes a synthetic event, which carries no session id at all', () => {
+    const { registry } = stand();
+    expect(registry.ingest(TERMINAL, terminalClosed()).kind).toBe('accepted');
+    expect(current(registry).observed.state).toBe('ended');
+  });
+
+  it('does not put a synthetic event through the session check', () => {
+    const { registry } = stand();
+    registry.ingest(TERMINAL, sessionStart(NEXT_SESSION, 'clear'));
+    expect(registry.ingest(TERMINAL, processGone(4242)).kind).toBe('accepted');
+    expect(current(registry).observed.state).toBe('orphaned');
+  });
+});
+
+describe('SessionRegistry keeps the observed detail a person reads', () => {
+  it('names the tool a turn is running', () => {
+    const { registry } = stand();
+    registry.ingest(TERMINAL, preToolUse(SESSION, 'Bash'));
+    expect(current(registry).observed.currentTool).toBe('Bash');
+  });
+
+  it('names the tool that is waiting for permission', () => {
+    const { registry } = stand();
+    registry.ingest(TERMINAL, permissionRequest(SESSION, 'Bash'));
+    expect(current(registry).observed.currentTool).toBe('Bash');
+  });
+
+  it('forgets the tool once it has finished', () => {
+    const { registry } = stand();
+    registry.ingest(TERMINAL, preToolUse(SESSION, 'Bash'));
+    registry.ingest(TERMINAL, postToolUse(SESSION, 'Bash'));
+    expect(current(registry).observed.currentTool).toBeNull();
+  });
+
+  it('forgets the tool when a turn ends', () => {
+    const { registry } = stand();
+    registry.ingest(TERMINAL, preToolUse(SESSION, 'Bash'));
+    registry.ingest(TERMINAL, stop(SESSION));
+    expect(current(registry).observed.currentTool).toBeNull();
+  });
+
+  it('says a tool is running without a name rather than naming the previous one', () => {
+    // `PreToolUse` without `tool_name` still means a tool started. Keeping the
+    // last one would put a finished tool on screen as the running one.
+    const { registry } = stand();
+    registry.ingest(TERMINAL, preToolUse(SESSION, 'Bash'));
+    registry.ingest(TERMINAL, preToolUse(SESSION, null));
+    expect(current(registry).observed.currentTool).toBeNull();
+  });
+
+  it('keeps the last assistant message from Stop', () => {
+    const { registry } = stand();
+    registry.ingest(TERMINAL, stop(SESSION, 'done, three files changed'));
+    expect(current(registry).observed.lastAssistantMessage).toBe('done, three files changed');
+  });
+
+  it('does not erase the last message when a Stop arrives without one', () => {
+    const { registry } = stand();
+    registry.ingest(TERMINAL, stop(SESSION, 'done, three files changed'));
+    registry.ingest(TERMINAL, stop(SESSION, null));
+    expect(current(registry).observed.lastAssistantMessage).toBe('done, three files changed');
+  });
+
+  it('drops the previous conversation last message when a session begins', () => {
+    const { registry } = stand();
+    registry.ingest(TERMINAL, stop(SESSION, 'done, three files changed'));
+    registry.ingest(TERMINAL, sessionStart(NEXT_SESSION, 'clear'));
+    expect(current(registry).observed.lastAssistantMessage).toBeNull();
+  });
+
+  it('leaves the fields it has no source for alone', () => {
+    // `cost` and `contextWindow` have exactly one producer, the statusline
+    // forwarder (M1.8a), and `pid` comes from the gateway. A registry that reset
+    // them on every event would make those channels look broken.
+    //
+    // The values are deliberately NOT the null the fixture starts with: against
+    // a null baseline this test passes even for a registry that clears all
+    // three, which is a test that cannot fail.
+    const filled = ObservedState.create({
+      state: 'working',
+      lastEventAt: NOW,
+      currentTool: null,
+      lastAssistantMessage: null,
+      cost: CostSnapshot.create(0.42, 90_000),
+      contextWindow: ContextWindowSnapshot.create(37),
+      pid: 4242,
+    });
+    const { registry } = stand(makeEntry({ observed: filled }));
+
+    registry.ingest(TERMINAL, stop(SESSION));
+
+    const after = current(registry).observed;
+    expect(after.cost?.totalUsd).toBe(0.42);
+    expect(after.contextWindow?.usedPercentage).toBe(37);
+    expect(after.pid).toBe(4242);
+  });
+});
+
+describe('SessionRegistry is the sink, and the only thing that reads a body', () => {
+  function bodyFor(sessionId: SessionId, extra: Record<string, unknown> = {}): string {
+    return JSON.stringify({ hook_event_name: 'Stop', session_id: sessionId.value, ...extra });
+  }
+
+  function deliver(registry: SessionRegistry, raw: string, terminalId = TERMINAL): void {
+    registry.receive({ terminalId, receivedAt: NOW, raw });
+  }
+
+  it('turns a body into a state change', () => {
+    const { registry } = stand(makeEntry({ observed: observedIn('working') }));
+
+    deliver(registry, bodyFor(SESSION, { last_assistant_message: 'all done' }));
+
+    const entry = current(registry);
+    expect(entry.observed.state).toBe('idle');
+    expect(entry.observed.lastAssistantMessage).toBe('all done');
+  });
+
+  it('warns about a body that is not JSON, and applies nothing', () => {
+    const { registry, logger, changes } = stand();
+
+    deliver(registry, 'this is not json');
+
+    expect(changes).toHaveLength(0);
+    expect(logger.warnings.map((line) => line.message)).toContain('a hook payload could not be read');
+  });
+
+  it('warns about a JSON body that is not a hook payload', () => {
+    const { registry, logger } = stand();
+    deliver(registry, '{"hello":"world"}');
+    expect(logger.warnings.map((line) => line.message)).toContain('a hook payload could not be read');
+  });
+
+  it('passes over an event type we do not model without calling it a failure', () => {
+    // The CLI emits well over thirty; we model eleven. A warning per unmodelled
+    // event would make the log useless exactly when it is needed.
+    const { registry, logger, changes } = stand();
+
+    deliver(registry, JSON.stringify({ hook_event_name: 'PreCompact', session_id: SESSION_UUID }));
+
+    expect(changes).toHaveLength(0);
+    expect(logger.warnings).toHaveLength(0);
+    expect(logger.infos.map((line) => line.message)).toContain('a hook event we do not model');
+  });
+
+  it('never throws out of receive, whatever arrives', () => {
+    // The receiver calls this after the response has gone. A throw here is
+    // reported to nobody but the log, so it must not be how a body is refused.
+    const { registry } = stand();
+    for (const raw of ['', 'null', '[]', '{"hook_event_name":"Stop"}', '{"session_id":"nope"}']) {
+      expect(() => {
+        deliver(registry, raw);
+      }).not.toThrow();
+    }
+  });
+
+  it('drops a delivery for a terminal it does not hold', () => {
+    const { registry, logger } = stand();
+    deliver(registry, bodyFor(SESSION), OTHER_TERMINAL);
+    expect(registry.list()).toHaveLength(1);
+    expect(logger.warnings.map((line) => line.message)).toContain(
+      'an event named a terminal this window does not hold'
+    );
+  });
+});
