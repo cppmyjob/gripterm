@@ -62,6 +62,7 @@ export {
 } from './infrastructure/http/hook-event-server';
 
 export { SystemClock } from './infrastructure/system-clock';
+export { findExecutable, type ExecutableSearch } from './infrastructure/executable-lookup';
 export { SystemIdGenerator } from './infrastructure/system-id-generator';
 export { FileEventJournal } from './infrastructure/store/file-event-journal';
 export { FileSessionSettingsStore } from './infrastructure/store/file-session-settings-store';
