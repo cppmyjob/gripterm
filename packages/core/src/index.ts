@@ -178,6 +178,18 @@ export {
 export { describeDetails } from './domain/services/log-details';
 
 export {
+  summariseTerminals,
+  type StatusSummary,
+} from './domain/services/terminal-summary';
+
+export {
+  CONTEXT_LIVE,
+  CONTEXT_OVER,
+  presentTerminal,
+  type TerminalPresentation,
+} from './domain/services/terminal-presentation';
+
+export {
   SessionRegistry,
   type IngestOutcome,
   type RegistryChange,

@@ -8,6 +8,8 @@ import {
 } from '@gripterm/core';
 import { VsCodeLogger } from './adapters/vscode-logger';
 import { VsCodeTerminalGateway } from './adapters/vscode-terminal-gateway';
+import { StatusBarPresenter } from './ui/status-bar-presenter';
+import { TERMINALS_VIEW_ID, TerminalTreeDataProvider } from './ui/terminal-tree';
 
 /**
  * What the extension hands back from `activate`.
@@ -44,6 +46,13 @@ export function activate(context: vscode.ExtensionContext): GriptermApi {
 
   const gateway = new VsCodeTerminalGateway();
   context.subscriptions.push({ dispose: () => { gateway.dispose(); } });
+
+  const tree = new TerminalTreeDataProvider(registry);
+  context.subscriptions.push(tree);
+  context.subscriptions.push(
+    vscode.window.createTreeView(TERMINALS_VIEW_ID, { treeDataProvider: tree })
+  );
+  context.subscriptions.push(new StatusBarPresenter(registry));
 
   logger.info('Gripterm activated', {
     trustedWorkspace: vscode.workspace.isTrusted,

@@ -9,7 +9,9 @@
   "engines": {
     "vscode": "^1.94.0"
   },
-  "categories": ["Other"],
+  "categories": [
+    "Other"
+  ],
   "main": "./dist/extension.js",
   "capabilities": {
     "untrustedWorkspaces": {
@@ -17,14 +19,25 @@
       "description": "Terminals are observed and restored, but no workflow script from the folder is executed until the folder is trusted."
     }
   },
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "commands": [
       {
         "command": "gripterm.showLogs",
         "title": "Gripterm: Show Logs"
       }
-    ]
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "gripterm.terminals",
+          "name": "Claude Code Terminals",
+          "contextualTitle": "Gripterm"
+        }
+      ]
+    }
   },
   "scripts": {
     "build": "tsc --build",
