@@ -18,7 +18,7 @@
     "test:coverage": "tsc -p tsconfig.eslint.json && jest --coverage",
     "build:integration": "tsc -p tsconfig.integration.json",
     "test:integration": "pnpm run build:extension && pnpm run build:integration && vscode-test",
-    "package": "pnpm run build && pnpm run build:extension && vsce package --no-dependencies"
+    "package": "pnpm run build && pnpm run build:extension && pnpm --filter gripterm run package"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
