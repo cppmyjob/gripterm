@@ -61,6 +61,19 @@ describe('retiring', () => {
     await expect(presence.listOwners()).resolves.toStrictEqual([]);
   });
 
+  it('refuses a heartbeat afterwards, as the file presence does', async () => {
+    // The port's rule, kept identical in both implementations: a window that has
+    // said it is leaving and goes on writing is exactly what liveness must be
+    // able to trust. In the file presence a beat after retiring would recreate
+    // the file; here there is nothing to recreate, and the call is still a
+    // lifecycle mistake worth hearing about.
+    const presence = new InMemoryOwnerPresence();
+    await presence.announce(US);
+    await presence.retire();
+
+    await expect(presence.heartbeat()).rejects.toThrow(ConflictError);
+  });
+
   it('is undone by announcing again', async () => {
     const presence = new InMemoryOwnerPresence();
     await presence.announce(US);

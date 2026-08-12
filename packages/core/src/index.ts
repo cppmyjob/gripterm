@@ -90,6 +90,17 @@ export {
   type FileTerminalRepositoryOptions,
 } from './infrastructure/store/file-terminal-repository';
 export {
+  FileOwnerPresence,
+  HEARTBEAT_INTERVAL_MS,
+  decodePresence,
+  encodePresence,
+  type FileOwnerPresenceOptions,
+  type PresenceDecode,
+  type PresenceDocument,
+  type PresenceRecord,
+  type SignalProbe,
+} from './infrastructure/store/file-owner-presence';
+export {
   StorageMigrator,
   type StorageOrigin,
   type StoragePreparation,

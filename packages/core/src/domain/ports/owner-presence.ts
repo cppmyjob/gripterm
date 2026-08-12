@@ -30,6 +30,14 @@ export interface OwnerIdentity {
  */
 export type OwnerLiveness = 'live' | 'dead' | 'unknown';
 
+/**
+ * The lifecycle is part of the contract, and both implementations enforce it:
+ * `announce` comes first, `heartbeat` and `retire` refuse before it, and a
+ * `heartbeat` AFTER `retire` is refused as well. The last of those is the one
+ * worth stating -- a window that has said it is leaving and goes on writing is
+ * exactly what liveness has to be able to trust -- so the timer is stopped
+ * before the window retires, not after.
+ */
 export interface OwnerPresence {
   announce: (identity: OwnerIdentity) => Promise<void>;
   heartbeat: () => Promise<void>;

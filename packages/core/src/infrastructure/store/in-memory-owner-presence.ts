@@ -31,7 +31,7 @@ export class InMemoryOwnerPresence implements OwnerPresence {
   }
 
   public async heartbeat(): Promise<void> {
-    this._requireAnnounced();
+    this._requireLiving();
   }
 
   public async livenessOf(ownerId: OwnerId): Promise<OwnerLiveness> {
@@ -62,6 +62,15 @@ export class InMemoryOwnerPresence implements OwnerPresence {
     const identity = this._identity;
     if (identity === null) {
       throw new ConflictError('this window has not announced itself yet');
+    }
+    return identity;
+  }
+
+  /** The port's rule, kept here too so the two implementations refuse the same calls. */
+  private _requireLiving(): OwnerIdentity {
+    const identity = this._requireAnnounced();
+    if (this._retired) {
+      throw new ConflictError('this window has retired and must not write itself back');
     }
     return identity;
   }
