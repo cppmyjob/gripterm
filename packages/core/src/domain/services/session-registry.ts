@@ -212,6 +212,21 @@ export class SessionRegistry implements HookEventSink {
   }
 
   /**
+   * Only the records this window holds.
+   *
+   * The list a caller wants when it is about to OFFER something -- a picker, a
+   * count in the status bar -- rather than to draw everything. Its own method
+   * because the alternative, filtering `list()` by asking `knows` about each
+   * row, is the same rule written out at every call site, and one of them would
+   * eventually be written differently: the close picker was, and it offered
+   * another window's terminals in a dialog that then blocked on a choice this
+   * window could not act on.
+   */
+  public own(): readonly TerminalEntry[] {
+    return [...this._entries.values()];
+  }
+
+  /**
    * The state of a terminal this window holds, or `null` when it holds none.
    *
    * It exists so that the one caller who needs the state and not the record --

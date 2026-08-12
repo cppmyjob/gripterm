@@ -39,16 +39,19 @@ export function registerCloseTerminal(
 /**
  * Which terminal, when the caller did not say.
  *
- * Only the ones this window can still act on are offered. `contextValue` is the
- * same answer the tree menus are keyed on, so the palette and the right-click
- * menu cannot come to different conclusions about what is closable.
+ * Only the ones this window can still act on are offered: `own()` removes the
+ * records the base projected in from other windows -- closing one of those is a
+ * write this window is forbidden to make -- and `contextValue` then removes the
+ * ones that are over. The second half is the same answer the tree menus are
+ * keyed on, so the palette and the right-click menu cannot come to different
+ * conclusions about what is closable.
  */
 async function chooseTerminal(
   registry: SessionRegistry,
   logger: Logger
 ): Promise<TerminalId | null> {
   const picks: TerminalPick[] = registry
-    .list()
+    .own()
     .map((entry) => ({ entry, shown: presentTerminal(entry) }))
     .filter(({ shown }) => shown.contextValue === CONTEXT_LIVE)
     .map(({ entry, shown }) => ({

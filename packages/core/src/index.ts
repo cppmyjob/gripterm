@@ -50,10 +50,25 @@ export {
   type TerminalSpec,
 } from './domain/ports/terminal-gateway';
 export {
+  FRESH_HEARTBEAT_MS,
+  HEARTBEAT_INTERVAL_MS,
   type OwnerIdentity,
   type OwnerLiveness,
   type OwnerPresence,
 } from './domain/ports/owner-presence';
+export {
+  OwnerHeartbeat,
+  type OwnerHeartbeatOptions,
+} from './domain/services/owner-heartbeat';
+export {
+  BaseProjection,
+  type BaseProjectionOptions,
+} from './domain/services/base-projection';
+export {
+  DEFAULT_STORAGE_DIRECTORY,
+  chooseStorageDir,
+  type StorageDirChoice,
+} from './domain/services/storage-directory';
 export {
   type AdoptOptions,
   type RepositoryListener,
@@ -132,7 +147,6 @@ export {
 } from './infrastructure/store/file-terminal-repository';
 export {
   FileOwnerPresence,
-  HEARTBEAT_INTERVAL_MS,
   decodePresence,
   encodePresence,
   type FileOwnerPresenceOptions,

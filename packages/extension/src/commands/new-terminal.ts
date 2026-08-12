@@ -40,6 +40,11 @@ export function registerNewTerminal(
       await lifecycle.launch({
         displayName: defaultTerminalName(
           cwd,
+          // Every name ON SCREEN, other windows' included, and deliberately:
+          // the name exists to tell rows apart in the list a person reads, and
+          // that list is the shared one. The price is that opening a terminal
+          // here can pick a different number because of a window somewhere
+          // else -- a suffix, against two rows called the same thing.
           registry.list().map((entry) => entry.metadata.displayName)
         ),
         // Bare in M1: the flags a person can choose -- permission mode, model,

@@ -1,8 +1,10 @@
 import * as vscode from 'vscode';
+import { homedir } from 'node:os';
 import {
   DEFAULT_JOURNAL_POLICY,
   DEFAULT_TOAST_SIGNALS,
   LAUNCH_MODES,
+  chooseStorageDir,
   isAttentionSignal,
   isLaunchLocation,
 } from '@gripterm/core';
@@ -15,6 +17,7 @@ import type {
 } from '@gripterm/core';
 
 const SECTION = 'gripterm';
+const STORAGE_PATH = 'storage.path';
 const TOAST_STATES = 'notify.toastStates';
 const LAUNCH_MODE = 'launch.mode';
 const LAUNCH_LOCATION = 'launch.location';
@@ -112,6 +115,34 @@ export function readLaunchLocation(logger: Logger): LaunchLocation {
     using: DEFAULT_LAUNCH_LOCATION,
   });
   return DEFAULT_LAUNCH_LOCATION;
+}
+
+/**
+ * Where the store lives, as the person configured it.
+ *
+ * Read once, at activation, and a change needs a window reload -- which is why
+ * `onDidChangeConfiguration` is not taken for this key either, although §4.8
+ * once expected it to be. Moving the base while a window is running would mean
+ * re-announcing this window's presence, rewriting every terminal's
+ * `settings.json` -- files the running CLI has already read -- and leaving the
+ * hooks of live terminals pointing into the directory we just left. Re-creating
+ * the watcher alone, which is all the milestone asked for, would leave this
+ * window WATCHING a directory nothing writes to: a list that never changes and
+ * never says why. A reload re-creates all of it, in order, and the manifest says
+ * so on the setting.
+ */
+export function readStorageDir(logger: Logger): string {
+  const configured = vscode.workspace.getConfiguration(SECTION).get<unknown>(STORAGE_PATH);
+  const choice = chooseStorageDir({ configured, home: homedir() });
+  if (choice.refused !== null) {
+    logger.warn('the configured storage path was not used', {
+      setting: `${SECTION}.${STORAGE_PATH}`,
+      configured,
+      reason: choice.refused,
+      using: choice.path,
+    });
+  }
+  return choice.path;
 }
 
 /**

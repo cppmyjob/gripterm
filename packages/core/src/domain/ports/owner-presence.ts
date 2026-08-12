@@ -31,6 +31,26 @@ export interface OwnerIdentity {
 export type OwnerLiveness = 'live' | 'dead' | 'unknown';
 
 /**
+ * How often a window rewrites its presence file. [П]
+ *
+ * Part of the contract rather than of one implementation: it is half of a pair
+ * with the freshness window below, and the pair is what other windows reason
+ * with. Changing one without the other changes what `unknown` means for
+ * everybody on the machine.
+ */
+export const HEARTBEAT_INTERVAL_MS = 10_000;
+
+/**
+ * How long a heartbeat stays fresh. Six beats. [П]
+ *
+ * Wide on purpose: a window that missed one beat because the machine was busy
+ * is not a window that is gone, and the cost of the two mistakes is not
+ * symmetric -- an early `dead` authorises a second `claude --resume` on one
+ * conversation, while a late one costs a person a confirmation click.
+ */
+export const FRESH_HEARTBEAT_MS = 60_000;
+
+/**
  * The lifecycle is part of the contract, and both implementations enforce it:
  * `announce` comes first, `heartbeat` and `retire` refuse before it, and a
  * `heartbeat` AFTER `retire` is refused as well. The last of those is the one

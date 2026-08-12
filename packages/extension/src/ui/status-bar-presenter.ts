@@ -34,7 +34,12 @@ export class StatusBarPresenter implements Disposable {
   }
 
   public refresh(): void {
-    const summary = summariseTerminals(this._registry.list());
+    // This window's own, not the whole base. The line means "what is going on
+    // HERE": counting other windows' terminals would light this window's status
+    // bar over a permission prompt in another one, and would stop a window
+    // running nothing from hiding itself the moment anybody else started a
+    // terminal.
+    const summary = summariseTerminals(this._registry.own());
     if (summary === null) {
       this._item.hide();
       return;

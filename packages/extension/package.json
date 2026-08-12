@@ -89,6 +89,12 @@
     "configuration": {
       "title": "Gripterm",
       "properties": {
+        "gripterm.storage.path": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Where Gripterm keeps its store: the records of every terminal, their event journals and the presence file of each window. Empty means `~/.gripterm`. A relative path is refused and the default used instead. Takes effect when the window reloads — every window on the machine must point at the same store to see each other."
+        },
         "gripterm.notify.toastStates": {
           "type": "array",
           "items": {

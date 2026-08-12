@@ -733,6 +733,20 @@ describe('SessionRegistry projects what other windows own', () => {
     expect(registry.knows(OTHER_TERMINAL)).toBe(true);
   });
 
+  /*
+   * The list a caller wants when it is about to OFFER something. Written as its
+   * own method after the close picker was found offering another window's
+   * terminals -- in a dialog that then waited for a choice this window could
+   * not have acted on.
+   */
+  it('keeps a list of its own records for the callers that may act', () => {
+    const { registry } = stand();
+    registry.replaceForeign([foreignEntry()]);
+
+    expect(registry.own().map((entry) => entry.terminalId.value)).toStrictEqual([TERMINAL_UUID]);
+    expect(registry.list()).toHaveLength(2);
+  });
+
   it('does not let a foreign record be acted on, looked up or amended', () => {
     // `get` is what every command resolves a row through, so answering here
     // would put "only the owning window may write" back into each of them.

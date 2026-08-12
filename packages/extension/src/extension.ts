@@ -4,14 +4,19 @@ import { join } from 'node:path';
 import { stat } from 'node:fs/promises';
 import {
   AttentionNotifier,
+  BaseProjection,
   ClaudeCodeCommandFactory,
   FileEventJournal,
+  FileOwnerPresence,
   FileSessionSettingsStore,
+  FileTerminalRepository,
   HOOK_EVENT_PATH_PREFIX,
   HookEventParser,
   HookEventServer,
   ObservabilityWatch,
+  OwnerHeartbeat,
   ProcessLaunchStrategy,
+  RepositoryWatcher,
   RequestAuthenticator,
   SessionRegistry,
   ShellLaunchStrategy,
@@ -49,7 +54,13 @@ import type {
 import { registerCloseTerminal } from './commands/close-terminal';
 import { registerFocusTerminal } from './commands/focus-terminal';
 import { registerNewTerminal } from './commands/new-terminal';
-import { readJournalPolicy, readLaunchLocation, readLaunchMode, readToastSignals } from './settings';
+import {
+  readJournalPolicy,
+  readLaunchLocation,
+  readLaunchMode,
+  readStorageDir,
+  readToastSignals,
+} from './settings';
 import { UnavailableAgentCommandFactory } from './adapters/unavailable-agent-command-factory';
 import { VsCodeLogger } from './adapters/vscode-logger';
 import { VsCodeTerminalGateway } from './adapters/vscode-terminal-gateway';
@@ -62,13 +73,13 @@ import { TERMINALS_VIEW_ID, TerminalTreeDataProvider } from './ui/terminal-tree'
 /** The agent this build knows how to start, by the name it goes by on a PATH. */
 const CLAUDE_CLI = 'claude';
 
+/** The setting whose change needs a reload, because the whole store moves with it. */
+const STORAGE_PATH_SETTING = 'gripterm.storage.path';
+
 /** The interpreter the `SessionStart` forwarder is run with (C5-2: never a bare name). */
 const FORWARDER_INTERPRETER = 'node';
 
 const FORWARDER_SCRIPT = join('assets', 'gripterm-forwarder.js');
-
-/** Everything this extension writes lives under one directory, named once. */
-const STORAGE_DIRECTORY = '.gripterm';
 
 /**
  * How long to wait for `claude --version`. Measured at 264 ms on this machine
@@ -95,8 +106,19 @@ export interface Readiness {
   readonly location: LaunchLocation;
   /** Why a launch would be refused, or `null` when it would not. */
   readonly refusal: string | null;
-  /** What `~/.gripterm` turned out to be: its schema version, or why it is unusable. */
+  /** What the store turned out to be: its schema version, or why it is unusable. */
   readonly storage: StoragePreparation;
+  /** Where the store is, after the setting and the fallback have been applied. */
+  readonly storageDir: string;
+  /**
+   * Whether this window is reading the base and watching it.
+   *
+   * False when the directory could not be prepared or this window could not
+   * announce itself -- both of which leave a working window that shows only its
+   * own terminals, and both of which the integration suite has to be able to
+   * tell from "it works".
+   */
+  readonly sharing: boolean;
 }
 
 /**
@@ -122,6 +144,15 @@ export interface GriptermApi {
  * not released.
  */
 let receiver: HookEventServer | null = null;
+
+/**
+ * This window's presence, held here for the same reason and with one more: its
+ * goodbye is a file DELETION, and a window that skipped it looks `unknown` to
+ * every other window for the next minute -- which is a minute of terminals that
+ * cannot be adopted and a row that says "detached" about a window that simply
+ * closed.
+ */
+let presence: OwnerHeartbeat | null = null;
 
 /**
  * Entry point and composition root.
@@ -160,8 +191,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   const gateway = new VsCodeTerminalGateway(location);
   context.subscriptions.push({ dispose: () => { gateway.dispose(); } });
 
-  const storage = new StorageLayout(join(homedir(), STORAGE_DIRECTORY));
+  const storage = new StorageLayout(readStorageDir(logger));
   const store = await prepareStorage(storage, logger);
+  const sharing = await shareTheBase({ context, storage, store, registry, identity, clock, logger });
   // Per activation, held in memory, never written down: it is only meaningful
   // together with the port below, and the two are born and die together (§4.7).
   const token = newActivationToken();
@@ -224,6 +256,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
       output.show(true);
     })
   );
+  // The one configuration key this build listens to, and it listens in order to
+  // say that listening is not enough. Everything downstream of the storage path
+  // -- this window's presence file, the watcher, the journal, and the
+  // `settings.json` the running CLIs have already read -- is built once at
+  // activation, so a change that silently moved only the watcher would leave
+  // this window observing a directory nothing writes to.
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration(STORAGE_PATH_SETTING)) {
+        say(
+          'info',
+          'Gripterm reads its storage path once, when the window loads. Reload the window to move the store.',
+          logger
+        );
+      }
+    })
+  );
 
   // `appName` is logged beside the kind we made of it, unconditionally. An
   // editor we do not recognise then names itself in the one place a person can
@@ -244,6 +293,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     launchLocation: location,
     storage: storage.baseDir,
     storageVersion: store.kind === 'ready' ? store.version : null,
+    sharingTheBase: sharing,
     journalKeepsContent: journal.includeContent,
     journalRetentionDays: journal.retentionDays,
   });
@@ -268,12 +318,87 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
       location,
       refusal: readiness.kind === 'refused' ? readiness.reason : null,
       storage: store,
+      storageDir: storage.baseDir,
+      sharing,
     },
   };
 }
 
 /**
- * Brings `~/.gripterm` up to the schema this build reads.
+ * Joins this window to the base every window on the machine shares.
+ *
+ * Four things in one movement, because none of them is any use without the
+ * others: this window announces itself and starts beating; the repository is
+ * built on that presence, since adoption is a question about liveness; the
+ * watcher is attached to `terminals/` and `owners/`; and both its signal and the
+ * repository's own writes lead to one re-read that hands the result to the
+ * registry (§4.6).
+ *
+ * Returns whether any of it happened. It is refused, rather than half-done, in
+ * two cases -- an unusable directory and a window that could not write its own
+ * presence file -- and both leave a working window that shows only its own
+ * terminals. That is the honest degradation: reading a base this window cannot
+ * write itself into would show other windows' terminals as adoptable while
+ * this window is invisible to them, which is the one shape §4.8 forbids.
+ */
+async function shareTheBase(parts: {
+  readonly context: vscode.ExtensionContext;
+  readonly storage: StorageLayout;
+  readonly store: StoragePreparation;
+  readonly registry: SessionRegistry;
+  readonly identity: OwnerIdentity;
+  readonly clock: SystemClock;
+  readonly logger: Logger;
+}): Promise<boolean> {
+  const { context, storage, registry, identity, clock, logger } = parts;
+  if (parts.store.kind === 'refused') {
+    logger.warn('this window will not read the shared store, so it lists only its own terminals', {
+      path: storage.baseDir,
+      reason: parts.store.reason,
+    });
+    return false;
+  }
+
+  const scheduler = new SystemScheduler();
+  const owner = new FileOwnerPresence({ layout: storage, clock, logger });
+  const heartbeat = new OwnerHeartbeat({ presence: owner, scheduler, logger });
+  try {
+    await heartbeat.start(identity);
+  } catch (cause: unknown) {
+    logger.error('this window could not announce itself, so it lists only its own terminals', {
+      path: storage.ownersDir,
+      reason: String(cause),
+    });
+    return false;
+  }
+  presence = heartbeat;
+  context.subscriptions.push(heartbeat);
+
+  const repository = new FileTerminalRepository({
+    layout: storage,
+    owner: ownerRefFor(identity),
+    presence: owner,
+    logger,
+  });
+  const projection = new BaseProjection({ repository, registry, logger });
+  context.subscriptions.push(projection);
+
+  const watcher = new RepositoryWatcher({ layout: storage, scheduler, logger });
+  context.subscriptions.push(watcher);
+  // Both signals lead to the same place. The watcher's is other windows, after
+  // a debounce; the repository's is this window's own writes, at once -- a
+  // person who renames a terminal should not watch the row lag behind them.
+  context.subscriptions.push(watcher.watch(() => void projection.refresh()));
+  context.subscriptions.push(repository.watch(() => void projection.refresh()));
+  watcher.start();
+  // The base as it is right now, before anything changes: a window that only
+  // reacted to changes would show an empty list until somebody else moved.
+  await projection.refresh();
+  return true;
+}
+
+/**
+ * Brings the store up to the schema this build reads.
  *
  * A refusal is reported and does not stop activation, which is the proportion
  * M2.1 can honestly hold: nothing yet READS a record out of that directory --
@@ -300,8 +425,14 @@ async function prepareStorage(layout: StorageLayout, logger: Logger): Promise<St
 }
 
 export async function deactivate(): Promise<void> {
-  // Everything else is owned by the context. This one is awaited: the socket
-  // must be closed before the host lets go, or a reload races its own port.
+  // Everything else is owned by the context. These two are awaited: the socket
+  // must be closed before the host lets go, or a reload races its own port; and
+  // the presence file must be gone before this window is, or the window looks
+  // `unknown` to the others for a minute after it has plainly closed.
+  const keeper = presence;
+  presence = null;
+  await keeper?.stop();
+
   const server = receiver;
   receiver = null;
   await server?.stop();

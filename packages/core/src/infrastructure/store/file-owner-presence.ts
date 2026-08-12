@@ -7,6 +7,10 @@ import { STORAGE_DIRECTORY_MODE } from './storage-layout';
 import { isEditorKind, isOwnerKind } from '../../domain/entities/owner-ref';
 import { asFiniteNumber, asRecord, asString, asStringArray } from '../../domain/json/json-readers';
 import { readJsonFile, writeJsonFile } from './json-file';
+// The pair of numbers lives with the port, not here: it is what every window on
+// the machine reasons about the others with, and one implementation is no place
+// for a rule the whole store obeys.
+import { FRESH_HEARTBEAT_MS } from '../../domain/ports/owner-presence';
 import type { Clock } from '../../domain/ports/clock';
 import type { EditorKind, OwnerKind } from '../../domain/entities/owner-ref';
 import type { Logger } from '../../domain/ports/logger';
@@ -16,19 +20,6 @@ import type {
   OwnerPresence,
 } from '../../domain/ports/owner-presence';
 import type { StorageLayout } from './storage-layout';
-
-/**
- * How often a living window writes its heartbeat, and how long a heartbeat is
- * believed. §4.8 fixes the first at ten seconds [П]; the second is six times it.
- *
- * The two are declared together because neither means anything alone: the ratio
- * IS the tolerance, and moving one without the other silently changes how long a
- * busy machine is allowed to stall before its windows start looking `unknown`.
- * The interval is exported because the timer belongs to the composition root and
- * the number belongs here.
- */
-export const HEARTBEAT_INTERVAL_MS = 10_000;
-const FRESH_HEARTBEAT_MS = 60_000;
 
 const MS_PER_SECOND = 1000;
 const OWNER_FILE_SUFFIX = '.json';
