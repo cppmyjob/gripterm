@@ -15,6 +15,8 @@ import {
   RequestAuthenticator,
   SessionRegistry,
   ShellLaunchStrategy,
+  StorageLayout,
+  StorageMigrator,
   SystemClock,
   SystemIdGenerator,
   SystemScheduler,
@@ -41,6 +43,7 @@ import type {
   ListeningAddress,
   Logger,
   OwnerIdentity,
+  StoragePreparation,
 } from '@gripterm/core';
 import { registerCloseTerminal } from './commands/close-terminal';
 import { registerFocusTerminal } from './commands/focus-terminal';
@@ -91,6 +94,8 @@ export interface Readiness {
   readonly location: LaunchLocation;
   /** Why a launch would be refused, or `null` when it would not. */
   readonly refusal: string | null;
+  /** What `~/.gripterm` turned out to be: its schema version, or why it is unusable. */
+  readonly storage: StoragePreparation;
 }
 
 /**
@@ -154,7 +159,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   const gateway = new VsCodeTerminalGateway(location);
   context.subscriptions.push({ dispose: () => { gateway.dispose(); } });
 
-  const storage = join(homedir(), STORAGE_DIRECTORY);
+  const storage = new StorageLayout(join(homedir(), STORAGE_DIRECTORY));
+  const store = await prepareStorage(storage, logger);
   // Per activation, held in memory, never written down: it is only meaningful
   // together with the port below, and the two are born and die together (§4.7).
   const token = newActivationToken();
@@ -234,7 +240,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     listeningOn: address === null ? null : address.origin,
     launchMode: mode,
     launchLocation: location,
-    storage,
+    storage: storage.baseDir,
+    storageVersion: store.kind === 'ready' ? store.version : null,
   });
   if (readiness.kind === 'refused') {
     logger.warn('Gripterm will refuse to start terminals', { reason: readiness.reason });
@@ -256,8 +263,36 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
       mode,
       location,
       refusal: readiness.kind === 'refused' ? readiness.reason : null,
+      storage: store,
     },
   };
+}
+
+/**
+ * Brings `~/.gripterm` up to the schema this build reads.
+ *
+ * A refusal is reported and does not stop activation, which is the proportion
+ * M2.1 can honestly hold: nothing yet READS a record out of that directory --
+ * the repository is still in memory until M2.3 -- so the only thing at stake
+ * today is the settings file, and refusing to start terminals over a version
+ * marker would cost more than the marker protects. M2.3 is where a refusal
+ * starts to mean "do not touch the records", because that is the milestone at
+ * which there are records to touch.
+ */
+async function prepareStorage(layout: StorageLayout, logger: Logger): Promise<StoragePreparation> {
+  const prepared = await new StorageMigrator(layout).prepare();
+  if (prepared.kind === 'refused') {
+    logger.warn('the storage directory is not usable', {
+      path: layout.baseDir,
+      reason: prepared.reason,
+    });
+  } else if (prepared.origin === 'adopted') {
+    logger.info('a storage directory left by an earlier build was completed', {
+      path: layout.baseDir,
+      version: prepared.version,
+    });
+  }
+  return prepared;
 }
 
 export async function deactivate(): Promise<void> {
@@ -276,7 +311,7 @@ export async function deactivate(): Promise<void> {
  */
 async function listen(parts: {
   readonly token: string;
-  readonly storage: string;
+  readonly storage: StorageLayout;
   readonly registry: SessionRegistry;
   readonly logger: Logger;
 }): Promise<ListeningAddress | null> {
@@ -368,7 +403,7 @@ function commandFactoryFor(
   readiness: ReturnType<typeof launchReadiness>,
   token: string,
   sessionStart: ForwarderScript | null,
-  storage: string
+  storage: StorageLayout
 ): AgentCommandFactory {
   if (readiness.kind === 'refused') {
     return new UnavailableAgentCommandFactory(readiness.reason);

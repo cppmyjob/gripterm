@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   FileEventJournal,
   StorageError,
+  StorageLayout,
   TerminalId,
   isErrorOfCode,
 } from '../../packages/core/src/index';
@@ -37,7 +38,7 @@ afterEach(async () => {
 });
 
 function journal(): FileEventJournal {
-  return new FileEventJournal(root);
+  return new FileEventJournal(new StorageLayout(root));
 }
 
 async function linesOf(terminalId = TERMINAL): Promise<string[]> {
@@ -200,7 +201,7 @@ describe('FileEventJournal when the file system refuses', () => {
   it('does not poison the queue for later appends', async () => {
     // A journal that stopped working after one refusal would lose every event
     // from then on, silently -- the exact failure this file exists to prevent.
-    const blocked = new FileEventJournal(join(root, 'nested'));
+    const blocked = new FileEventJournal(new StorageLayout(join(root, 'nested')));
     await writeFile(join(root, 'nested'), 'in the way', 'utf8');
     await expect(blocked.append(entry('{"n":1}'))).rejects.toBeInstanceOf(StorageError);
 

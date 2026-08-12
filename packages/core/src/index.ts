@@ -79,6 +79,26 @@ export { SystemIdGenerator } from './infrastructure/system-id-generator';
 export { FileEventJournal } from './infrastructure/store/file-event-journal';
 export { FileSessionSettingsStore } from './infrastructure/store/file-session-settings-store';
 export {
+  STORAGE_DIRECTORY_MODE,
+  STORAGE_SCHEMA_VERSION,
+  StorageLayout,
+} from './infrastructure/store/storage-layout';
+export { writeAtomic, type AtomicWriteOptions } from './infrastructure/store/atomic-file';
+export {
+  StorageMigrator,
+  type StorageOrigin,
+  type StoragePreparation,
+} from './infrastructure/store/storage-migrator';
+export {
+  decodeEntry,
+  encodeObserved,
+  encodeRecord,
+  type EntryDecode,
+  type ObservedDocument,
+  type ObservedProvenance,
+  type RecordDocument,
+} from './infrastructure/store/record-codec';
+export {
   readClaudeSettings,
   type ClaudeSettingsRead,
 } from './infrastructure/store/claude-settings-reader';
@@ -97,7 +117,14 @@ export { ListeningAddress } from './domain/entities/listening-address';
 export { TerminalId } from './domain/entities/terminal-id';
 export { SessionId } from './domain/entities/session-id';
 export { OwnerId } from './domain/entities/owner-id';
-export { OwnerRef, type OwnerKind, type EditorKind, type OwnerRefParams } from './domain/entities/owner-ref';
+export {
+  OwnerRef,
+  isEditorKind,
+  isOwnerKind,
+  type EditorKind,
+  type OwnerKind,
+  type OwnerRefParams,
+} from './domain/entities/owner-ref';
 export { Note } from './domain/entities/note';
 export { HumanMetadata, type HumanMetadataParams } from './domain/entities/human-metadata';
 export {
@@ -110,9 +137,21 @@ export { CostSnapshot } from './domain/entities/cost-snapshot';
 export { ContextWindowSnapshot } from './domain/entities/context-window-snapshot';
 export { ObservedState, type ObservedStateParams } from './domain/entities/observed-state';
 export {
-  type TerminalState,
+  PERSISTED_TERMINAL_STATES,
+  isPersistedTerminalState,
   type PersistedTerminalState,
+  type TerminalState,
 } from './domain/entities/terminal-state';
+
+export {
+  asArray,
+  asBoolean,
+  asFiniteNumber,
+  asRecord,
+  asString,
+  asStringArray,
+  asStringMap,
+} from './domain/json/json-readers';
 export {
   TerminalEntry,
   type CreateTerminalEntryParams,

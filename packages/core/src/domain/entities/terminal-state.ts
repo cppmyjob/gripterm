@@ -34,3 +34,34 @@ export type TerminalState =
  * it simply stops applying, with no reverse transition and no write.
  */
 export type PersistedTerminalState = Exclude<TerminalState, 'detached'>;
+
+/**
+ * The same union as values, derived from a record that the compiler forces to
+ * be total -- so a state added above cannot fall out of the list below without
+ * failing the build.
+ *
+ * It exists for the one caller that meets these names as untrusted text: the
+ * codec reading a record written by another build. `detached` is absent for the
+ * same reason it is absent from the type, and a file claiming it is a file
+ * refused.
+ */
+const PERSISTED: Readonly<Record<PersistedTerminalState, true>> = {
+  launching: true,
+  idle: true,
+  working: true,
+  waiting_permission: true,
+  waiting_input: true,
+  turn_failed: true,
+  ended: true,
+  orphaned: true,
+  degraded: true,
+  resume_failed: true,
+};
+
+export const PERSISTED_TERMINAL_STATES: readonly PersistedTerminalState[] = Object.freeze(
+  Object.keys(PERSISTED) as PersistedTerminalState[]
+);
+
+export function isPersistedTerminalState(value: string): value is PersistedTerminalState {
+  return Object.hasOwn(PERSISTED, value);
+}

@@ -1,10 +1,16 @@
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { STORAGE_DIRECTORY_MODE } from './storage-layout';
 import { StorageError } from '../../domain/errors/gripterm-error';
-import type { HookDelivery } from '../../domain/entities/hook-delivery';
 import type { EventJournal } from '../../domain/ports/event-journal';
+import type { HookDelivery } from '../../domain/entities/hook-delivery';
+import type { StorageLayout } from './storage-layout';
 
-const TERMINALS_DIRECTORY = 'terminals';
+/**
+ * One file per terminal, and the name lives here rather than in the layout: §4.8
+ * draws `events/<YYYY-MM-DD>.ndjson`, which is M2.4a's decision to make, and the
+ * layout does not publish a path nothing writes.
+ */
 const JOURNAL_FILE = 'events.ndjson';
 
 /**
@@ -18,9 +24,6 @@ const JOURNAL_FILE = 'events.ndjson';
  * that happen to be present.
  */
 const LINE_VERSION = 1;
-
-/** Owner-only, as in `FileSessionSettingsStore`; a no-op on Windows and therefore not asserted. */
-const DIRECTORY_MODE = 0o700;
 
 /**
  * The journal, one file per terminal, one line per delivery.
@@ -53,7 +56,7 @@ export class FileEventJournal implements EventJournal {
    */
   private _tail: Promise<void> = Promise.resolve();
 
-  constructor(private readonly _baseDir: string) {}
+  constructor(private readonly _layout: StorageLayout) {}
 
   public async append(delivery: HookDelivery): Promise<void> {
     const next = this._tail.then(async () => { await this._write(delivery); });
@@ -68,7 +71,7 @@ export class FileEventJournal implements EventJournal {
   }
 
   private async _write(delivery: HookDelivery): Promise<void> {
-    const directory = join(this._baseDir, TERMINALS_DIRECTORY, delivery.terminalId.value);
+    const directory = this._layout.terminalDir(delivery.terminalId);
     const file = join(directory, JOURNAL_FILE);
     const line = JSON.stringify({
       v: LINE_VERSION,
@@ -78,7 +81,7 @@ export class FileEventJournal implements EventJournal {
     });
 
     try {
-      await mkdir(directory, { recursive: true, mode: DIRECTORY_MODE });
+      await mkdir(directory, { recursive: true, mode: STORAGE_DIRECTORY_MODE });
       // `JSON.stringify` escapes every newline inside `raw`, so one delivery is
       // one line however many line breaks the payload contains.
       await appendFile(file, `${line}\n`, 'utf8');

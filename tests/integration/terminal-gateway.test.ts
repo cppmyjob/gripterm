@@ -155,7 +155,14 @@ suite('VsCodeTerminalGateway', () => {
   test('A21: a terminal opens as an editor tab, not in the panel', async () => {
     const { gateway, readiness } = await api();
     assert.equal(readiness.location, 'editor', 'the default is no longer the editor area');
-    const before = terminalTabs().length;
+    // By NAME rather than by count. Earlier tests in this file open and close
+    // terminals of their own, and the editor tears their tabs down on its own
+    // schedule -- so a count taken here can fall as easily as it rises, and an
+    // assertion on it fails for a reason that has nothing to do with A21.
+    assert.ok(
+      !terminalTabs().some((tab) => tab.label.includes('gripterm-a21')),
+      'a tab from an earlier run is still open, so this test would prove nothing'
+    );
 
     const handle = await gateway.create({
       terminalId: TERMINAL_ID,
@@ -170,7 +177,6 @@ suite('VsCodeTerminalGateway', () => {
     await waitFor('a terminal tab in the editor area', () =>
       terminalTabs().some((tab) => tab.label.includes('gripterm-a21'))
     );
-    assert.ok(terminalTabs().length > before);
 
     const closed = closeOf(handle);
     handle.dispose();

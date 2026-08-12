@@ -6,6 +6,7 @@ import {
   ListeningAddress,
   SessionSettingsBuilder,
   StorageError,
+  StorageLayout,
   TerminalId,
 } from '../../packages/core/src/index';
 import { NEXT_SESSION_UUID, TERMINAL_UUID } from '../helpers/domain-fixtures';
@@ -50,7 +51,7 @@ describe('FileSessionSettingsStore', () => {
   });
 
   it('builds the terminal directory that did not exist, and names the file it wrote', async () => {
-    const store = new FileSessionSettingsStore(base);
+    const store = new FileSessionSettingsStore(new StorageLayout(base));
 
     const written = await store.write(TERMINAL, documentFor(51_337));
 
@@ -59,7 +60,7 @@ describe('FileSessionSettingsStore', () => {
   });
 
   it('writes JSON the CLI can read back unchanged', async () => {
-    const store = new FileSessionSettingsStore(base);
+    const store = new FileSessionSettingsStore(new StorageLayout(base));
     const document = documentFor(51_337);
 
     const written = await store.write(TERMINAL, document);
@@ -76,7 +77,7 @@ describe('FileSessionSettingsStore', () => {
     // the file with a newline, so "more than one line" is true of unindented
     // JSON as well, and the assertion would hold on the thing it forbids. Found
     // by mutation, 2026-08-10.
-    const store = new FileSessionSettingsStore(base);
+    const store = new FileSessionSettingsStore(new StorageLayout(base));
 
     const written = await store.write(TERMINAL, documentFor(51_337));
     const lines = (await readFile(written, 'utf8')).split('\n');
@@ -86,7 +87,7 @@ describe('FileSessionSettingsStore', () => {
   });
 
   it('replaces a stale file rather than leaving the dead port in place', async () => {
-    const store = new FileSessionSettingsStore(base);
+    const store = new FileSessionSettingsStore(new StorageLayout(base));
     await store.write(TERMINAL, documentFor(51_337));
 
     const written = await store.write(TERMINAL, documentFor(51_338));
@@ -99,7 +100,7 @@ describe('FileSessionSettingsStore', () => {
   it('leaves no half-written neighbour behind', async () => {
     // Replacing in place would give the CLI a window in which the file exists
     // and is truncated. Whatever the store does instead must not survive it.
-    const store = new FileSessionSettingsStore(base);
+    const store = new FileSessionSettingsStore(new StorageLayout(base));
 
     await store.write(TERMINAL, documentFor(51_337));
     await store.write(TERMINAL, documentFor(51_338));
@@ -108,7 +109,7 @@ describe('FileSessionSettingsStore', () => {
   });
 
   it('keeps two terminals in separate directories', async () => {
-    const store = new FileSessionSettingsStore(base);
+    const store = new FileSessionSettingsStore(new StorageLayout(base));
 
     await store.write(TERMINAL, documentFor(51_337));
     await store.write(OTHER_TERMINAL, documentFor(51_338));
@@ -125,7 +126,7 @@ describe('FileSessionSettingsStore', () => {
     // what belongs in it.
     const settingsAsDirectory = join(base, 'terminals', TERMINAL_UUID, 'settings.json');
     await mkdir(settingsAsDirectory, { recursive: true });
-    const store = new FileSessionSettingsStore(base);
+    const store = new FileSessionSettingsStore(new StorageLayout(base));
 
     await expect(store.write(TERMINAL, documentFor(51_337))).rejects.toBeInstanceOf(StorageError);
 
@@ -137,7 +138,7 @@ describe('FileSessionSettingsStore', () => {
     // "the disk said no" and a defect of ours. A raw ENOTDIR arriving at the
     // user as a notification is the same thing as no message at all.
     await writeFile(join(base, 'terminals'), 'not a directory', 'utf8');
-    const store = new FileSessionSettingsStore(base);
+    const store = new FileSessionSettingsStore(new StorageLayout(base));
 
     await expect(store.write(TERMINAL, documentFor(51_337))).rejects.toBeInstanceOf(StorageError);
   });

@@ -1,34 +1,26 @@
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { STORAGE_DIRECTORY_MODE } from './storage-layout';
 import { StorageError } from '../../domain/errors/gripterm-error';
 import type { SessionSettingsDocument } from '../../domain/agents/claude-code/session-settings-builder';
+import type { StorageLayout } from './storage-layout';
 import type { TerminalId } from '../../domain/entities/terminal-id';
-
-const TERMINALS_DIRECTORY = 'terminals';
-const SETTINGS_FILE = 'settings.json';
-
-/**
- * Owner-only, matching what the CLI does with its own IDE lock files. A no-op
- * on Windows, which is the platform this is developed on -- so it is set and
- * not asserted anywhere: a test claiming the permission holds here would be
- * describing POSIX while running on NTFS.
- */
-const DIRECTORY_MODE = 0o700;
 
 /** Two spaces, because the single argument for a file over inline JSON is that a person can open it (§4.4). */
 const JSON_INDENT = 2;
 
 /**
- * Writes the one file M1 puts on disk.
+ * Writes the `--settings` file of one session.
  *
- * `~/.gripterm` is passed in rather than resolved here: the base is a user
- * setting (`gripterm.storage.path`), and resolving `~` is the composition
- * root's business. It also lets the tests address a real directory of their
- * own, which is the only way the three things this class actually does --
- * create, replace, fail -- can be observed rather than imagined.
+ * The layout is passed in rather than built here: `~/.gripterm` is a user
+ * setting (`gripterm.storage.path`), resolving `~` is the composition root's
+ * business, and every path in the store is formed in one place so that two
+ * spellings of the same file cannot drift apart. It also lets the tests address
+ * a real directory of their own, which is the only way the three things this
+ * class actually does -- create, replace, fail -- can be observed rather than
+ * imagined.
  */
 export class FileSessionSettingsStore {
-  constructor(private readonly _baseDir: string) {}
+  constructor(private readonly _layout: StorageLayout) {}
 
   /**
    * Replaces the file for `terminalId` and returns its absolute path, which is
@@ -48,8 +40,8 @@ export class FileSessionSettingsStore {
    * because anything here demonstrates it.
    */
   public async write(terminalId: TerminalId, document: SessionSettingsDocument): Promise<string> {
-    const directory = join(this._baseDir, TERMINALS_DIRECTORY, terminalId.value);
-    const file = join(directory, SETTINGS_FILE);
+    const directory = this._layout.terminalDir(terminalId);
+    const file = this._layout.settingsFile(terminalId);
     // The pid keeps two processes writing the same terminal off each other's
     // scratch file. They should not both be doing this -- one live owner per
     // record (§4.8) -- but a temporary is cheap insurance against a rule that
@@ -57,7 +49,7 @@ export class FileSessionSettingsStore {
     const scratch = `${file}.${process.pid}.tmp`;
 
     try {
-      await mkdir(directory, { recursive: true, mode: DIRECTORY_MODE });
+      await mkdir(directory, { recursive: true, mode: STORAGE_DIRECTORY_MODE });
       await writeFile(scratch, `${JSON.stringify(document, null, JSON_INDENT)}\n`, 'utf8');
       await rename(scratch, file);
       return file;

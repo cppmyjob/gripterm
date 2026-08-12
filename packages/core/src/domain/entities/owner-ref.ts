@@ -11,6 +11,31 @@ export type OwnerKind = 'window' | 'service';
 
 export type EditorKind = 'vscode' | 'cursor' | 'unknown' | 'none';
 
+/*
+ * Both unions as values, by the same construction as `PERSISTED_TERMINAL_STATES`:
+ * a record the compiler keeps total, so the list cannot fall behind the type.
+ * The one caller is the codec, which meets these names as untrusted text.
+ *
+ * `unknown` as an editor kind is a legitimate stored value -- it means "a fork
+ * we do not recognise" -- and must not be confused with a value we failed to
+ * read. That is why reading returns `null` on failure rather than `'unknown'`.
+ */
+const OWNER_KINDS: Readonly<Record<OwnerKind, true>> = { window: true, service: true };
+const EDITOR_KINDS: Readonly<Record<EditorKind, true>> = {
+  vscode: true,
+  cursor: true,
+  unknown: true,
+  none: true,
+};
+
+export function isOwnerKind(value: string): value is OwnerKind {
+  return Object.hasOwn(OWNER_KINDS, value);
+}
+
+export function isEditorKind(value: string): value is EditorKind {
+  return Object.hasOwn(EDITOR_KINDS, value);
+}
+
 export interface OwnerRefParams {
   readonly kind: OwnerKind;
   readonly ownerId: OwnerId;

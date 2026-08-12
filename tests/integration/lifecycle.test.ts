@@ -1,8 +1,9 @@
 import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
-import { isAbsolute } from 'node:path';
+import { isAbsolute, join } from 'node:path';
+import { homedir } from 'node:os';
+import { readFileSync, statSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
-import { statSync } from 'node:fs';
 import { CONTEXT_LIVE, CONTEXT_OVER } from '../../packages/core/src/index';
 import type { GriptermApi } from '../../packages/extension/src/extension';
 
@@ -89,6 +90,26 @@ suite('the launch pipeline', () => {
     assert.equal(readiness.refusal, null, readiness.refusal ?? '');
     assert.ok(readiness.address, 'no hook receiver is listening');
     assert.notEqual(readiness.cliPath, null, 'claude was not found');
+  });
+
+  /**
+   * M2.1 against the real profile directory, which is the only place the
+   * question is real: the unit tests build a store in a temporary folder, and
+   * this machine has one that M1 already wrote settings files into. Adopting
+   * that directory rather than refusing it is the whole milestone.
+   */
+  test('brought the storage directory this machine already had up to version 1', async () => {
+    const { readiness } = await api();
+
+    assert.equal(
+      readiness.storage.kind,
+      'ready',
+      readiness.storage.kind === 'refused' ? readiness.storage.reason : ''
+    );
+    const marker = join(homedir(), '.gripterm', 'version');
+    assert.equal(readFileSync(marker, 'utf8').trim(), '1', `${marker} does not say version 1`);
+    assert.ok(statSync(join(homedir(), '.gripterm', 'owners')).isDirectory(), 'no owners/');
+    assert.ok(statSync(join(homedir(), '.gripterm', 'terminals')).isDirectory(), 'no terminals/');
   });
 
   test('found the Claude Code this machine will actually run', async () => {

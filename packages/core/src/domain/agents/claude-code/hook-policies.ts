@@ -1,3 +1,4 @@
+import { asBoolean, asRecord, asStringArray } from '../../json/json-readers';
 import { TOKEN_ENV_VAR } from './session-settings-builder';
 
 /** One settings file, as read: its path, and whatever JSON was in it. */
@@ -101,31 +102,15 @@ export function reviewHookPolicies(
   return findings;
 }
 
-/**
- * An object to look settings up in, or `null`.
+/*
+ * The three readers this file used to keep privately now live in
+ * `domain/json/json-readers`. The shared `asRecord` refuses an array, where this
+ * one accepted it; the outcome here is unchanged, because a JSON array carries
+ * no named key and every lookup below found `undefined` either way -- measured
+ * by a mutation that survived the whole suite. What changes is that the codec,
+ * which does have to tell the two apart, no longer needs a second spelling.
  *
- * An array needs no special case, and that is measured rather than assumed: a
- * mutation admitting arrays here survived the whole suite, because a JSON array
- * cannot carry a named key -- so every lookup below finds `undefined` and no
- * finding is produced either way. The guard was removed rather than paired with
- * a test asserting something that cannot happen.
+ * `asBoolean` still refuses `"true"` for the reason it always did: a string
+ * there is a file the CLI itself rejects, and reporting a policy the CLI never
+ * applied sends somebody to fix the wrong thing.
  */
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === 'object' && value !== null
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
-
-/**
- * `null` for anything that is not a boolean.
- *
- * A file with `"true"` in it is a file the CLI refuses, and reporting a policy
- * the CLI never applied would send somebody to fix the wrong thing.
- */
-function asBoolean(value: unknown): boolean | null {
-  return typeof value === 'boolean' ? value : null;
-}
-
-function asStringArray(value: unknown): readonly string[] | null {
-  return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : null;
-}
