@@ -7,6 +7,8 @@ import { STORAGE_DIRECTORY_MODE } from './storage-layout';
 import { isEditorKind, isOwnerKind } from '../../domain/entities/owner-ref';
 import { asFiniteNumber, asRecord, asString, asStringArray } from '../../domain/json/json-readers';
 import { readJsonFile, writeJsonFile } from './json-file';
+import { isProcessThere, sendSignalZero } from '../process-liveness';
+import { precedesBoot } from '../../domain/services/boot-window';
 // The pair of numbers lives with the port, not here: it is what every window on
 // the machine reasons about the others with, and one implementation is no place
 // for a rule the whole store obeys.
@@ -19,13 +21,10 @@ import type {
   OwnerLiveness,
   OwnerPresence,
 } from '../../domain/ports/owner-presence';
+import type { SignalProbe } from '../process-liveness';
 import type { StorageLayout } from './storage-layout';
 
-const MS_PER_SECOND = 1000;
 const OWNER_FILE_SUFFIX = '.json';
-
-/** The one `process.kill` outcome that means the process is not there (§4.8). */
-const NO_SUCH_PROCESS = 'ESRCH';
 
 /** `owners/<ownerId>.json`. Timestamps are epoch milliseconds, as everywhere else in this store. */
 export interface PresenceDocument {
@@ -67,17 +66,6 @@ type PresenceRead =
   | { readonly kind: 'ok', readonly record: PresenceRecord }
   | { readonly kind: 'absent', readonly reason: string }
   | { readonly kind: 'broken', readonly reason: string };
-
-/**
- * Sends signal 0 to a process, or throws the way `process.kill` does.
- *
- * A seam, and a narrow one on purpose. The outcome this whole file turns on --
- * `EPERM`, which means the process IS there and belongs to another user or
- * another privilege level -- cannot be produced by a test that does not run a
- * second user's process, and a rule no test can reach is a rule nobody can say
- * still holds.
- */
-export type SignalProbe = (pid: number) => void;
 
 export interface FileOwnerPresenceOptions {
   readonly layout: StorageLayout;
@@ -278,30 +266,13 @@ export class FileOwnerPresence implements OwnerPresence {
     // (microsoft/vscode#70665), so orphaned files are normal rather than rare --
     // and Windows hands out pids again aggressively. Without this line a stranger
     // holding a dead window's pid would leave its records `unknown` forever.
-    if (heartbeatMs < nowMs - this._uptimeSeconds() * MS_PER_SECOND) {
+    if (precedesBoot(heartbeatMs, nowMs, this._uptimeSeconds())) {
       return 'dead';
     }
-    if (!this._isProcessThere(record.identity.pid)) {
+    if (!isProcessThere(record.identity.pid, this._options.probe ?? sendSignalZero)) {
       return 'dead';
     }
     return nowMs - heartbeatMs < FRESH_HEARTBEAT_MS ? 'live' : 'unknown';
-  }
-
-  /**
-   * Whether a process answers to that pid, by the table measured on this machine
-   * (§4.8): no exception means it is there, `ESRCH` means it is not, and
-   * **every other refusal -- `EPERM` above all -- means it is there and not
-   * ours to signal**. A naive `catch { return false }` would call a window
-   * started by an administrator dead while it is running.
-   */
-  private _isProcessThere(pid: number): boolean {
-    const probe = this._options.probe ?? sendSignalZero;
-    try {
-      probe(pid);
-      return true;
-    } catch (cause: unknown) {
-      return (cause as { readonly code?: unknown }).code !== NO_SUCH_PROCESS;
-    }
   }
 
   private _uptimeSeconds(): number {
@@ -346,10 +317,6 @@ export class FileOwnerPresence implements OwnerPresence {
     return announced;
   }
 }
-
-const sendSignalZero: SignalProbe = (pid) => {
-  process.kill(pid, 0);
-};
 
 export function encodePresence(record: PresenceRecord): PresenceDocument {
   return {

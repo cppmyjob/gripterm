@@ -1,4 +1,8 @@
-import { claudeSettingsLocations } from '../../../packages/core/src/domain/agents/claude-code/settings-locations';
+import {
+  claudeSettingsLocations,
+  claudeTranscriptsDirectory,
+  claudeUserDirectory,
+} from '../../../packages/core/src/domain/agents/claude-code/settings-locations';
 
 describe('where Claude Code keeps the settings that can block a hook', () => {
   it('names the managed file and its drop-in directory on windows', () => {
@@ -94,5 +98,34 @@ describe('where Claude Code keeps the settings that can block a hook', () => {
     });
 
     expect(new Set(found.files).size).toBe(found.files.length);
+  });
+});
+
+describe('where Claude Code keeps the conversations', () => {
+  it('hangs the transcripts off the user level, in the platform\'s spelling', () => {
+    // Read out of the binary 2.1.228: `function vA(){return
+    // u$.join(wn(),"projects")}`, and `wn()` is the user level.
+    expect(
+      claudeTranscriptsDirectory({ platform: 'win32', home: 'C:\\Users\\person', configDir: undefined })
+    ).toBe('C:\\Users\\person\\.claude\\projects');
+    expect(
+      claudeTranscriptsDirectory({ platform: 'linux', home: '/home/person', configDir: undefined })
+    ).toBe('/home/person/.claude/projects');
+  });
+
+  it('follows CLAUDE_CONFIG_DIR, which is what keeps an experiment off a real profile', () => {
+    expect(
+      claudeTranscriptsDirectory({
+        platform: 'linux',
+        home: '/home/person',
+        configDir: '/tmp/probe-config',
+      })
+    ).toBe('/tmp/probe-config/projects');
+  });
+
+  it('answers the user level on its own, because more than one thing hangs off it', () => {
+    expect(
+      claudeUserDirectory({ platform: 'linux', home: '/home/person', configDir: undefined })
+    ).toBe('/home/person/.claude');
   });
 });

@@ -14,6 +14,19 @@ export {
 
 export type { AgentListing, AgentRecord } from './domain/entities/agent-record';
 
+export type { TranscriptIndex } from './domain/entities/transcript-index';
+
+export { precedesBoot } from './domain/services/boot-window';
+
+export {
+  planRestore,
+  type RestoreInputs,
+  type RestorePlan,
+  type RestoreRefusal,
+  type RestoreSkip,
+  type RestoreStep,
+} from './domain/services/restore-planner';
+
 export {
   launchReadiness,
   type LaunchInputs,
@@ -111,6 +124,16 @@ export { SystemScheduler } from './infrastructure/system-scheduler';
 export { findExecutable, type ExecutableSearch } from './infrastructure/executable-lookup';
 export { probeVersionOutput, type VersionProbe } from './infrastructure/cli-probe';
 export { runCli, type CliRun, type CliRunOptions } from './infrastructure/cli-run';
+export {
+  isProcessThere,
+  pidsEstablishedGone,
+  sendSignalZero,
+  type SignalProbe,
+} from './infrastructure/process-liveness';
+export {
+  readTranscriptIndex,
+  type DirectoryReader,
+} from './infrastructure/transcript-index';
 export { agentListingFrom, readAgentListing } from './infrastructure/cli-agents';
 export { SystemIdGenerator } from './infrastructure/system-id-generator';
 export {
@@ -172,7 +195,6 @@ export {
   type PresenceDecode,
   type PresenceDocument,
   type PresenceRecord,
-  type SignalProbe,
 } from './infrastructure/store/file-owner-presence';
 export {
   StorageMigrator,
@@ -311,6 +333,9 @@ export {
 
 export {
   claudeSettingsLocations,
+  claudeTranscriptsDirectory,
+  claudeUserDirectory,
+  type ClaudeUserFacts,
   type SettingsLocationFacts,
   type SettingsLocations,
 } from './domain/agents/claude-code/settings-locations';
