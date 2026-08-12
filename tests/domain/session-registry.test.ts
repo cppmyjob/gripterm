@@ -23,6 +23,7 @@ import {
   type SessionStartSource,
   type StopEvent,
   type TerminalEntry,
+  type UnknownConversationChange,
   type UserPromptSubmitEvent,
 } from '../../packages/core/src/index';
 import {
@@ -124,6 +125,8 @@ interface Stand {
   readonly projections: number;
   /** Ids the registry said it had dropped, in order. */
   readonly removals: string[];
+  /** Refusals published because the conversation was one this record never had. */
+  readonly unknown: UnknownConversationChange[];
 }
 
 function stand(entry: TerminalEntry | null = makeEntry()): Stand {
@@ -140,8 +143,9 @@ function stand(entry: TerminalEntry | null = makeEntry()): Stand {
   }
   const changes: EntryChange[] = [];
   const removals: string[] = [];
+  const unknown: UnknownConversationChange[] = [];
   let projections = 0;
-  // A total switch rather than an `else`: a fourth kind of change must arrive
+  // A total switch rather than an `else`: a fifth kind of change must arrive
   // here as a compiler error and not as a silently miscounted projection.
   registry.subscribe((change) => {
     switch (change.kind) {
@@ -150,6 +154,9 @@ function stand(entry: TerminalEntry | null = makeEntry()): Stand {
         return;
       case 'removed':
         removals.push(change.terminalId.value);
+        return;
+      case 'unknown-conversation':
+        unknown.push(change);
         return;
       case 'projection':
         projections += 1;
@@ -162,6 +169,7 @@ function stand(entry: TerminalEntry | null = makeEntry()): Stand {
     clock,
     changes,
     removals,
+    unknown,
     get projections(): number {
       return projections;
     },
@@ -443,7 +451,7 @@ describe('SessionRegistry §4.6 case 3: an event from a session the terminal has
     expect(registry.ingest(TERMINAL, stop(asTerminal)).kind).toBe('foreign-session');
   });
 
-  it('tells no listener about either refusal', () => {
+  it('tells no listener that a refused event changed the record', () => {
     const { registry, changes } = stand();
     registry.ingest(TERMINAL, sessionStart(NEXT_SESSION, 'clear'));
     changes.length = 0;
@@ -452,6 +460,44 @@ describe('SessionRegistry §4.6 case 3: an event from a session the terminal has
     registry.ingest(TERMINAL, stop(THIRD_SESSION));
 
     expect(changes).toHaveLength(0);
+  });
+
+  it('publishes the conversation it has never heard of, and not the one it remembers', () => {
+    // The difference between the two refusals is the difference between traffic
+    // and a defect. An event from a session in the history is the ordinary
+    // in-flight case of a `/clear` that went well; an event from a session
+    // nobody announced usually means the announcement was lost -- and only
+    // somebody holding the record's state can tell that from a source we have
+    // not measured, so the fact is published and the judgement is not made here
+    // (M2.8).
+    const { registry, unknown } = stand();
+    registry.ingest(TERMINAL, sessionStart(NEXT_SESSION, 'clear'));
+
+    registry.ingest(TERMINAL, stop(SESSION));
+    registry.ingest(TERMINAL, stop(THIRD_SESSION));
+
+    expect(unknown).toHaveLength(1);
+    expect(unknown[0]?.sessionId.value).toBe(THIRD_SESSION.value);
+  });
+
+  it('hands over the record untouched, because nothing about it moved', () => {
+    const { registry, unknown } = stand();
+
+    registry.ingest(TERMINAL, stop(THIRD_SESSION));
+
+    expect(unknown[0]?.entry).toBe(current(registry));
+    expect(unknown[0]?.entry.sessionId.value).toBe(SESSION.value);
+  });
+
+  it('names the record in the log when a listener throws about that refusal', () => {
+    const { registry, logger } = stand();
+    registry.subscribe(() => {
+      throw new Error('a listener that cannot cope');
+    });
+
+    registry.ingest(TERMINAL, stop(THIRD_SESSION));
+
+    expect(logger.errors.at(-1)?.details?.terminalId).toBe(TERMINAL_UUID);
   });
 });
 

@@ -3,14 +3,21 @@ import {
   HookEventParser,
   ObservabilityWatch,
   ObservedState,
+  SessionId,
   SessionRegistry,
   TerminalId,
   TerminalStateMachine,
   terminalClosed,
-  type SilentTerminal,
+  type WatchReport,
 } from '../../packages/core/src/index';
 import { FakeScheduler, FixedClock, RecordingLogger } from '../helpers/port-fakes';
-import { OBSERVED_AT, SESSION_UUID, TERMINAL_UUID, makeEntry } from '../helpers/domain-fixtures';
+import {
+  NEXT_SESSION_UUID,
+  OBSERVED_AT,
+  SESSION_UUID,
+  TERMINAL_UUID,
+  makeEntry,
+} from '../helpers/domain-fixtures';
 
 const TERMINAL = TerminalId.fromString(TERMINAL_UUID);
 const SILENCE_MS = 20_000;
@@ -19,7 +26,7 @@ interface Stand {
   readonly registry: SessionRegistry;
   readonly scheduler: FakeScheduler;
   readonly logger: RecordingLogger;
-  readonly said: SilentTerminal[];
+  readonly said: WatchReport[];
   readonly watch: ObservabilityWatch;
 }
 
@@ -32,7 +39,7 @@ function stand(): Stand {
     logger,
   });
   const scheduler = new FakeScheduler();
-  const said: SilentTerminal[] = [];
+  const said: WatchReport[] = [];
   const watch = new ObservabilityWatch({
     registry,
     scheduler,
@@ -116,7 +123,7 @@ describe('noticing that a terminal is not being observed', () => {
 
     expect(said).toHaveLength(1);
     expect(said[0]?.entry.terminalId.value).toBe(TERMINAL_UUID);
-    expect(said[0]?.silenceMs).toBe(SILENCE_MS);
+    expect(said[0]).toMatchObject({ kind: 'silent', silenceMs: SILENCE_MS });
   });
 
   it('writes it to the log as well, because a toast is gone in five seconds', () => {
@@ -253,5 +260,165 @@ describe('a terminal whose record the person deleted', () => {
     registry.register(launching());
 
     expect(scheduler.live).toHaveLength(1);
+  });
+});
+
+/**
+ * The other way a terminal stops being observed, and the one this class's own
+ * doc used to claim it caught while catching nothing of the sort: the silence
+ * timer settles on a terminal's first event and never arms again, so a terminal
+ * that goes wrong an hour later was watched by nobody.
+ *
+ * That hour-later failure is exactly M2.8's: `/clear` sends `SessionEnd` over
+ * HTTP and `SessionStart` through the command forwarder (H1), so a forwarder
+ * that did not run leaves the record at a witnessed end while the person carries
+ * on typing -- and every event of the new conversation is refused as belonging
+ * to a session this terminal never had. The row says "ended" while the terminal
+ * works, which is П1 brought back by the feature written to prevent it.
+ */
+describe('noticing that a terminal is answering a conversation we never saw begin', () => {
+  const STRANGER = NEXT_SESSION_UUID;
+  const THIRD_UUID = '7f4d2a1c-5b6e-4c8a-9d0f-1a2b3c4d5e6f';
+
+  function inState(state: 'ended' | 'idle' | 'resume_failed'): ReturnType<typeof makeEntry> {
+    return makeEntry({
+      observed: ObservedState.create({
+        state,
+        lastEventAt: OBSERVED_AT,
+        currentTool: null,
+        lastAssistantMessage: null,
+        cost: null,
+        contextWindow: null,
+        pid: null,
+      }),
+    });
+  }
+
+  function hookFrom(registry: SessionRegistry, sessionId: string): void {
+    registry.receive({
+      terminalId: TERMINAL,
+      receivedAt: OBSERVED_AT,
+      raw: JSON.stringify({
+        session_id: sessionId,
+        hook_event_name: 'UserPromptSubmit',
+        cwd: 'D:/Projects/foo',
+      }),
+    });
+  }
+
+  it('says so when the row claims the conversation is over and the terminal is talking', () => {
+    const { registry, said } = stand();
+    registry.register(inState('ended'));
+
+    hookFrom(registry, STRANGER);
+
+    expect(said).toHaveLength(1);
+    expect(said[0]).toMatchObject({ kind: 'stranded' });
+    expect(said[0]?.entry.terminalId.value).toBe(TERMINAL_UUID);
+  });
+
+  it('says so about a restore that failed as well, for the same reason', () => {
+    // The two witnessed ends are one rule, and it is the state machine's --
+    // `resume_failed` also means "we saw this conversation stop". Something
+    // answering afterwards is the same contradiction, and a copy of the pair
+    // kept here would be free to disagree with the machine about a third state.
+    const { registry, said } = stand();
+    registry.register(inState('resume_failed'));
+
+    hookFrom(registry, STRANGER);
+
+    expect(said).toHaveLength(1);
+  });
+
+  it('names the conversation, because it is the only handle anyone has on it', () => {
+    const { registry, said } = stand();
+    registry.register(inState('ended'));
+
+    hookFrom(registry, STRANGER);
+
+    expect(said[0]).toMatchObject({ sessionId: { value: STRANGER } });
+  });
+
+  it('writes it to the log as well, because a toast is gone in five seconds', () => {
+    const { registry, logger } = stand();
+    registry.register(inState('ended'));
+
+    hookFrom(registry, STRANGER);
+
+    expect(logger.warnings.map((line) => line.message)).toContain(
+      'a terminal is answering a conversation this window never saw begin'
+    );
+  });
+
+  it('says it once, and not once per keystroke', () => {
+    // Everything the person types from here on arrives the same way. A toast
+    // apiece would be the failure made unusable by its own report.
+    const { registry, said } = stand();
+    registry.register(inState('ended'));
+
+    hookFrom(registry, STRANGER);
+    hookFrom(registry, STRANGER);
+    hookFrom(registry, STRANGER);
+
+    expect(said).toHaveLength(1);
+  });
+
+  it('says it again when a second conversation goes missing', () => {
+    // Another `/clear` with the forwarder still dead. The terminal is stranded
+    // for a second time, on an id the person has not been given.
+    const { registry, said } = stand();
+    registry.register(inState('ended'));
+    hookFrom(registry, STRANGER);
+
+    hookFrom(registry, THIRD_UUID);
+
+    expect(said).toHaveLength(2);
+  });
+
+  it('leaves alone a terminal whose row is not claiming to be over', () => {
+    // An event from an unknown session while the record is alive is not this
+    // failure, and may not be a failure at all -- a hook from somewhere in the
+    // CLI we have not measured would arrive exactly like it. What makes the case
+    // above safe to interrupt a person about is the state: the row says the
+    // conversation ended, and something is plainly still talking.
+    const { registry, said } = stand();
+    registry.register(inState('idle'));
+
+    hookFrom(registry, STRANGER);
+
+    expect(said).toEqual([]);
+  });
+
+  it('leaves alone a late message from a conversation the record remembers', () => {
+    // `/clear`, then the new conversation ends properly, and only then does a
+    // message from the first one arrive. The record knows that id, so nothing
+    // was missed -- this is the ordinary in-flight case of §4.6.
+    const { registry, said } = stand();
+    registry.register(
+      makeEntry({
+        sessionId: SessionId.fromString(NEXT_SESSION_UUID),
+        sessionIdHistory: [SessionId.fromString(SESSION_UUID)],
+        observed: inState('ended').observed,
+      })
+    );
+
+    hookFrom(registry, SESSION_UUID);
+
+    expect(said).toEqual([]);
+  });
+
+  it('forgets what it complained about when the record is deleted', () => {
+    // Everything remembered about a record goes when the record goes. A restored
+    // one is a new record to this class, and the person who has just been given
+    // it back is owed the same warning as the first time.
+    const { registry, said } = stand();
+    registry.register(inState('ended'));
+    hookFrom(registry, STRANGER);
+    registry.forget(TERMINAL);
+
+    registry.register(inState('ended'));
+    hookFrom(registry, STRANGER);
+
+    expect(said).toHaveLength(2);
   });
 });

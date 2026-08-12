@@ -1,7 +1,13 @@
+import { isWitnessedEnd } from './terminal-state-machine';
 import type { Disposable } from '../ports/disposable';
 import type { Logger } from '../ports/logger';
-import type { RegistryChange, SessionRegistry } from './session-registry';
+import type {
+  RegistryChange,
+  SessionRegistry,
+  UnknownConversationChange,
+} from './session-registry';
 import type { Scheduler } from '../ports/scheduler';
+import type { SessionId } from '../entities/session-id';
 import type { TerminalEntry } from '../entities/terminal-entry';
 
 /**
@@ -16,44 +22,81 @@ export const DEFAULT_SILENCE_MS = 20_000;
 
 /** A terminal that started and has said nothing since. */
 export interface SilentTerminal {
+  readonly kind: 'silent';
   readonly entry: TerminalEntry;
   readonly silenceMs: number;
 }
+
+/**
+ * A terminal whose row says its conversation is over, and which is answering a
+ * conversation this window never saw begin.
+ *
+ * The two halves are what make it reportable. Either alone is ordinary: a record
+ * at a witnessed end is what every finished terminal looks like, and an event
+ * from an unrecognised session is a refusal §4.6 makes several times during a
+ * normal `/clear`. Together they are a contradiction that can only be resolved
+ * one way -- something is plainly still talking, so the row is wrong.
+ */
+export interface StrandedTerminal {
+  readonly kind: 'stranded';
+  readonly entry: TerminalEntry;
+  /** The conversation nobody announced. It is the only handle on it that exists. */
+  readonly sessionId: SessionId;
+}
+
+/** What this watch found. Both are "the row is not tracking the terminal". */
+export type WatchReport = SilentTerminal | StrandedTerminal;
 
 export interface ObservabilityWatchOptions {
   readonly registry: SessionRegistry;
   readonly scheduler: Scheduler;
   /** Says it where a person will see it. The log line is written here regardless. */
-  readonly announce: (silent: SilentTerminal) => void;
+  readonly announce: (report: WatchReport) => void;
   readonly logger: Logger;
   readonly silenceMs?: number;
 }
 
 /**
- * The one check that covers the causes nobody listed.
+ * The two checks that cover the causes nobody listed.
  *
- * §4.7 states the rule it implements, and states it as a correction: reading
- * settings can only find the blockers we know the names of, while "started, and
- * has sent nothing for N seconds" covers `disableAllHooks`, an administrator's
+ * §4.7 states the first rule and states it as a correction: reading settings can
+ * only find the blockers we know the names of, while "started, and has sent
+ * nothing for N seconds" covers `disableAllHooks`, an administrator's
  * `allowManagedHooksOnly`, a CLI whose hook contract moved, an interpreter that
  * is not there, a filtered URL and our own mistake in the settings file -- with
  * one rule that does not age with a version number.
  *
- * It is also the only thing that catches the limit M1.9 named: after `/clear`,
- * a terminal whose `SessionStart` forwarder is dead sees every later event
- * refused as `foreign-session`, and sits in `ended` while somebody is talking to
- * it. There is no self-repair for that in M1 -- but there is no longer a silence
- * either.
- *
  * WHAT COUNTS AS PROOF OF LIFE is any transition at all, including one the state
- * machine ignored. The question here is not whether the event was useful; it is
+ * machine ignored. The question there is not whether the event was useful; it is
  * whether the channel exists.
+ *
+ * **The second rule is M2.8's, and it exists because the first one covered
+ * nothing here.** This doc used to claim that the silence timer caught the limit
+ * M1.9 named -- a terminal whose `SessionStart` never arrived after `/clear`,
+ * refusing every event of the new conversation and sitting in `ended` while
+ * somebody types into it. It did not: the timer arms only for a record that
+ * claims to be `launching` and settles for good on its first event, so a
+ * terminal that goes wrong an hour into its life was watched by nobody at all.
+ *
+ * What catches it is the refusal itself. An event from a conversation the record
+ * has never had, arriving at a record that says its conversation is over, is a
+ * contradiction: something is talking, so the row is stale. That pair is
+ * reported once per conversation -- see `_onUnknownConversation` for why both
+ * halves are required and why the id is not simply adopted.
+ *
+ * There is still no self-repair for it. The rename would have to be invented
+ * from a signal we have not measured, and the cost of getting it wrong is a
+ * record pointing at the wrong conversation -- which is a restore, later, onto a
+ * conversation the person never asked for (§8.2). Saying so is what this class
+ * can honestly do.
  */
 export class ObservabilityWatch implements Disposable {
   private readonly _options: ObservabilityWatchOptions;
   private readonly _waiting = new Map<string, Disposable>();
   /** Terminals already decided about: heard from, announced, or dead. */
   private readonly _settled = new Set<string>();
+  /** Terminal id -> the unannounced conversation we last reported for it. */
+  private readonly _stranded = new Map<string, string>();
   private readonly _subscription: Disposable;
 
   constructor(options: ObservabilityWatchOptions) {
@@ -72,6 +115,10 @@ export class ObservabilityWatch implements Disposable {
   }
 
   private _onChange(change: RegistryChange): void {
+    if (change.kind === 'unknown-conversation') {
+      this._onUnknownConversation(change);
+      return;
+    }
     if (change.kind === 'removed') {
       // A timer left running for a record a person has just deleted announces
       // "Gripterm is not seeing this terminal" about a terminal nobody is
@@ -83,6 +130,10 @@ export class ObservabilityWatch implements Disposable {
       // this id is never watched again, and that is a claim about a record
       // coming back from the dead which nothing today can make true or false.
       this._stopWaiting(change.terminalId.value);
+      // Everything remembered about a record goes when the record does. A
+      // restored one is a new record here, and the person who has just been
+      // given it back is owed the same warning as the first time.
+      this._stranded.delete(change.terminalId.value);
       return;
     }
     if (change.kind !== 'entry') {
@@ -123,6 +174,50 @@ export class ObservabilityWatch implements Disposable {
     );
   }
 
+  /**
+   * An event refused as belonging to a conversation this record never had.
+   *
+   * **Both halves are required, and the second one is the whole of the safety
+   * here.** A refusal on its own says only that something we do not recognise
+   * posted to this terminal's address, and this build has not measured
+   * everything that can: a hook from a part of the CLI we have not met would
+   * arrive exactly like a missed `SessionStart`, and a warning on every one of
+   * those would be a warning nobody reads. Adding "the record says its
+   * conversation is over" removes that whole class -- a conversation the CLI
+   * itself considers finished is not producing prompts -- and leaves the case
+   * this is for: `/clear` whose `SessionEnd` arrived over HTTP and whose
+   * `SessionStart` did not (H1).
+   *
+   * **The id is reported, not adopted.** Renaming the record onto it would make
+   * the row right again in the common case and would, in the case we have not
+   * measured, point the record at a conversation that is not the terminal's --
+   * which a restore turns into `claude --resume` on somebody else's history
+   * (§8.2). Reporting is reversible; renaming is not.
+   *
+   * Once per conversation, because everything the person types from here on
+   * arrives the same way. A second `/clear` with the forwarder still dead is a
+   * new id and is said again: the terminal is stranded a second time, on a
+   * handle the person has not been given.
+   */
+  private _onUnknownConversation(change: UnknownConversationChange): void {
+    const id = change.entry.terminalId.value;
+    if (!isWitnessedEnd(change.entry.observed.state)) {
+      return;
+    }
+    if (this._stranded.get(id) === change.sessionId.value) {
+      return;
+    }
+    this._stranded.set(id, change.sessionId.value);
+    this._options.logger.warn('a terminal is answering a conversation this window never saw begin', {
+      terminalId: id,
+      displayName: change.entry.metadata.displayName,
+      state: change.entry.observed.state,
+      recorded: change.entry.sessionId.value,
+      arrived: change.sessionId.value,
+    });
+    this._options.announce({ kind: 'stranded', entry: change.entry, sessionId: change.sessionId });
+  }
+
   private _settle(id: string): void {
     this._stopWaiting(id);
     this._settled.add(id);
@@ -144,6 +239,6 @@ export class ObservabilityWatch implements Disposable {
       displayName: entry.metadata.displayName,
       silenceMs,
     });
-    this._options.announce({ entry, silenceMs });
+    this._options.announce({ kind: 'silent', entry, silenceMs });
   }
 }

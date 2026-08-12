@@ -218,9 +218,38 @@ function tooltipLines(
   if (entry.observed.contextWindow !== null) {
     lines.push(`context ${entry.observed.contextWindow.usedPercentage.toFixed(0)}%`);
   }
-  // Last, because it is the line a person copies rather than reads.
-  lines.push(`session ${entry.sessionId.value}`);
+  // Last, because these are the lines a person copies rather than reads.
+  appendSessions(entry, lines);
   return lines;
+}
+
+/**
+ * Which conversation this terminal is having, and which one it left.
+ *
+ * The second line is the visible half of M2.8, and it is there for a reason
+ * stronger than telling a person that `/clear` was noticed. `/clear` DESTROYS
+ * nothing: the previous conversation is still in the CLI's own store and
+ * `claude --resume <id>` still reaches it -- but its id is the only handle on it
+ * that exists anywhere, and until this line it lived nowhere a person could see.
+ * A record that quietly forgot it would make a `/clear` typed by accident
+ * irreversible for the one thing in this design nothing can rebuild.
+ *
+ * So it is shown WHOLE, and only the most recent one is. An id is a line to copy
+ * rather than to read, and a terminal cleared eleven times would otherwise turn
+ * its tooltip into a column of them; the count says there is more without
+ * drawing it.
+ */
+function appendSessions(entry: TerminalEntry, lines: string[]): void {
+  lines.push(`session ${entry.sessionId.value}`);
+  const { sessionIdHistory } = entry;
+  const previous = sessionIdHistory.at(-1);
+  if (previous === undefined) {
+    return;
+  }
+  const older = sessionIdHistory.length - 1;
+  lines.push(
+    older === 0 ? `previously ${previous.value}` : `previously ${previous.value} (+${older} more)`
+  );
 }
 
 /**

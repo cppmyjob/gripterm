@@ -7,12 +7,19 @@ import {
   HumanMetadata,
   Note,
   ObservedState,
+  SessionId,
   presentTerminal,
   type HumanMetadataParams,
   type PersistedTerminalState,
   type TerminalState,
 } from '../../packages/core/src/index';
-import { CREATED_AT, OBSERVED_AT, makeEntry } from '../helpers/domain-fixtures';
+import {
+  CREATED_AT,
+  NEXT_SESSION_UUID,
+  OBSERVED_AT,
+  SESSION_UUID,
+  makeEntry,
+} from '../helpers/domain-fixtures';
 
 /**
  * The list is the product. П1 is not "the extension knows the state" but "the
@@ -319,5 +326,44 @@ describe('what the person put on the row', () => {
 
     expect(shown.contextValue).toBe(CONTEXT_OVER);
     expect(shown.labelColorId).toBe('terminal.ansiCyan');
+  });
+});
+
+describe('a terminal whose conversation has been replaced', () => {
+  const THIRD_UUID = '7f4d2a1c-5b6e-4c8a-9d0f-1a2b3c4d5e6f';
+
+  function cleared(...history: readonly string[]): ReturnType<typeof makeEntry> {
+    return makeEntry({
+      sessionId: SessionId.fromString(NEXT_SESSION_UUID),
+      sessionIdHistory: history.map((id) => SessionId.fromString(id)),
+    });
+  }
+
+  it('names the conversation it is having now', () => {
+    expect(presentTerminal(cleared(SESSION_UUID)).tooltipLines).toContain(
+      `session ${NEXT_SESSION_UUID}`
+    );
+  });
+
+  it('names the one it left, in full, because that is the way back to it', () => {
+    // `/clear` does not delete anything: the conversation is still in the CLI's
+    // own store and `claude --resume <id>` still reaches it. The id is the only
+    // handle on it a person has, so it is shown whole rather than shortened --
+    // this is a line to copy, not to read.
+    expect(presentTerminal(cleared(SESSION_UUID)).tooltipLines).toContain(
+      `previously ${SESSION_UUID}`
+    );
+  });
+
+  it('counts the older ones instead of listing them', () => {
+    expect(presentTerminal(cleared(THIRD_UUID, SESSION_UUID)).tooltipLines).toContain(
+      `previously ${SESSION_UUID} (+1 more)`
+    );
+  });
+
+  it('says nothing at all about a terminal still in its first conversation', () => {
+    expect(
+      presentTerminal(makeEntry()).tooltipLines.some((line) => line.startsWith('previously '))
+    ).toBe(false);
   });
 });

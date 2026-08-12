@@ -339,6 +339,8 @@ export {
   ObservabilityWatch,
   type ObservabilityWatchOptions,
   type SilentTerminal,
+  type StrandedTerminal,
+  type WatchReport,
 } from './domain/services/observability-watch';
 
 export { shellKindFor } from './domain/services/shell-selection';
@@ -418,10 +420,12 @@ export {
   type RemovalChange,
   type RegistryListener,
   type SessionRegistryOptions,
+  type UnknownConversationChange,
 } from './domain/services/session-registry';
 
 export {
   TerminalStateMachine,
+  isWitnessedEnd,
   type AttentionSignal,
   type IgnoredTransition,
   type MovedTransition,

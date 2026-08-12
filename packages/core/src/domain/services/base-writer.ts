@@ -157,6 +157,13 @@ export class BaseWriter implements Disposable {
       case 'projection':
         return;
 
+      // A refusal, and the record did not move -- which is the complaint, not a
+      // change to write down. Queueing the entry here would put the same bytes
+      // back on the disk for every event of a conversation we are refusing, and
+      // wake every other window's watcher for each of them.
+      case 'unknown-conversation':
+        return;
+
       case 'removed':
         // At once, and never on the debounce. A person pressed delete and
         // confirmed it; a row that lingers in every other window for half a

@@ -56,6 +56,21 @@ const WITNESSED_DEAD: ReadonlySet<PersistedTerminalState> = new Set<PersistedTer
 ]);
 
 /**
+ * Whether the record says, on first-hand evidence, that the conversation is
+ * over.
+ *
+ * Exported because a second reader appeared with M2.8 and the alternative was a
+ * second copy of the set. `ObservabilityWatch` asks the same question this
+ * machine asks, for the opposite purpose: the machine refuses a late hook here,
+ * while the watch reads "an event arrived anyway" as proof that the row is
+ * wrong. Two copies of the pair would eventually disagree about a third state,
+ * and the disagreement would show up as a warning nobody could reproduce.
+ */
+export function isWitnessedEnd(state: PersistedTerminalState): boolean {
+  return WITNESSED_DEAD.has(state);
+}
+
+/**
  * The notification types that name a phase. Every other type -- and there are
  * seven more -- proves the process is alive without saying what it is doing.
  *

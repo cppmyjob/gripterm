@@ -345,6 +345,32 @@ describe('records other windows own', () => {
   });
 });
 
+describe('an event refused as belonging to a conversation the record never had', () => {
+  it('is not a write, because nothing about the record moved', async () => {
+    // The shape this guards against is a stranded terminal (M2.8): every event
+    // of a conversation nobody announced is refused, and a writer that queued
+    // the record anyway would put the same bytes back on the disk for each of
+    // them -- waking every other window's watcher, once per keystroke, to
+    // announce that nothing had happened.
+    const { registry, store, scheduler, writer } = stand();
+    writer.start();
+    registry.register(makeEntry());
+    await settle();
+    store.forget();
+
+    registry.ingest(TERMINAL, {
+      kind: 'Stop',
+      sessionId: SessionId.fromString('7f4d2a1c-5b6e-4c8a-9d0f-1a2b3c4d5e6f'),
+      lastAssistantMessage: null,
+      ...CONTEXT,
+    });
+    await settle();
+
+    expect(store.attempts).toBe(0);
+    expect(scheduler.armed).toStrictEqual([]);
+  });
+});
+
 describe('when the store refuses a write', () => {
   it('says which terminal and why, and does not try again', async () => {
     // A retry loop would meet a full disk with one attempt every half second for

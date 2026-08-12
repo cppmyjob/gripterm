@@ -52,6 +52,7 @@ import type {
   Logger,
   OwnerIdentity,
   StoragePreparation,
+  WatchReport,
 } from '@gripterm/core';
 import { registerCloseTerminal } from './commands/close-terminal';
 import { registerDeleteTerminal } from './commands/delete-terminal';
@@ -249,19 +250,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
       signals: readToastSignals(logger),
     })
   );
-  // The check that covers the causes nobody listed, including our own mistakes
-  // (§4.7). The policy report below explains; this one detects.
+  // The checks that cover the causes nobody listed, including our own mistakes
+  // (§4.7). The policy report below explains; these detect.
   context.subscriptions.push(
     new ObservabilityWatch({
       registry,
       scheduler: new SystemScheduler(),
       logger,
-      announce: ({ entry, silenceMs }) => {
-        say(
-          'warning',
-          `Gripterm is not seeing "${entry.metadata.displayName}": no events in ${Math.round(silenceMs / MS_PER_SECOND)} s. The terminal may be working perfectly — we would not know. See the Gripterm log.`,
-          logger
-        );
+      announce: (report) => {
+        say('warning', sentenceFor(report), logger);
       },
     })
   );
@@ -344,6 +341,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
       sharing,
     },
   };
+}
+
+/**
+ * What the watch found, in a sentence.
+ *
+ * Both say the same thing about the same thing -- the row you are looking at is
+ * not tracking that terminal -- and both name the cost rather than the cause: a
+ * person cannot act on "the SessionStart hook did not arrive", and the log,
+ * which the sentence sends them to, has the cause a few lines up.
+ *
+ * The second one names the conversation that was lost, and that is the part
+ * worth typing out: `/clear` deletes nothing, so `claude --resume <id>` still
+ * reaches the conversation the row has stopped following.
+ */
+function sentenceFor(report: WatchReport): string {
+  const name = report.entry.metadata.displayName;
+  if (report.kind === 'silent') {
+    return `Gripterm is not seeing "${name}": no events in ${Math.round(report.silenceMs / MS_PER_SECOND)} s. The terminal may be working perfectly — we would not know. See the Gripterm log.`;
+  }
+  return `Gripterm has lost track of "${name}": it is answering a conversation nothing announced, so its row is out of date. The conversation is ${report.sessionId.value}. See the Gripterm log.`;
 }
 
 /**

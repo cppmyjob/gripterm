@@ -79,7 +79,35 @@ export interface RemovalChange {
   readonly terminalId: TerminalId;
 }
 
-export type RegistryChange = EntryChange | ProjectionChange | RemovalChange;
+/**
+ * An event reached one of this window's terminals from a conversation the record
+ * has never had -- neither the one it is having nor any it remembers (§4.6,
+ * case 3).
+ *
+ * It is a REFUSAL, and it is published because of what it usually means. The
+ * only hook that announces a beginning is `SessionStart`, and it is the only one
+ * that cannot travel over HTTP (H1) -- it goes through the command forwarder,
+ * which is a node process that has to start. Lose that one event and every
+ * event after it looks like this: a conversation nobody saw begin, talking to a
+ * record that is still following the conversation it replaced.
+ *
+ * The entry travels with it deliberately, unchanged, because the fact alone is
+ * not enough to act on -- what makes this worth interrupting a person about is
+ * the state the record is in when it happens (see `ObservabilityWatch`). No
+ * listener may treat it as a change to the record: nothing about the record
+ * moved, which is exactly the complaint.
+ */
+export interface UnknownConversationChange {
+  readonly kind: 'unknown-conversation';
+  readonly entry: TerminalEntry;
+  readonly sessionId: SessionId;
+}
+
+export type RegistryChange =
+  | EntryChange
+  | ProjectionChange
+  | RemovalChange
+  | UnknownConversationChange;
 
 export type RegistryListener = (change: RegistryChange) => void;
 
@@ -107,7 +135,8 @@ type SessionRouting =
   | { readonly kind: 'current' }
   | { readonly kind: 'renamed', readonly sessionId: SessionId }
   | { readonly kind: 'stale' }
-  | { readonly kind: 'foreign' };
+  /** Carries the id, because the refusal is published and the id is its substance. */
+  | { readonly kind: 'foreign', readonly sessionId: SessionId };
 
 const CURRENT: SessionRouting = { kind: 'current' };
 
@@ -362,6 +391,13 @@ export class SessionRegistry implements HookEventSink {
       return { kind: 'stale-session' };
     }
     if (routing.kind === 'foreign') {
+      // Told, as well as logged. What this usually is -- a `SessionStart` that
+      // never arrived, leaving the record on a conversation that has been
+      // replaced -- is invisible from here: it takes the record's own state to
+      // tell "we missed a beginning" from "something we have not measured also
+      // posts to this address". So the fact goes out and the judgement is made
+      // by whoever is watching (M2.8).
+      this._notify({ kind: 'unknown-conversation', entry, sessionId: routing.sessionId });
       return { kind: 'foreign-session' };
     }
 
@@ -455,7 +491,7 @@ export class SessionRegistry implements HookEventSink {
       arrived: event.sessionId.value,
       event: event.kind,
     });
-    return { kind: 'foreign' };
+    return { kind: 'foreign', sessionId: event.sessionId };
   }
 
   /**
@@ -518,6 +554,7 @@ export class SessionRegistry implements HookEventSink {
 function terminalIdOf(change: RegistryChange): string | null {
   switch (change.kind) {
     case 'entry':
+    case 'unknown-conversation':
       return change.entry.terminalId.value;
     case 'removed':
       return change.terminalId.value;

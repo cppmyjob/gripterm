@@ -108,12 +108,16 @@ export class AttentionNotifier implements Disposable {
 
   private _onChange(change: RegistryChange): void {
     if (change.kind !== 'entry') {
-      // Two things, and neither is news. Other windows' records arrive
-      // wholesale from the base: this window did not see any of it happen,
-      // cannot say which of them moved, and a toast offering to focus a
-      // terminal that lives in another window is an interruption with nothing
-      // behind it. A deletion is the person's own act of a moment ago, and
-      // telling somebody what they have just done is the definition of noise.
+      // Three things, and none of them is a state a terminal has entered. Other
+      // windows' records arrive wholesale from the base: this window did not see
+      // any of it happen, cannot say which of them moved, and a toast offering
+      // to focus a terminal that lives in another window is an interruption with
+      // nothing behind it. A deletion is the person's own act of a moment ago,
+      // and telling somebody what they have just done is the definition of
+      // noise. A refused event moved nothing at all -- and the one shape of it
+      // worth interrupting anyone about is `ObservabilityWatch`'s to report,
+      // because it takes the record's state as well as the refusal to tell that
+      // shape from the ordinary traffic of a `/clear` (M2.8).
       return;
     }
 
