@@ -261,6 +261,24 @@ export class TerminalEntry {
     );
   }
 
+  /**
+   * True when any conversation this terminal has had appears among those ids.
+   *
+   * The same question as `matchesSession`, asked of a SET rather than of one
+   * candidate, because that is the shape the CLI's answer arrives in. It lives
+   * here rather than in either of its callers -- the restore planner and the
+   * reconciler -- so that the two cannot answer it differently: a conversation
+   * this terminal used to be is still running under an id we handed out, and a
+   * reader that forgot the history would let something start a second process
+   * on it.
+   */
+  public claimsAnyOf(sessionIds: ReadonlySet<string>): boolean {
+    return (
+      sessionIds.has(this._state.sessionId.value) ||
+      this._state.sessionIdHistory.some((past) => sessionIds.has(past.value))
+    );
+  }
+
   private _withState(changes: Partial<TerminalEntryState>): TerminalEntry {
     return new TerminalEntry({ ...this._state, ...changes });
   }

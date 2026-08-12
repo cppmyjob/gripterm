@@ -197,7 +197,7 @@ function refusalFor(
   if (listed === null) {
     return 'agents-unavailable';
   }
-  if (namesThisTerminal(listed, entry)) {
+  if (entry.claimsAnyOf(listed)) {
     return 'session-listed';
   }
   if (inputs.transcripts.kind === 'unavailable') {
@@ -283,17 +283,4 @@ function mayBeRunning(entry: TerminalEntry, inputs: RestoreInputs): boolean {
     return true;
   }
   return !inputs.deadPids.has(observed.pid);
-}
-
-/**
- * History counts, not just the current id. A conversation this terminal used to
- * be (`/clear`, `--fork-session`) turning up in the CLI's list means something
- * is running an id we handed out, and the honest reaction to that is to keep our
- * hands off the record until a person looks.
- */
-function namesThisTerminal(listed: ReadonlySet<string>, entry: TerminalEntry): boolean {
-  return (
-    listed.has(entry.sessionId.value) ||
-    entry.sessionIdHistory.some((past) => listed.has(past.value))
-  );
 }

@@ -15,7 +15,9 @@ import {
   HookEventParser,
   HookEventServer,
   ObservabilityWatch,
+  DEFAULT_RECONCILE_INTERVAL_MS,
   OwnerHeartbeat,
+  Reconciler,
   ProcessLaunchStrategy,
   RepositoryWatcher,
   RequestAuthenticator,
@@ -35,10 +37,12 @@ import {
   describeCliVersion,
   findExecutable,
   gatherRestoreInputs,
+  isProcessThere,
   launchReadiness,
   newActivationToken,
   ownerRefFor,
   planRestore,
+  sendSignalZero,
   probeVersionOutput,
   readAgentListing,
   readClaudeSettings,
@@ -184,6 +188,13 @@ export interface GriptermApi {
   readonly readiness: Readiness;
   /** `null` when this window is not reading the shared store. */
   readonly repository: TerminalRepository | null;
+  /**
+   * The sweep, or `null` in a window with no shared base.
+   *
+   * Exposed for the integration suite, which is the only place a real
+   * `owners/` directory with a real dead window in it can be built.
+   */
+  readonly reconciler: Reconciler | null;
   /** `null` for the same reason: a restore is an operation on the base. */
   readonly restore: RestoreOrchestrator | null;
 }
@@ -276,7 +287,54 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   });
   context.subscriptions.push(lifecycle);
 
-  const tree = new TerminalTreeDataProvider(registry);
+  /*
+   * The sweep, and the two things it is wired to besides its own timer.
+   *
+   * It exists only where there is a shared base: a window reading nothing has
+   * no other windows to be right or wrong about, and every record it holds is
+   * its own and live by construction.
+   *
+   * Both out-of-turn triggers go through `sweepIfStale`, which is what keeps
+   * them from being a process spawner -- each pass runs `claude agents --json`.
+   * The base-change trigger is why watching `owners/` was worth doing (§4.8):
+   * another window retiring rewrites that directory, and without this the news
+   * would wait up to the whole interval.
+   */
+  const reconciler = shared === null
+    ? null
+    : new Reconciler({
+      repository: shared.repository,
+      registry,
+      presence: shared.presence,
+      self: identity.ownerId,
+      readAgents: async () =>
+        readiness.kind === 'refused'
+          ? { kind: 'unavailable', reason: readiness.reason }
+          : await readAgentListing(readiness.cliPath, AGENT_LISTING_TIMEOUT_MS),
+      isRunning: (pid) => isProcessThere(pid, sendSignalZero),
+      clock,
+      scheduler: new SystemScheduler(),
+      logger,
+      intervalMs: readReconcileInterval(logger),
+      uptimeSeconds: uptime,
+    });
+  if (reconciler !== null && shared !== null) {
+    context.subscriptions.push(reconciler);
+    context.subscriptions.push(
+      vscode.window.onDidChangeWindowState((state) => {
+        if (state.focused) {
+          void reconciler.sweepIfStale();
+        }
+      })
+    );
+    context.subscriptions.push(
+      shared.repository.watch(() => {
+        void reconciler.sweepIfStale();
+      })
+    );
+  }
+
+  const tree = new TerminalTreeDataProvider(registry, reconciler);
   context.subscriptions.push(tree);
   context.subscriptions.push(
     vscode.window.createTreeView(TERMINALS_VIEW_ID, { treeDataProvider: tree })
@@ -363,6 +421,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     logger,
   });
 
+  // After the restore, not before: a sweep that ran first would look at records
+  // this window is about to adopt and start, and the first thing it would find
+  // is that their processes are gone -- which they are, for another second.
+  if (reconciler !== null) {
+    await reconciler.sweep();
+    reconciler.start();
+  }
+
   // `appName` is logged beside the kind we made of it, unconditionally. An
   // editor we do not recognise then names itself in the one place a person can
   // send us -- which is how the list in `identifyEditor` grows from evidence
@@ -414,6 +480,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     },
     repository: shared?.repository ?? null,
     restore: orchestrator,
+    reconciler,
   };
 }
 
@@ -837,4 +904,35 @@ async function isFile(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * How often the machine is swept, in seconds.
+ *
+ * A number a person can raise, because the cost of the sweep is a `claude`
+ * process every interval in every open window and only they know what that is
+ * worth on their machine. Out of range or not a number falls back to the
+ * default with a line saying so -- a setting that silently means something else
+ * is worse than one that refuses.
+ */
+const RECONCILE_INTERVAL_SETTING = 'gripterm.reconcile.intervalSeconds';
+const MIN_RECONCILE_SECONDS = 5;
+const MAX_RECONCILE_SECONDS = 3600;
+
+function readReconcileInterval(logger: Logger): number {
+  const seconds = vscode.workspace
+    .getConfiguration()
+    .get<number>(RECONCILE_INTERVAL_SETTING);
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) {
+    return DEFAULT_RECONCILE_INTERVAL_MS;
+  }
+  if (seconds < MIN_RECONCILE_SECONDS || seconds > MAX_RECONCILE_SECONDS) {
+    logger.warn('the reconcile interval is outside what this build accepts, so the default stands', {
+      seconds,
+      min: MIN_RECONCILE_SECONDS,
+      max: MAX_RECONCILE_SECONDS,
+    });
+    return DEFAULT_RECONCILE_INTERVAL_MS;
+  }
+  return seconds * MS_PER_SECOND;
 }

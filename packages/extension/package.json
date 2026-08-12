@@ -180,6 +180,14 @@
           "scope": "application",
           "markdownDescription": "Where Gripterm keeps its store: the records of every terminal, their event journals and the presence file of each window. Empty means `~/.gripterm`. A relative path is refused and the default used instead. Takes effect when the window reloads — every window on the machine must point at the same store to see each other."
         },
+        "gripterm.reconcile.intervalSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 5,
+          "maximum": 3600,
+          "scope": "window",
+          "markdownDescription": "How often Gripterm checks the machine for terminals whose process is gone and for windows that closed without saying so. Each check runs `claude agents --json` once, so raising it costs freshness and lowers the load. Values outside 5–3600 seconds are refused and the default used instead. Takes effect when the window reloads."
+        },
         "gripterm.notify.toastStates": {
           "type": "array",
           "items": {

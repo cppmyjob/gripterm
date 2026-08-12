@@ -60,8 +60,12 @@ class StubPresence implements OwnerPresence {
     return this._liveness.get(ownerId.value) ?? 'unknown';
   }
 
-  public async listOwners(): Promise<[]> {
+  public async survey(): Promise<[]> {
     return [];
+  }
+
+  public async collect(): Promise<void> {
+    // Not part of a read.
   }
 
   public async retire(): Promise<void> {

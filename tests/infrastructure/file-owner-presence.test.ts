@@ -33,6 +33,8 @@ const BOOTED_HOURS_AGO_S = 7200;
 
 const MINE = 'window-activation-1';
 const A_MINUTE_MS = 60_000;
+/** Exactly one freshness window back, which the table calls stale. */
+const NOW_A_MINUTE_AGO = new Date(NOW.getTime() - A_MINUTE_MS);
 
 interface Parts {
   readonly probe?: SignalProbe;
@@ -83,6 +85,15 @@ function documentFor(heartbeatAt: Date, pid = process.pid, ownerId = MINE): Pres
 async function writeOwnerFile(name: string, document: unknown): Promise<void> {
   await mkdir(layout.ownersDir, { recursive: true });
   await writeJsonFile(join(layout.ownersDir, `${name}.json`), document);
+}
+
+/** A probe that answers ESRCH for one pid and nothing for the rest. */
+function goneFor(gone: number): SignalProbe {
+  return (pid): void => {
+    if (pid === gone) {
+      throw Object.assign(new Error('kill: ESRCH'), { code: 'ESRCH' });
+    }
+  };
 }
 
 async function readOwnerFile(ownerId: string): Promise<PresenceDocument> {
@@ -335,7 +346,7 @@ describe('retiring', () => {
     await presence.retire();
 
     await expect(presence.livenessOf(OwnerId.fromString(MINE))).resolves.toBe('dead');
-    await expect(presence.listOwners()).resolves.toStrictEqual([]);
+    await expect(presence.survey()).resolves.toStrictEqual([]);
   });
 
   it('can be called twice, because a disposal path runs more than once', async () => {
@@ -363,39 +374,72 @@ describe('retiring', () => {
   });
 });
 
-describe('listing the windows on this machine', () => {
+/*
+ * The directory as its collector meets it, which is a different question from
+ * `livenessOf` and not a convenience over it. The reconciler (M2.12) has to see
+ * the files it cannot READ -- those are exactly the ones liveness can never
+ * settle, and therefore the only ones nothing else would ever take away.
+ */
+describe('surveying the windows on this machine', () => {
   it('says nobody rather than failing when no window has ever announced', async () => {
-    await expect(presenceOf().listOwners()).resolves.toStrictEqual([]);
+    await expect(presenceOf().survey()).resolves.toStrictEqual([]);
     expect(logger.infos[0]?.message).toContain('no window has announced itself');
   });
 
-  /*
-   * Unfiltered on purpose. A dead window's file outlives every terminal it
-   * owned, so a list of the living could never lead the reconciler (M2.12) to
-   * the files it has to collect.
-   */
-  it('lists a dead window beside a live one, and leaves liveness to be asked', async () => {
+  it('gives every file the same verdict `livenessOf` would', async () => {
+    // One file per row of the table, in one pass. The point is not that the
+    // verdicts are right -- that is the table's own suite above -- but that
+    // asking about the whole directory answers the same as asking one by one.
     await writeOwnerFile(MINE, documentFor(NOW));
-    await writeOwnerFile('window-activation-2', documentFor(NOW, 4242, 'window-activation-2'));
+    await writeOwnerFile('window-asleep', documentFor(NOW_A_MINUTE_AGO, process.pid, 'window-asleep'));
+    await writeOwnerFile('window-that-closed', documentFor(NOW, 4242, 'window-that-closed'));
 
-    const presence = presenceOf({ probe: refusing('ESRCH') });
-    const listed = await presence.listOwners();
+    const presence = presenceOf({ probe: goneFor(4242) });
+    const surveyed = await presence.survey();
 
-    expect(listed.map((identity) => identity.ownerId.value)).toStrictEqual([
-      MINE,
-      'window-activation-2',
+    expect(surveyed.map((row) => [row.name, row.liveness])).toStrictEqual([
+      [MINE, 'live'],
+      ['window-asleep', 'unknown'],
+      ['window-that-closed', 'dead'],
     ]);
+    for (const row of surveyed) {
+      await expect(presence.livenessOf(OwnerId.fromString(row.name))).resolves.toBe(row.liveness);
+    }
   });
 
-  it('skips a file it cannot read, names it, and still returns the others', async () => {
+  it('applies the boot rule here too: a heartbeat older than the boot is dead at any pid', async () => {
+    // The pid is this very process, so the probe cannot be what settles it.
+    await writeOwnerFile(MINE, documentFor(new Date(NOW.getTime() - BOOTED_HOURS_AGO_S * 1000 - 1)));
+
+    const surveyed = await presenceOf().survey();
+
+    expect(surveyed.map((row) => row.liveness)).toStrictEqual(['dead']);
+  });
+
+  it('shows a file it cannot read, with no identity and nothing established', async () => {
     await writeOwnerFile(MINE, documentFor(NOW));
     await writeOwnerFile('window-activation-2', { ...documentFor(NOW), pid: 0 });
 
-    const listed = await presenceOf().listOwners();
+    const surveyed = await presenceOf().survey();
 
-    expect(listed.map((identity) => identity.ownerId.value)).toStrictEqual([MINE]);
-    expect(logger.warnings[0]?.message).toContain('skipped');
+    expect(surveyed.map((row) => [row.name, row.identity === null, row.liveness])).toStrictEqual([
+      [MINE, false, 'live'],
+      ['window-activation-2', true, 'unknown'],
+    ]);
     expect(logger.warnings[0]?.details?.path).toContain('window-activation-2.json');
+  });
+
+  it('shows a file named for one window that says it is another as unreadable', async () => {
+    // The check M2.1's refusal of unsafe ids exists for, met from the reading
+    // side: a file whose name and contents disagree is a file nothing may be
+    // concluded from, including that its window is gone.
+    await writeOwnerFile('window-activation-2', documentFor(NOW, process.pid, MINE));
+
+    const surveyed = await presenceOf().survey();
+
+    expect(surveyed.map((row) => [row.name, row.identity === null])).toStrictEqual([
+      ['window-activation-2', true],
+    ]);
   });
 
   it('ignores what is not an owner file: a subdirectory, and a file of another kind', async () => {
@@ -403,9 +447,74 @@ describe('listing the windows on this machine', () => {
     await mkdir(join(layout.ownersDir, 'window-activation-2.json'), { recursive: true });
     await writeFile(join(layout.ownersDir, 'notes.txt'), 'not ours', 'utf8');
 
-    const listed = await presenceOf().listOwners();
+    const surveyed = await presenceOf().survey();
 
-    expect(listed.map((identity) => identity.ownerId.value)).toStrictEqual([MINE]);
-    expect(logger.warnings).toStrictEqual([]);
+    expect(surveyed.map((row) => row.name)).toStrictEqual([MINE]);
+  });
+});
+
+/*
+ * Collection is the only operation here that destroys anything, so it goes
+ * through the trash rather than through `rm` (§I.3). The file it takes away is
+ * usually worthless -- but the two cases that make the rule are the ones where
+ * it is not: a file that fails to decode may be failing because of a defect in
+ * OUR decoder, and deleting every instance of the evidence is how such a defect
+ * survives its own report; or because a newer build wrote it, in which case it
+ * belongs to a window that is running.
+ */
+describe('collecting a presence file', () => {
+  it('moves it to the trash rather than deleting it, and it is readable there', async () => {
+    await writeOwnerFile('window-that-closed', documentFor(NOW, 4242, 'window-that-closed'));
+
+    await presenceOf().collect('window-that-closed.json');
+
+    await expect(presenceOf().survey()).resolves.toStrictEqual([]);
+    const discarded = layout.discardedOwnerFile(NOW, 'window-that-closed.json');
+    await expect(readFile(discarded, 'utf8')).resolves.toContain('window-that-closed');
+  });
+
+  it('takes a file that does not decode, since that is the whole point of it', async () => {
+    await mkdir(layout.ownersDir, { recursive: true });
+    await writeFile(join(layout.ownersDir, 'window-half-written.json'), '{not json', 'utf8');
+
+    await presenceOf().collect('window-half-written.json');
+
+    await expect(presenceOf().survey()).resolves.toStrictEqual([]);
+  });
+
+  it('is silent about a file that is already gone', async () => {
+    await expect(presenceOf().collect('window-never-was.json')).resolves.toBeUndefined();
+  });
+
+  it('reports any other refusal instead of swallowing it', async () => {
+    // Absence is the ONE failure that means agreement. Everything else -- a
+    // locked file, a directory in the way -- has to reach the caller, or a
+    // machine where collection can never succeed sweeps silently for ever.
+    await writeOwnerFile('window-that-closed', documentFor(NOW, 4242, 'window-that-closed'));
+    const occupied = layout.discardedOwnerFile(NOW, 'window-that-closed.json');
+    await mkdir(occupied, { recursive: true });
+    await writeFile(join(occupied, 'in-the-way'), 'not a place for a file', 'utf8');
+
+    await expect(presenceOf().collect('window-that-closed.json')).rejects.toThrow();
+  });
+
+  it('refuses a name that is a path rather than a file', async () => {
+    // The names it is called with come from `readdir`, so they are single
+    // components by construction -- which is exactly why the guard is here and
+    // not argued about: the day one arrives from somewhere else, it refuses.
+    await expect(presenceOf().collect('../version')).rejects.toThrow(ValidationError);
+    await expect(presenceOf().collect('nested/thing.json')).rejects.toThrow(ValidationError);
+    await expect(presenceOf().collect('')).rejects.toThrow(ValidationError);
+  });
+
+  it('refuses to collect the file this window is announcing itself with', async () => {
+    // A window that removes its own presence file goes on beating into nothing
+    // and looks dead to everybody, which is the one mistake in this class that
+    // hands its own conversations away.
+    const presence = presenceOf();
+    await presence.announce(identityWith(process.pid));
+
+    await expect(presence.collect(`${MINE}.json`)).rejects.toThrow(ConflictError);
+    await expect(presence.livenessOf(OwnerId.fromString(MINE))).resolves.toBe('live');
   });
 });

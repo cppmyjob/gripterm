@@ -51,6 +51,37 @@ export const HEARTBEAT_INTERVAL_MS = 10_000;
 export const FRESH_HEARTBEAT_MS = 60_000;
 
 /**
+ * One entry of `owners/`, as its collector meets it rather than as a reader of
+ * one window does.
+ *
+ * `name` first, and `identity` nullable, because those two together are the
+ * whole reason this shape exists. The reconciler (M2.12) has to see the files
+ * that could NOT be decoded: liveness answers `unknown` about them forever --
+ * nothing can be established from a file nobody can read -- so they are the one
+ * kind of rubbish that no other rule would ever take away. Addressing them by
+ * the name they turned up under is the only address they have.
+ */
+export interface OwnerSurvey {
+  /**
+   * The window this file is named FOR -- which is not the same as what it says
+   * about itself, and the difference is the point: a file that does not decode
+   * still has a name, and that name is the only thing a record's `ownerId` can
+   * be compared against.
+   */
+  readonly name: string;
+  /**
+   * How the medium spells it. The handle `collect` takes, kept apart from
+   * `name` rather than derived from it, so that nothing has to know how a
+   * window's name becomes a file's -- least of all the domain.
+   */
+  readonly fileName: string;
+  /** `null` when the file did not decode. */
+  readonly identity: OwnerIdentity | null;
+  /** The same verdict `livenessOf` gives, and `unknown` for a file that did not decode. */
+  readonly liveness: OwnerLiveness;
+}
+
+/**
  * The lifecycle is part of the contract, and both implementations enforce it:
  * `announce` comes first, `heartbeat` and `retire` refuse before it, and a
  * `heartbeat` AFTER `retire` is refused as well. The last of those is the one
@@ -62,6 +93,27 @@ export interface OwnerPresence {
   announce: (identity: OwnerIdentity) => Promise<void>;
   heartbeat: () => Promise<void>;
   livenessOf: (ownerId: OwnerId) => Promise<OwnerLiveness>;
-  listOwners: () => Promise<readonly OwnerIdentity[]>;
+  /**
+   * Every file in the directory, live or not, readable or not.
+   *
+   * Deliberately unfiltered in both directions. A dead window's presence file
+   * outlives every terminal it owned, so a list of the LIVING could never lead
+   * anything to the files that have to be collected; and a list of the
+   * DECODABLE would hide precisely the ones that nothing else can.
+   */
+  survey: () => Promise<readonly OwnerSurvey[]>;
+  /**
+   * Takes one presence file out of the directory, by the name it was found
+   * under.
+   *
+   * Refuses this window's own file, in both implementations. A window that
+   * removes its own presence goes on beating into nothing and looks dead to
+   * everybody else -- which is the one mistake in this class that hands its own
+   * conversations away.
+   *
+   * Absent is not an error: two windows may sweep at once, and a collector that
+   * threw on the second would report a fault where there is only agreement.
+   */
+  collect: (fileName: string) => Promise<void>;
   retire: () => Promise<void>;
 }

@@ -180,6 +180,37 @@ describe('withSessionId', () => {
   });
 });
 
+/*
+ * The same question asked from the other side, and it is here rather than in
+ * either of its two callers because they must not answer it differently. What
+ * the CLI hands over is a LIST of running conversations, and both readers of
+ * that list -- the restore planner, deciding whether a record may be started,
+ * and the reconciler, deciding whether one lost its process -- have to count a
+ * conversation this terminal used to be as this terminal's own.
+ */
+describe('claimsAnyOf', () => {
+  it('recognises the conversation it is having now', () => {
+    expect(makeEntry().claimsAnyOf(new Set([SESSION_UUID]))).toBe(true);
+  });
+
+  it('recognises a conversation it used to be, because `/clear` does not end it', () => {
+    // The old conversation is still in the CLI's store and still resumable. A
+    // record that stopped answering for it would let something start a second
+    // process on an id we handed out.
+    const drifted = makeEntry().withSessionId(SessionId.fromString(NEXT_SESSION_UUID));
+
+    expect(drifted.claimsAnyOf(new Set([SESSION_UUID]))).toBe(true);
+    expect(drifted.claimsAnyOf(new Set([NEXT_SESSION_UUID]))).toBe(true);
+  });
+
+  it('claims nothing out of a set that does not name it', () => {
+    const drifted = makeEntry().withSessionId(SessionId.fromString(NEXT_SESSION_UUID));
+
+    expect(drifted.claimsAnyOf(new Set([TERMINAL_UUID]))).toBe(false);
+    expect(drifted.claimsAnyOf(new Set())).toBe(false);
+  });
+});
+
 describe('adoptedBy', () => {
   it('hands the record to a different owner', () => {
     const entry = makeEntry();

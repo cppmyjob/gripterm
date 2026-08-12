@@ -4,6 +4,7 @@ import type {
   OwnerIdentity,
   OwnerLiveness,
   OwnerPresence,
+  OwnerSurvey,
 } from '../../domain/ports/owner-presence';
 
 /**
@@ -48,9 +49,40 @@ export class InMemoryOwnerPresence implements OwnerPresence {
     return this._retired ? 'dead' : 'live';
   }
 
-  public async listOwners(): Promise<readonly OwnerIdentity[]> {
+  public async survey(): Promise<readonly OwnerSurvey[]> {
     const identity = this._identity;
-    return identity === null || this._retired ? [] : [identity];
+    if (identity === null || this._retired) {
+      return [];
+    }
+    // The file name is invented rather than absent: the port promises one, and
+    // a base with no medium still has to answer the same shape. It is never
+    // used to reach anything -- `collect` below refuses this row, and there is
+    // no other.
+    return [
+      {
+        name: identity.ownerId.value,
+        fileName: identity.ownerId.value,
+        identity,
+        liveness: 'live',
+      },
+    ];
+  }
+
+  /**
+   * Nothing to collect, and that is an answer rather than a gap.
+   *
+   * This base holds exactly one window -- its own -- so the only file a
+   * collector could name is either that one, which is refused for the reason
+   * the port states, or a window this object has never heard of, which it has
+   * nothing to take away. Throwing on the second would report a fault where
+   * there is only agreement.
+   */
+  public async collect(fileName: string): Promise<void> {
+    if (fileName === this._identity?.ownerId.value) {
+      throw new ConflictError('a window must not collect its own presence file', {
+        details: { fileName },
+      });
+    }
   }
 
   public async retire(): Promise<void> {

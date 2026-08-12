@@ -1,11 +1,12 @@
 import { mkdir, readdir, rm } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { uptime } from 'node:os';
 import { ConflictError, ValidationError } from '../../domain/errors/gripterm-error';
 import { OwnerId } from '../../domain/entities/owner-id';
 import { STORAGE_DIRECTORY_MODE } from './storage-layout';
 import { isEditorKind, isOwnerKind } from '../../domain/entities/owner-ref';
 import { asFiniteNumber, asRecord, asString, asStringArray } from '../../domain/json/json-readers';
+import { moveAtomic } from './atomic-file';
 import { readJsonFile, writeJsonFile } from './json-file';
 import { isProcessThere, sendSignalZero } from '../process-liveness';
 import { precedesBoot } from '../../domain/services/boot-window';
@@ -20,6 +21,7 @@ import type {
   OwnerIdentity,
   OwnerLiveness,
   OwnerPresence,
+  OwnerSurvey,
 } from '../../domain/ports/owner-presence';
 import type { SignalProbe } from '../process-liveness';
 import type { StorageLayout } from './storage-layout';
@@ -167,26 +169,91 @@ export class FileOwnerPresence implements OwnerPresence {
   }
 
   /**
-   * Every window the directory holds, live or not.
+   * Every file the directory holds, live or not, readable or not.
    *
-   * Deliberately unfiltered: liveness is a separate question with a separate
-   * answer, and folding it in here would hide exactly the files that have to be
-   * found in order to be collected -- a dead window's presence file outlives
-   * every terminal it owned, so a list of the living could never lead anything
-   * to it.
+   * Unfiltered in both directions, and both are load-bearing. Liveness is a
+   * separate question with a separate answer, so folding it in would hide
+   * exactly the files that have to be found in order to be collected -- a dead
+   * window's presence file outlives every terminal it owned. And a file that
+   * did not decode is REPORTED rather than skipped, because it is the only kind
+   * of rubbish nothing else can ever take away: liveness answers `unknown`
+   * about it forever, by design, since a file nobody can read establishes
+   * nothing at all.
+   *
+   * A file that vanished between the listing and the read arrives here as one
+   * more unreadable one. It is the same sentence to a person and the same
+   * action for the collector -- there is nothing to move, and `collect` is
+   * silent about that -- so it is not a case worth a branch of its own.
    */
-  public async listOwners(): Promise<readonly OwnerIdentity[]> {
-    const identities: OwnerIdentity[] = [];
-    for (const name of await this._ownerFileNames()) {
-      const path = join(this._options.layout.ownersDir, name);
-      const read = await this._readAt(path, basename(name, OWNER_FILE_SUFFIX));
+  public async survey(): Promise<readonly OwnerSurvey[]> {
+    const rows: OwnerSurvey[] = [];
+    for (const fileName of await this._ownerFileNames()) {
+      const path = join(this._options.layout.ownersDir, fileName);
+      const name = basename(fileName, OWNER_FILE_SUFFIX);
+      const read = await this._readAt(path, name);
       if (read.kind === 'ok') {
-        identities.push(read.record.identity);
+        rows.push({
+          name,
+          fileName,
+          identity: read.record.identity,
+          liveness: this._verdict(read.record),
+        });
         continue;
       }
-      this._options.logger.warn('an owner file was skipped', { path, reason: read.reason });
+      this._options.logger.warn('an owner file could not be read, so its window is not established as gone', {
+        path,
+        reason: read.reason,
+      });
+      rows.push({ name, fileName, identity: null, liveness: 'unknown' });
     }
-    return identities;
+    return rows;
+  }
+
+  /**
+   * Moves one presence file to the trash (§I.3), by the name it was found
+   * under.
+   *
+   * This window's own file is refused, announced or retired alike. The one
+   * rule, rather than one rule per lifecycle state: a window that removes its
+   * own presence goes on beating into nothing and looks dead to every other
+   * window on the machine, which is the single mistake here that hands its own
+   * conversations away.
+   *
+   * Somebody else's file removed by mistake is survivable and that is not an
+   * accident of this design: the owning window's next heartbeat recreates it
+   * within ten seconds. It narrows the exposure rather than closing it, which
+   * is why the reconciler's guard -- no record names that window -- is where
+   * the safety actually lives.
+   *
+   * The destination is formed FIRST, because that is the step that validates
+   * the name -- a name that could leave `owners/` must not be joined into a
+   * source path either.
+   */
+  public async collect(fileName: string): Promise<void> {
+    if (fileName === this._ownFileName()) {
+      throw new ConflictError('a window must not collect its own presence file', {
+        details: { fileName },
+      });
+    }
+
+    const to = this._options.layout.discardedOwnerFile(this._options.clock.now(), fileName);
+    const from = join(this._options.layout.ownersDir, fileName);
+    await mkdir(dirname(to), { recursive: true, mode: STORAGE_DIRECTORY_MODE });
+
+    try {
+      await moveAtomic(from, to);
+    } catch (cause: unknown) {
+      if ((cause as { readonly code?: unknown }).code !== 'ENOENT') {
+        throw cause;
+      }
+      // Two windows sweeping at once agree rather than fail: the file is gone,
+      // which is what the caller wanted.
+      this._options.logger.info('a presence file was gone before it could be collected', {
+        path: from,
+      });
+      return;
+    }
+    this._options.logger.info('a presence file was moved to the trash', { path: from, movedTo: to });
   }
 
   /**
@@ -199,6 +266,12 @@ export class FileOwnerPresence implements OwnerPresence {
     const announced = this._requireAnnounced();
     await rm(this._options.layout.ownerFile(announced.identity.ownerId), { force: true });
     this._retired = true;
+  }
+
+  /** The file this window announces itself with, or a name no listing can produce. */
+  private _ownFileName(): string | null {
+    const announced = this._announced;
+    return announced === null ? null : `${announced.identity.ownerId.value}${OWNER_FILE_SUFFIX}`;
   }
 
   private async _write(record: PresenceRecord): Promise<void> {

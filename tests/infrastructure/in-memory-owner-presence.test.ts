@@ -12,7 +12,7 @@ describe('before anyone has announced', () => {
   it('knows nobody and refuses the calls that presuppose an announcement', async () => {
     const presence = new InMemoryOwnerPresence();
 
-    await expect(presence.listOwners()).resolves.toStrictEqual([]);
+    await expect(presence.survey()).resolves.toStrictEqual([]);
     await expect(presence.livenessOf(US.ownerId)).resolves.toBe('unknown');
     await expect(presence.heartbeat()).rejects.toThrow(ConflictError);
     await expect(presence.retire()).rejects.toThrow(ConflictError);
@@ -20,13 +20,36 @@ describe('before anyone has announced', () => {
 });
 
 describe('after announcing', () => {
-  it('reports itself live and lists itself', async () => {
+  it('reports itself live and surveys itself', async () => {
     const presence = new InMemoryOwnerPresence();
     await presence.announce(US);
 
     await expect(presence.livenessOf(US.ownerId)).resolves.toBe('live');
-    await expect(presence.listOwners()).resolves.toStrictEqual([US]);
+    await expect(presence.survey()).resolves.toStrictEqual([
+      { name: US.ownerId.value, fileName: US.ownerId.value, identity: US, liveness: 'live' },
+    ]);
     await expect(presence.heartbeat()).resolves.toBeUndefined();
+  });
+
+  it('refuses to collect the only file it has, which is its own', async () => {
+    // Same rule as the file presence, and for the same reason: a window
+    // that takes away its own presence looks dead to everybody while it
+    // runs, and its conversations become adoptable.
+    const presence = new InMemoryOwnerPresence();
+    await presence.announce(US);
+
+    await expect(presence.collect(US.ownerId.value)).rejects.toThrow(ConflictError);
+    await expect(presence.livenessOf(US.ownerId)).resolves.toBe('live');
+  });
+
+  it('has nothing to collect for anybody else, and says so by doing nothing', async () => {
+    // There are no other windows in a base no other process can reach, so
+    // the honest answer is neither a throw nor a pretence of having swept.
+    const presence = new InMemoryOwnerPresence();
+    await presence.announce(US);
+
+    await expect(presence.collect(STRANGER.value)).resolves.toBeUndefined();
+    await expect(presence.survey()).resolves.toHaveLength(1);
   });
 
   it('calls a window it has never heard of `unknown`, never `dead`', async () => {
@@ -52,13 +75,13 @@ describe('after announcing', () => {
 });
 
 describe('retiring', () => {
-  it('turns the window dead and empties the list', async () => {
+  it('turns the window dead and empties the survey', async () => {
     const presence = new InMemoryOwnerPresence();
     await presence.announce(US);
     await presence.retire();
 
     await expect(presence.livenessOf(US.ownerId)).resolves.toBe('dead');
-    await expect(presence.listOwners()).resolves.toStrictEqual([]);
+    await expect(presence.survey()).resolves.toStrictEqual([]);
   });
 
   it('refuses a heartbeat afterwards, as the file presence does', async () => {
@@ -81,6 +104,6 @@ describe('retiring', () => {
     await presence.announce(US);
 
     await expect(presence.livenessOf(US.ownerId)).resolves.toBe('live');
-    await expect(presence.listOwners()).resolves.toStrictEqual([US]);
+    await expect(presence.survey()).resolves.toHaveLength(1);
   });
 });

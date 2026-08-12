@@ -19,6 +19,14 @@ export type { TranscriptIndex } from './domain/entities/transcript-index';
 export { precedesBoot } from './domain/services/boot-window';
 
 export {
+  DEFAULT_RECONCILE_INTERVAL_MS,
+  Reconciler,
+  type ReconcileListener,
+  type ReconcileReport,
+  type ReconcilerOptions,
+} from './domain/services/reconciler';
+
+export {
   planRestore,
   type RestoreInputs,
   type RestorePlan,
@@ -84,6 +92,7 @@ export {
   type OwnerIdentity,
   type OwnerLiveness,
   type OwnerPresence,
+  type OwnerSurvey,
 } from './domain/ports/owner-presence';
 export {
   OwnerHeartbeat,

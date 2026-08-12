@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { presentTerminal } from '@gripterm/core';
 import { terminalUri } from './terminal-decorations';
-import type { Disposable, SessionRegistry, TerminalEntry } from '@gripterm/core';
+import type { Disposable, Reconciler, SessionRegistry, TerminalEntry } from '@gripterm/core';
 
 export const TERMINALS_VIEW_ID = 'gripterm.terminals';
 
@@ -26,23 +26,44 @@ export class TerminalTreeDataProvider implements vscode.TreeDataProvider<Termina
   public readonly onDidChangeTreeData: vscode.Event<void>;
 
   private readonly _registry: SessionRegistry;
+  private readonly _reconciler: Reconciler | null;
   private readonly _changed = new vscode.EventEmitter<void>();
-  private readonly _subscription: Disposable;
+  private readonly _subscriptions: readonly Disposable[];
 
-  constructor(registry: SessionRegistry) {
+  /**
+   * The reconciler is optional because a window with no shared base has no
+   * other windows to be right or wrong about: every record it holds is its own
+   * and live, which is exactly what `presentTerminal` assumes without one.
+   */
+  constructor(registry: SessionRegistry, reconciler: Reconciler | null = null) {
     this._registry = registry;
+    this._reconciler = reconciler;
     this.onDidChangeTreeData = this._changed.event;
     // No delta: the signal says "read again". A tree that trusted a delta would
     // silently miss whatever a lost batch contained (M2.5).
-    this._subscription = registry.subscribe(() => {
+    const redraw = (): void => {
       this._changed.fire();
-    });
+    };
+    this._subscriptions = [
+      registry.subscribe(redraw),
+      // Liveness lives nowhere in the records, so nothing in the registry moves
+      // when a window dies -- and without this the rows of a window that closed
+      // would go on claiming it is there until something else happened to
+      // change (§4.3, M2.12).
+      ...(reconciler === null ? [] : [reconciler.subscribe(redraw)]),
+    ];
   }
 
   public getTreeItem(entry: TerminalEntry): vscode.TreeItem {
     // `knows` is what tells our records from the ones the base projected in, and
     // it decides which buttons the row offers -- see `CONTEXT_FOREIGN`.
-    const shown = presentTerminal(entry, { ours: this._registry.knows(entry.terminalId) });
+    const shown = presentTerminal(entry, {
+      ours: this._registry.knows(entry.terminalId),
+      // `detached` is laid over the row here and written nowhere (§4.3). With
+      // no reconciler there is only this window, which is live by being the one
+      // asking.
+      liveness: this._reconciler?.livenessOf(entry.owner.ownerId) ?? 'live',
+    });
     const item = new vscode.TreeItem(shown.label);
     item.id = entry.terminalId.value;
     // Names no file and is never opened. It exists so that the person's own
@@ -73,7 +94,9 @@ export class TerminalTreeDataProvider implements vscode.TreeDataProvider<Termina
   }
 
   public dispose(): void {
-    this._subscription.dispose();
+    for (const subscription of this._subscriptions) {
+      subscription.dispose();
+    }
     this._changed.dispose();
   }
 }

@@ -222,4 +222,24 @@ describe('where a discarded record goes', () => {
     expect(layout.discardedTerminalDir(at, id).startsWith(layout.trashDir)).toBe(true);
     expect(layout.discardedTerminalDir(at, id)).not.toContain('..');
   });
+
+  /*
+   * A presence file goes to the same place for the same reason (M2.12). The
+   * name is the one difference: a record is addressed by a validated uuid, and
+   * a presence file by whatever name it turned up under in `owners/` -- which
+   * is the point, since the files worth collecting are the ones nothing could
+   * be decoded from. So this is the one path here formed from an untrusted
+   * string, and it is the one that checks.
+   */
+  it('gives a collected presence file the same trash, under its own directory', () => {
+    expect(layout.discardedOwnerFile(at, 'window-that-closed.json')).toBe(
+      join(layout.trashDir, '2026-08-12_14-33-07', 'owners', 'window-that-closed.json')
+    );
+  });
+
+  it('refuses a presence file name that is a path, however it is spelled', () => {
+    for (const name of ['..', '../version', 'nested/thing.json', 'nested\\thing.json', '']) {
+      expect(() => layout.discardedOwnerFile(at, name)).toThrow(ValidationError);
+    }
+  });
 });

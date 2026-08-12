@@ -210,6 +210,48 @@ export class StorageLayout {
   public discardedObservedFile(at: Date, terminalId: TerminalId): string {
     return join(this.discardedTerminalDir(at, terminalId), OBSERVED_FILE);
   }
+
+  /**
+   * Where a presence file goes when the reconciler collects it (M2.12).
+   *
+   * The trash rather than deletion, for the same reason a record gets it: an
+   * irreversible act needs the way back made first (§I.3). The file is usually
+   * worthless -- a window that is gone -- but the case that decides the rule is
+   * the other one: a file that would not DECODE may be failing because of a
+   * defect in the decoder, and deleting every instance of the evidence is how
+   * such a defect outlives its own report.
+   *
+   * Takes a FILE NAME and not an `OwnerId`, and it is the only path in this
+   * class that takes an untrusted string. That is forced by what is being
+   * collected: the files worth collecting are the ones nothing could be read
+   * from, so there is no id to form them from -- only the name `readdir`
+   * returned. Which is exactly why this one checks.
+   */
+  public discardedOwnerFile(at: Date, fileName: string): string {
+    return join(
+      this.trashDir,
+      trashStamp(at),
+      OWNERS_DIRECTORY,
+      requireSafeFileName(fileName)
+    );
+  }
+}
+
+/**
+ * A name that can only be a file IN a directory, never a way out of one.
+ *
+ * Weaker than `requireSafeOwnerId` on purpose: this is applied to names that
+ * came off the medium rather than to ids we minted, and a presence file left by
+ * a future version -- or by a person's stray copy -- must still be collectable.
+ * What it refuses is only what would leave the directory it was found in.
+ */
+function requireSafeFileName(name: string): string {
+  if (name === '' || name === '.' || name === '..' || /[\\/]/u.test(name)) {
+    throw new ValidationError('a collected file name must be a single path component', {
+      details: { fileName: name },
+    });
+  }
+  return name;
 }
 
 /** Whether a name in `events/` is one of ours, and not, say, an editor's backup. */
