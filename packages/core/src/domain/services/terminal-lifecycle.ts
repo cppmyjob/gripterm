@@ -50,6 +50,18 @@ export interface LaunchRequest {
 export type DiscardOutcome = 'discarded' | 'still-running' | 'unknown-terminal';
 
 /**
+ * What `startOver` did.
+ *
+ * The same three answers as `discard` and for the same reason -- each is a
+ * different sentence to the person who asked -- except that the first one
+ * carries the record it made, because that is what the caller shows them.
+ */
+export type StartOverOutcome =
+  | { readonly kind: 'started', readonly entry: TerminalEntry }
+  | { readonly kind: 'still-running' }
+  | { readonly kind: 'unknown-terminal' };
+
+/**
  * What to do with the pane once the process is running.
  *
  * Two values rather than a boolean, because the call site is where this is read:
@@ -109,45 +121,72 @@ export class TerminalLifecycleService implements Disposable {
     this._options = options;
   }
 
-  /**
-   * A terminal that did not exist before: new ids, a fresh record, `launching`.
-   *
-   * Both ids are drawn here rather than by the agent's command builder, because
-   * `--session-id` on the launch path is US telling the CLI which conversation
-   * this is. The record and the process therefore agree on the id before the
-   * process exists, which is what makes the first hook event routable.
-   */
+  /** A terminal that did not exist before: new ids, a fresh record, `launching`. */
   public async launch(request: LaunchRequest): Promise<TerminalEntry> {
-    const startedAt = this._options.clock.now();
-    const entry = TerminalEntry.create({
-      terminalId: TerminalId.fromString(this._options.ids.newUuid()),
-      sessionId: SessionId.fromString(this._options.ids.newUuid()),
-      owner: this._options.owner,
-      metadata: HumanMetadata.create({
-        displayName: request.displayName,
-        task: null,
-        notes: [],
-        tags: [],
-        color: null,
-      }),
-      launch: request.recipe,
-      observed: ObservedState.create({
-        // Not `idle`: nothing has been observed yet, and a record that claims to
-        // be idle before its process exists is indistinguishable from one whose
-        // turn has finished. `launching` is also what makes a non-zero exit
-        // readable as a failed launch rather than as an ordinary end (§4.3).
-        state: 'launching',
-        lastEventAt: startedAt,
-        currentTool: null,
-        lastAssistantMessage: null,
-        cost: null,
-        contextWindow: null,
-        pid: null,
-      }),
-      createdAt: startedAt,
+    const metadata = HumanMetadata.create({
+      displayName: request.displayName,
+      task: null,
+      notes: [],
+      tags: [],
+      color: null,
     });
+    return await this.start(this._fresh(metadata, request.recipe), 'launch');
+  }
 
-    return await this.start(entry, 'launch');
+  /**
+   * The conversation could not be continued, so the work moves to a new one
+   * (M2.13).
+   *
+   * A NEW record rather than a new id on the old one, and that is the whole
+   * design. The conversation that failed still exists in the CLI's store, still
+   * answers `claude --resume <id>` by hand, and may still be named by `agents
+   * --json`; a record that went on claiming it would veto its own restore
+   * (M2.10) and would route that conversation's late events into the new work.
+   * So the old record is archived whole -- to `trash/`, with its history and its
+   * journal -- and what crosses over is the part a person cannot rebuild: the
+   * name, the task, the notes, the tags, and the recipe that says which project
+   * this is.
+   *
+   * **Refused while this window still holds a process for the record**, on the
+   * same evidence `discard` uses and for a sharper reason. A restore that failed
+   * in the editor leaves a LIVE `claude` in an open pane -- measured, A26: the
+   * process prints its refusal and does not exit -- and starting over on top of
+   * that is precisely how one terminal becomes two (О3). The pane is not closed
+   * for them either: it is not ours to kill, and nothing here establishes that
+   * anything is wrong with it.
+   *
+   * **The archive happens last.** Reversed, a start that threw would leave the
+   * person with nothing on screen and their notes in the trash; this way the
+   * worst case is two rows, which they can see and act on (§I.3).
+   */
+  public async startOver(terminalId: TerminalId): Promise<StartOverOutcome> {
+    if (this._watched.has(terminalId.value)) {
+      this._options.logger.warn(
+        'a terminal was not started over, because this window still has a process for it',
+        { terminalId: terminalId.value }
+      );
+      return { kind: 'still-running' };
+    }
+
+    const old = this._options.registry.get(terminalId);
+    if (old === undefined) {
+      this._options.logger.info('starting over named a terminal this window does not hold', {
+        terminalId: terminalId.value,
+      });
+      return { kind: 'unknown-terminal' };
+    }
+
+    const entry = await this.start(this._fresh(old.metadata, old.launch), 'launch');
+    this._options.registry.forget(terminalId);
+    this._options.logger.info('a terminal was started over', {
+      terminalId: entry.terminalId.value,
+      archived: terminalId.value,
+      // The conversation the person is walking away from, said out loud because
+      // this id is now the only handle on it anywhere: the record that named it
+      // has just been archived, and `claude --resume <id>` is what reaches it.
+      leftBehind: old.sessionId.value,
+    });
+    return { kind: 'started', entry };
   }
 
   /**
@@ -337,6 +376,39 @@ export class TerminalLifecycleService implements Disposable {
     this._watched.clear();
     // The terminals are NOT destroyed. Deactivation is not a decision about
     // anybody's conversation, and `isTransient` takes them when the editor goes.
+  }
+
+  /**
+   * A record for a conversation that does not exist yet.
+   *
+   * Both ids are drawn here rather than by the agent's command builder, because
+   * `--session-id` on the launch path is US telling the CLI which conversation
+   * this is. The record and the process therefore agree on the id before the
+   * process exists, which is what makes the first hook event routable.
+   */
+  private _fresh(metadata: HumanMetadata, launch: LaunchRecipe): TerminalEntry {
+    const startedAt = this._options.clock.now();
+    return TerminalEntry.create({
+      terminalId: TerminalId.fromString(this._options.ids.newUuid()),
+      sessionId: SessionId.fromString(this._options.ids.newUuid()),
+      owner: this._options.owner,
+      metadata,
+      launch,
+      observed: ObservedState.create({
+        // Not `idle`: nothing has been observed yet, and a record that claims to
+        // be idle before its process exists is indistinguishable from one whose
+        // turn has finished. `launching` is also what makes a non-zero exit
+        // readable as a failed launch rather than as an ordinary end (§4.3).
+        state: 'launching',
+        lastEventAt: startedAt,
+        currentTool: null,
+        lastAssistantMessage: null,
+        cost: null,
+        contextWindow: null,
+        pid: null,
+      }),
+      createdAt: startedAt,
+    });
   }
 
   private _watch(handle: TerminalHandle, intent: LaunchIntent): void {

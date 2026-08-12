@@ -63,11 +63,14 @@ import type {
   OwnerIdentity,
   OwnerPresence,
   StoragePreparation,
+  TerminalEntry,
   TerminalRepository,
   WatchReport,
 } from '@gripterm/core';
 import { registerCloseTerminal } from './commands/close-terminal';
 import { registerDeleteTerminal } from './commands/delete-terminal';
+import { registerShowRecord } from './commands/show-record';
+import { registerStartOver } from './commands/start-over';
 import { registerFocusTerminal } from './commands/focus-terminal';
 import { registerMetadataCommands } from './commands/edit-metadata';
 import { registerNewTerminal } from './commands/new-terminal';
@@ -185,6 +188,14 @@ export interface GriptermApi {
   readonly gateway: VsCodeTerminalGateway;
   readonly lifecycle: TerminalLifecycleService;
   readonly identity: OwnerIdentity;
+  /**
+   * The list itself, not merely its data provider.
+   *
+   * Exposed because `reveal` is the platform's and lives on the view: the
+   * `resume_failed` toast presses a button that selects a row, and a real editor
+   * is the only place that can be shown to happen (M2.13).
+   */
+  readonly view: vscode.TreeView<TerminalEntry>;
   readonly readiness: Readiness;
   /** `null` when this window is not reading the shared store. */
   readonly repository: TerminalRepository | null;
@@ -336,9 +347,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
 
   const tree = new TerminalTreeDataProvider(registry, reconciler);
   context.subscriptions.push(tree);
-  context.subscriptions.push(
-    vscode.window.createTreeView(TERMINALS_VIEW_ID, { treeDataProvider: tree })
-  );
+  // Held, not just disposed of: `gripterm.showRecord` reveals a row through it,
+  // and a data provider alone cannot select anything (M2.13).
+  const view = vscode.window.createTreeView(TERMINALS_VIEW_ID, { treeDataProvider: tree });
+  context.subscriptions.push(view);
   // The person's own colour, on the row's label. The icon's colour belongs to
   // the state, and the two must not be confusable (M2.7).
   const decorations = new TerminalDecorationProvider(registry);
@@ -388,6 +400,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   context.subscriptions.push(registerFocusTerminal(gateway, logger));
   context.subscriptions.push(registerCloseTerminal(lifecycle, registry, logger));
   context.subscriptions.push(registerDeleteTerminal(lifecycle, registry, logger));
+  context.subscriptions.push(registerStartOver(lifecycle, registry, logger));
+  context.subscriptions.push(registerShowRecord(view, registry, logger));
   context.subscriptions.push(...registerMetadataCommands(metadata, registry, logger));
   context.subscriptions.push(
     vscode.commands.registerCommand('gripterm.showLogs', () => {
@@ -465,6 +479,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     gateway,
     lifecycle,
     identity,
+    view,
     readiness: {
       cliPath: cli.path,
       cliVersion: cli.version,

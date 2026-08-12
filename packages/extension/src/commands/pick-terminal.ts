@@ -19,8 +19,13 @@ import type { Logger, SessionRegistry, TerminalId } from '@gripterm/core';
  */
 export const EDITABLE_ROWS: readonly string[] = [CONTEXT_LIVE, CONTEXT_OVER];
 
-/** Rows a person may throw away: ours, and no longer running. */
-export const DISCARDABLE_ROWS: readonly string[] = [CONTEXT_OVER];
+/**
+ * Rows whose terminal is over: ours, and with no process of ours behind them.
+ *
+ * Two commands take it, and both are about a record rather than a terminal --
+ * throwing it away, and starting its conversation over (M2.13).
+ */
+export const FINISHED_ROWS: readonly string[] = [CONTEXT_OVER];
 
 interface TerminalPick extends vscode.QuickPickItem {
   readonly terminalId: TerminalId;

@@ -93,6 +93,15 @@ export class TerminalTreeDataProvider implements vscode.TreeDataProvider<Termina
     return element === undefined ? [...this._registry.list()] : [];
   }
 
+  /**
+   * Flat, so nothing has a parent -- and the method exists because `reveal` is
+   * refused outright by the platform without it. That is what the
+   * `resume_failed` toast presses (M2.13).
+   */
+  public getParent(): undefined {
+    return undefined;
+  }
+
   public dispose(): void {
     for (const subscription of this._subscriptions) {
       subscription.dispose();

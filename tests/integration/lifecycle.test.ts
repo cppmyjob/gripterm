@@ -98,6 +98,9 @@ suite('the lifecycle commands', () => {
       assert.deepEqual(rowsFor(command), [CONTEXT_LIVE, CONTEXT_OVER].sort(), command);
     }
     assert.deepEqual(rowsFor('gripterm.deleteTerminal'), [CONTEXT_OVER]);
+    // M2.13, and the same rule: starting over is offered where the terminal is
+    // over. On a live row it would be an offer to make a second one (О3).
+    assert.deepEqual(rowsFor('gripterm.startOver'), [CONTEXT_OVER]);
     assert.deepEqual(rowsFor('gripterm.closeTerminal'), [CONTEXT_LIVE]);
   });
 

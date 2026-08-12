@@ -11,24 +11,31 @@ export const FOCUS_TERMINAL_COMMAND = 'gripterm.focusTerminal';
 export const SHOW_LOGS_COMMAND = 'gripterm.showLogs';
 
 /**
+ * The command that puts the person in front of the record itself -- which is
+ * where starting over is offered (M2.13).
+ */
+export const SHOW_RECORD_COMMAND = 'gripterm.showRecord';
+
+/**
  * `gripterm.notify.toastStates` by default.
  *
  * `waiting_permission` because it blocks a turn until a person answers.
  * `launch_failed` because nothing else will ever mention it -- the terminal is
  * already gone by the time the signal is born.
  *
+ * `resume_failed` because a restore that failed is exactly the complaint this
+ * extension exists about -- "a restart loses touch with my conversations" --
+ * and without a word it happens quietly.
+ *
  * `waiting_input` is deliberately NOT here: the only emitter of
  * `agent_needs_input` in binary 2.1.225 is the background agent-jobs strip, and
  * the state does not occur in a single interactive terminal [Ф, round 9].
- * `resume_failed` joins with M2, which is when a restore can fail at all.
  */
-export const DEFAULT_TOAST_SIGNALS: readonly AttentionSignal[] = ['waiting_permission', 'launch_failed'];
-
-/** Signals that mean the terminal is already gone, so there is nothing to focus. */
-const TERMINAL_IS_GONE: ReadonlySet<AttentionSignal> = new Set<AttentionSignal>([
+export const DEFAULT_TOAST_SIGNALS: readonly AttentionSignal[] = [
+  'waiting_permission',
   'launch_failed',
   'resume_failed',
-]);
+];
 
 /**
  * What each signal is called in a notification. Total over `AttentionSignal`, so
@@ -155,20 +162,28 @@ function requestFor(entry: TerminalEntry, signal: AttentionSignal): AttentionReq
 /**
  * The button, and it is not decoration.
  *
- * By the time `launch_failed` exists the terminal has been destroyed -- the
- * signal is BORN of its closing (M1.12) -- so the promised "jump to your
- * terminal" would be a button that does nothing. Where there is no terminal,
- * the offer is the place the cause is visible instead.
- *
- * `resume_failed` gets the same treatment for now; M2.13 replaces it with
- * "Show record", which is where starting over will be offered.
+ * Two of the signals are BORN of a terminal closing (M1.12), so for them the
+ * promised "jump to your terminal" would be a button that does nothing -- and
+ * the two lead to different places, because what each of them leaves behind
+ * differs. A launch that failed leaves a line in the log and nothing else. A
+ * restore that failed leaves a RECORD: the person's name for it, their task,
+ * their notes, and the offer to start the conversation over (M2.13).
  */
 function actionFor(entry: TerminalEntry, signal: AttentionSignal): AttentionAction {
-  return TERMINAL_IS_GONE.has(signal)
-    ? { title: 'Open logs', command: SHOW_LOGS_COMMAND, arguments: [] }
-    : {
-      title: 'Show terminal',
-      command: FOCUS_TERMINAL_COMMAND,
-      arguments: [entry.terminalId.value],
-    };
+  switch (signal) {
+    case 'launch_failed':
+      return { title: 'Open logs', command: SHOW_LOGS_COMMAND, arguments: [] };
+    case 'resume_failed':
+      return {
+        title: 'Show record',
+        command: SHOW_RECORD_COMMAND,
+        arguments: [entry.terminalId.value],
+      };
+    default:
+      return {
+        title: 'Show terminal',
+        command: FOCUS_TERMINAL_COMMAND,
+        arguments: [entry.terminalId.value],
+      };
+  }
 }

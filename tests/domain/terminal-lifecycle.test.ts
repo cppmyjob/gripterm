@@ -694,3 +694,156 @@ describe('deleting the record of a terminal', () => {
     expect(seen).toStrictEqual([{ kind: 'removed', terminalId: entry.terminalId }]);
   });
 });
+
+/*
+ * Starting over (M2.13).
+ *
+ * What a restore that failed leaves behind is a record whose metadata is intact
+ * and whose conversation cannot be continued. The offer is to keep the work and
+ * begin a new conversation -- which is a NEW record, because the old one names a
+ * conversation that still exists in the CLI's store and must go on naming it.
+ *
+ * Two rules carry the whole operation and both are about О3, "a full restart
+ * creates no duplicate terminal": nothing starts while this window still holds a
+ * process for the record, and the old record is archived only AFTER the new
+ * terminal exists.
+ */
+describe('starting a terminal over', () => {
+  /** A record with a person's work on it, and no process of ours. */
+  function abandoned(registry: SessionRegistry): TerminalEntry {
+    const entry = makeEntry();
+    registry.register(entry);
+    return entry;
+  }
+
+  /** The same stand, with an editor that will not open a terminal. */
+  function refusingStand(): { registry: SessionRegistry, lifecycle: TerminalLifecycleService } {
+    const clock = new FixedClock(STARTED_AT);
+    const logger = new RecordingLogger();
+    const registry = new SessionRegistry({
+      stateMachine: new TerminalStateMachine(),
+      reader: new HookEventParser(),
+      clock,
+      logger,
+    });
+    const lifecycle = new TerminalLifecycleService({
+      registry,
+      gateway: new RefusingGateway(),
+      commands: new StubAgentCommands(),
+      strategy: new ProcessLaunchStrategy(),
+      ids: new SequentialIdGenerator(),
+      clock,
+      owner: makeOwnerRef(),
+      logger,
+    });
+    return { registry, lifecycle };
+  }
+
+  it('carries the work onto a new record and starts it', async () => {
+    const { lifecycle, registry, gateway, commands } = stand();
+    const old = abandoned(registry);
+
+    const outcome = await lifecycle.startOver(old.terminalId);
+
+    expect(outcome.kind).toBe('started');
+    const next = registry.own()[0];
+    expect(next).toBeDefined();
+    // The person's work, carried whole rather than re-created: name, task,
+    // notes, tags and colour are what makes the row worth keeping at all.
+    expect(next?.metadata).toBe(old.metadata);
+    expect(next?.metadata.task).toBe('Move token validation into its own service');
+    expect(next?.metadata.notes).toHaveLength(1);
+    // And the recipe, because starting over means the same project with the
+    // same flags -- a terminal in a different folder is a different terminal.
+    expect(next?.launch).toBe(old.launch);
+    expect(next?.observed.state).toBe('launching');
+    expect(gateway.specs).toHaveLength(1);
+    expect(commands.asked.map((ask) => ask.intent)).toStrictEqual(['launch']);
+  });
+
+  it('gives the new record a conversation of its own', async () => {
+    // The whole point of a new record rather than a new id on the old one: the
+    // conversation that failed is still in the CLI's store, still resumable by
+    // hand, and still the thing `agents --json` may report as running. A record
+    // that claimed it would veto its own restore (M2.10) and would route that
+    // conversation's late events into the new one.
+    const { lifecycle, registry } = stand();
+    const old = abandoned(registry);
+
+    await lifecycle.startOver(old.terminalId);
+
+    const next = registry.own()[0];
+    expect(next?.terminalId.equals(old.terminalId)).toBe(false);
+    expect(next?.sessionId.equals(old.sessionId)).toBe(false);
+    expect(next?.sessionIdHistory).toStrictEqual([]);
+    expect(next?.claimsAnyOf(new Set([old.sessionId.value]))).toBe(false);
+    expect(next?.revision).toBe(0);
+    expect(next?.closedAt).toBeNull();
+  });
+
+  it('archives the old record, and only once the new terminal exists', async () => {
+    // The order is the reversibility (§I.3). Archive first and a start that
+    // throws leaves the person with nothing on screen and their notes in the
+    // trash; start first and the worst case is two rows, which they can see.
+    const { lifecycle, registry } = stand();
+    const old = abandoned(registry);
+    const seen: string[] = [];
+    registry.subscribe((change: RegistryChange) => {
+      seen.push(change.kind === 'removed' ? `removed ${change.terminalId.value}` : change.kind);
+    });
+
+    await lifecycle.startOver(old.terminalId);
+
+    expect(seen).toStrictEqual(['entry', `removed ${old.terminalId.value}`]);
+    expect(registry.knows(old.terminalId)).toBe(false);
+    expect(registry.own()).toHaveLength(1);
+  });
+
+  it('keeps the old record when the new terminal could not be started', async () => {
+    const { lifecycle, registry } = refusingStand();
+    const old = abandoned(registry);
+
+    await expect(lifecycle.startOver(old.terminalId)).rejects.toThrow('the editor refused');
+
+    expect(registry.knows(old.terminalId)).toBe(true);
+    expect(registry.own()).toHaveLength(1);
+  });
+
+  it('refuses while this window still has a process for the record', async () => {
+    // О3 in one line. A failed restore in the editor leaves a LIVE `claude`
+    // in an open pane -- measured, A26 -- and starting over on top of that is
+    // how one terminal becomes two.
+    const { lifecycle, registry, gateway } = stand();
+    const running = await lifecycle.launch(request());
+
+    const outcome = await lifecycle.startOver(running.terminalId);
+
+    expect(outcome.kind).toBe('still-running');
+    expect(registry.knows(running.terminalId)).toBe(true);
+    expect(registry.own()).toHaveLength(1);
+    expect(gateway.specs).toHaveLength(1);
+  });
+
+  it('refuses a record this window does not hold', async () => {
+    const { lifecycle, gateway } = stand();
+
+    const outcome = await lifecycle.startOver(TerminalId.fromString(ABSENT));
+
+    expect(outcome.kind).toBe('unknown-terminal');
+    expect(gateway.specs).toHaveLength(0);
+  });
+
+  it('writes down the conversation it left behind', async () => {
+    // The id is the only handle on that conversation that exists anywhere: the
+    // record carrying it has just been archived, and `claude --resume <id>` is
+    // what reaches it afterwards. Left unsaid, starting over would quietly make
+    // one thing irreversible.
+    const { lifecycle, registry, logger } = stand();
+    const old = abandoned(registry);
+
+    await lifecycle.startOver(old.terminalId);
+
+    const line = logger.infos.find((entry) => entry.message === 'a terminal was started over');
+    expect(line?.details?.leftBehind).toBe(old.sessionId.value);
+  });
+});

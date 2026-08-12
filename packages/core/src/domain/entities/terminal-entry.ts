@@ -179,27 +179,35 @@ export class TerminalEntry {
   }
 
   /**
-   * Records the session id drifting -- `/clear`, `/branch`, `--fork-session`.
+   * Records the session id moving -- `/clear`, `/branch`, `--fork-session`, and
+   * a `/resume` back onto a conversation this terminal has already had.
+   *
    * The previous id moves into the history so that events still in flight from
    * the dying session find their terminal instead of creating a phantom one.
+   * Returns `this` when the id has not moved.
    *
-   * Returns `this` when the id has not moved. Throws when the new id is one the
-   * terminal already used: the CLI never reissues an id, so that can only be a
-   * caller's mistake, and accepting it would leave the same id both current and
-   * past, making the lookup ambiguous.
+   * **Returning to a past id is a SWAP**, not an append: that id leaves the
+   * history and the current one takes its place there. This case threw until
+   * 2026-08-12, on the premise that the CLI never reissues an id -- and A19
+   * measured the opposite, that `/resume <id>` inside a terminal announces
+   * itself with `SessionStart` carrying exactly such an id. What the refusal was
+   * protecting survives the change and is the reason it is a swap: one id is
+   * never both current and past, so the lookup stays a lookup.
+   *
+   * What is lost is the knowledge that this conversation was also had EARLIER.
+   * The history exists to route late events, not to keep an itinerary, and both
+   * ids are in it either way.
    */
   public withSessionId(next: SessionId): TerminalEntry {
     if (this._state.sessionId.equals(next)) {
       return this;
     }
-    if (this._state.sessionIdHistory.some((past) => past.equals(next))) {
-      throw new ValidationError('a previous sessionId cannot become the current one again', {
-        details: { sessionId: next.value },
-      });
-    }
     return this._withState({
       sessionId: next,
-      sessionIdHistory: [...this._state.sessionIdHistory, this._state.sessionId],
+      sessionIdHistory: [
+        ...this._state.sessionIdHistory.filter((past) => !past.equals(next)),
+        this._state.sessionId,
+      ],
     });
   }
 

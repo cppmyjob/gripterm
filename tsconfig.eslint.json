@@ -5,6 +5,15 @@
     "declaration": false,
     "declarationMap": false,
     "noEmit": true,
+    // The domain, as SOURCE -- for the same reason as in the integration config
+    // and with one more. Checking the extension against the BUILT package lets a
+    // change compile against a `dist/` nobody rebuilt; checking it against
+    // `src/` cannot. Emission is unaffected: `tsc --build` uses the project
+    // references, and neither of these two configs emits anything.
+    "baseUrl": ".",
+    "paths": {
+      "@gripterm/core": ["packages/core/src/index.ts"]
+    },
     "types": ["node", "jest", "vscode", "mocha"]
   },
   "include": ["packages/**/src/**/*.ts", "tests/**/*.ts"]

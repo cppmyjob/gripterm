@@ -1,6 +1,10 @@
 import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
-import { ATTENTION_SIGNALS, DEFAULT_JOURNAL_POLICY } from '../../packages/core/src/index';
+import {
+  ATTENTION_SIGNALS,
+  DEFAULT_JOURNAL_POLICY,
+  DEFAULT_TOAST_SIGNALS,
+} from '../../packages/core/src/index';
 
 const BYTES_PER_KB = 1024;
 const BYTES_PER_MB = BYTES_PER_KB * BYTES_PER_KB;
@@ -20,6 +24,8 @@ suite('attention', () => {
 
     assert.ok(commands.includes('gripterm.focusTerminal'), 'focusTerminal is not registered');
     assert.ok(commands.includes('gripterm.showLogs'), 'showLogs is not registered');
+    // The third, and the one M2.13 added: a failed restore leads to the record.
+    assert.ok(commands.includes('gripterm.showRecord'), 'showRecord is not registered');
   });
 
   test('offers exactly the states this build knows in the settings enum', () => {
@@ -41,7 +47,12 @@ suite('attention', () => {
     const property = manifest.contributes.configuration.properties['gripterm.notify.toastStates'];
 
     assert.deepEqual([...property.items.enum].sort(), [...ATTENTION_SIGNALS].sort());
-    assert.deepEqual(property.default, ['waiting_permission', 'launch_failed']);
+    // Against the code's own default rather than against a third copy of the
+    // list. The manifest supplies what `getConfiguration` returns and what a
+    // person reads; `DEFAULT_TOAST_SIGNALS` supplies what the notifier falls
+    // back to. Written out here as well, the two would drift silently -- and
+    // the way it would show is a state that interrupts nobody.
+    assert.deepEqual([...property.default].sort(), [...DEFAULT_TOAST_SIGNALS].sort());
   });
 
   test('promises the same journal limits in the manifest as the code falls back to', () => {

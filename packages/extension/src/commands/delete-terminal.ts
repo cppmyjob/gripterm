@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { presentTerminal, terminalIdFrom } from '@gripterm/core';
-import { DISCARDABLE_ROWS, pickTerminal } from './pick-terminal';
+import { FINISHED_ROWS, pickTerminal } from './pick-terminal';
 import { say } from '../ui/say';
 import type { Logger, SessionRegistry, TerminalLifecycleService } from '@gripterm/core';
 
@@ -41,7 +41,7 @@ export function registerDeleteTerminal(
       named ??
       (await pickTerminal(registry, logger, {
         placeHolder: 'Delete the record of which terminal?',
-        rows: DISCARDABLE_ROWS,
+        rows: FINISHED_ROWS,
         whenEmpty: 'Gripterm: every terminal of this window is still running.',
       }));
     if (terminalId === null) {

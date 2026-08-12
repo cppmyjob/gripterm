@@ -380,21 +380,45 @@ describe('SessionRegistry §4.6 case 2: the session id moved', () => {
     expect(current(registry).sessionId.value).toBe(SESSION_UUID);
   });
 
-  it('leaves the id alone when a SessionStart names a session the terminal already used', () => {
-    // The aggregate refuses to make a past id current again -- that would leave
-    // one id both current and past and make the lookup ambiguous. So this is
-    // reported rather than forced, and the state still moves, because the
-    // terminal is demonstrably alive.
+  it('follows a SessionStart that names a session the terminal already used', () => {
+    // A19, measured 2026-08-12: `/resume <id>` inside the terminal is announced
+    // exactly like `/clear` -- `SessionEnd` and then `SessionStart` -- except
+    // that the id it carries is one this terminal has already had. This record
+    // used to stay on the conversation the person had just left, and a restore
+    // would then have offered that one.
     const { registry, logger } = stand();
     registry.ingest(TERMINAL, sessionStart(NEXT_SESSION, 'clear'));
 
     const outcome = registry.ingest(TERMINAL, sessionStart(SESSION, 'resume'));
 
     expect(outcome.kind).toBe('accepted');
-    expect(current(registry).sessionId.value).toBe(NEXT_SESSION_UUID);
-    expect(logger.warnings.map((line) => line.message)).toContain(
+    expect(current(registry).sessionId.value).toBe(SESSION_UUID);
+    expect(current(registry).sessionIdHistory.map((id) => id.value)).toStrictEqual([
+      NEXT_SESSION_UUID,
+    ]);
+    expect(logger.warnings.map((line) => line.message)).not.toContain(
       'a terminal announced a session it had used before'
     );
+    // Said in the log, because from the outside a rename to an id we have seen
+    // before and a rename to a fresh one look identical, and only one of them
+    // means the person went back.
+    const renames = logger.infos.filter((line) => line.message === 'a terminal changed session');
+    expect(renames.at(-1)?.details?.returning).toBe(true);
+    // And the `/clear` that got it there was not a return, so the flag is
+    // reporting the difference rather than being always on.
+    expect(renames.at(0)?.details?.returning).toBe(false);
+  });
+
+  it('treats what it left as stale, whichever direction it moved', () => {
+    // The other half of the swap. An event still in flight from the conversation
+    // the terminal has just left belongs to this record -- and must not set its
+    // state, or a `SessionEnd` from the abandoned session would end the one that
+    // replaced it.
+    const { registry } = stand();
+    registry.ingest(TERMINAL, sessionStart(NEXT_SESSION, 'clear'));
+    registry.ingest(TERMINAL, sessionStart(SESSION, 'resume'));
+
+    expect(registry.ingest(TERMINAL, stop(NEXT_SESSION)).kind).toBe('stale-session');
   });
 });
 

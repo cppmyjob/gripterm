@@ -429,6 +429,7 @@ export {
   TerminalLifecycleService,
   type DiscardOutcome,
   type LaunchRequest,
+  type StartOverOutcome,
   type StartVisibility,
   type TerminalLifecycleOptions,
 } from './domain/services/terminal-lifecycle';
@@ -452,6 +453,7 @@ export {
   isAttentionSignal,
   FOCUS_TERMINAL_COMMAND,
   SHOW_LOGS_COMMAND,
+  SHOW_RECORD_COMMAND,
   type AttentionNotifierOptions,
 } from './domain/services/attention-notifier';
 

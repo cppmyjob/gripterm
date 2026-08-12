@@ -6,6 +6,15 @@
     "declarationMap": false,
     "rootDir": ".",
     "outDir": "out",
+    // The domain, as SOURCE. Without this the extension's published types come
+    // from the built package while a test's come from `src/`, and a class with a
+    // private field declared in two places is two types -- so a test could not
+    // hand the running extension a record at all. The two are the same code;
+    // this says which copy the type checker reads.
+    "baseUrl": ".",
+    "paths": {
+      "@gripterm/core": ["packages/core/src/index.ts"]
+    },
     "types": ["node", "vscode", "mocha"]
   },
   "include": ["tests/integration/**/*.ts"]

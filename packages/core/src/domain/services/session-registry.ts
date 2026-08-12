@@ -439,20 +439,6 @@ export class SessionRegistry implements HookEventSink {
     }
 
     if (event.kind === 'SessionStart') {
-      if (entry.matchesSession(event.sessionId)) {
-        // A conversation this terminal has already had. The aggregate refuses
-        // to make a past id current again -- that would leave one id both
-        // current and past, and the lookup would stop being a lookup -- so this
-        // is said out loud and the id left alone. The state still moves: the
-        // terminal is demonstrably alive. Recorded as a limit in §8.2, since a
-        // restore would then offer the newer conversation and not this one.
-        this._options.logger.warn('a terminal announced a session it had used before', {
-          terminalId: entry.terminalId.value,
-          current: entry.sessionId.value,
-          announced: event.sessionId.value,
-        });
-        return CURRENT;
-      }
       // §4.6, case 1. Wider than the plan's `source: "clear"` on purpose:
       // `/resume` onto another conversation, `--fork-session` and `/compact`
       // also begin a session with a new id, and `source` is a field we collapse
@@ -460,11 +446,20 @@ export class SessionRegistry implements HookEventSink {
       // value would strand a terminal on a label we failed to guess. What makes
       // this safe is the event, not the label: `SessionStart` is the one hook
       // that announces a beginning.
+      //
+      // A conversation this terminal has ALREADY had is followed too, and it is
+      // the same rule rather than an exception to it. That case was refused
+      // until A19 measured it (2026-08-12): `/resume <id>` typed into the
+      // terminal sends `SessionEnd(reason: resume)` and then this event with an
+      // id out of our own history. Left alone, the record went on naming the
+      // conversation the person had just walked away from -- and that is the
+      // one a restore would have offered them.
       this._options.logger.info('a terminal changed session', {
         terminalId: entry.terminalId.value,
         from: entry.sessionId.value,
         to: event.sessionId.value,
         source: event.source,
+        returning: entry.matchesSession(event.sessionId),
       });
       return { kind: 'renamed', sessionId: event.sessionId };
     }

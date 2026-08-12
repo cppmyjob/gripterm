@@ -73,6 +73,16 @@
         "command": "gripterm.focusTerminal",
         "title": "Gripterm: Show Terminal",
         "icon": "$(terminal)"
+      },
+      {
+        "command": "gripterm.showRecord",
+        "title": "Gripterm: Show Record",
+        "icon": "$(list-selection)"
+      },
+      {
+        "command": "gripterm.startOver",
+        "title": "Gripterm: Start Over",
+        "icon": "$(debug-restart)"
       }
     ],
     "menus": {
@@ -150,14 +160,23 @@
           "group": "2_act@1"
         },
         {
-          "command": "gripterm.deleteTerminal",
+          "command": "gripterm.startOver",
           "when": "view == gripterm.terminals && viewItem == gripterm.terminal.over",
           "group": "2_act@2"
+        },
+        {
+          "command": "gripterm.deleteTerminal",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.over",
+          "group": "2_act@3"
         }
       ],
       "commandPalette": [
         {
           "command": "gripterm.focusTerminal",
+          "when": "false"
+        },
+        {
+          "command": "gripterm.showRecord",
           "when": "false"
         }
       ]
@@ -208,7 +227,8 @@
           },
           "default": [
             "waiting_permission",
-            "launch_failed"
+            "launch_failed",
+            "resume_failed"
           ],
           "markdownDescription": "States that raise a notification when a terminal ENTERS them. An empty list turns notifications off."
         },

@@ -1,16 +1,19 @@
 import {
   ATTENTION_SIGNALS,
   AttentionNotifier,
+  DEFAULT_TOAST_SIGNALS,
   FOCUS_TERMINAL_COMMAND,
   HookEventParser,
   ObservedState,
   SHOW_LOGS_COMMAND,
+  SHOW_RECORD_COMMAND,
   SessionId,
   SessionRegistry,
   TerminalId,
   TerminalStateMachine,
   isAttentionSignal,
   launchExitedNonZero,
+  resumeExitedNonZero,
   terminalClosed,
   type AttentionPresenter,
   type AttentionRequest,
@@ -206,6 +209,22 @@ describe('AttentionNotifier offers a button that does something', () => {
     expect(JSON.stringify(presenter.shown)).not.toContain(FOCUS_TERMINAL_COMMAND);
   });
 
+  it('offers the record when a restore failed', () => {
+    // The terminal is gone by the time this signal exists, exactly as with
+    // `launch_failed`. What is different is where the answer is: a failed
+    // LAUNCH leaves nothing but a log line, while a failed RESTORE leaves a
+    // record with its name, its task and its notes intact -- and the offer to
+    // start over sits on that record (M2.13).
+    const { registry, presenter } = stand('launching');
+
+    registry.ingest(TERMINAL, resumeExitedNonZero(1));
+
+    expect(presenter.shown[0]?.signal).toBe('resume_failed');
+    expect(presenter.shown[0]?.actions).toStrictEqual([
+      { title: 'Show record', command: SHOW_RECORD_COMMAND, arguments: [TERMINAL_UUID] },
+    ]);
+  });
+
   it('names the terminal the way the person named it', () => {
     const { registry, presenter } = stand('idle');
 
@@ -216,6 +235,16 @@ describe('AttentionNotifier offers a button that does something', () => {
 });
 
 describe('the signals a person may configure', () => {
+  it('interrupts a person for a restore that failed, by default', () => {
+    // Without this a failed restore is silent, and silence is the original
+    // complaint -- "a restart loses touch with my conversations" -- only
+    // quieter. It joins with M2, which is the milestone at which a restore can
+    // fail at all.
+    expect([...DEFAULT_TOAST_SIGNALS].sort()).toStrictEqual(
+      ['launch_failed', 'resume_failed', 'waiting_permission'].sort()
+    );
+  });
+
   it('lists exactly the ones the notifier has words for', () => {
     // Derived from the wording table rather than written out twice, so this
     // asserts the derivation rather than a copy of the list.

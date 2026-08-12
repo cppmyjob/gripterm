@@ -163,12 +163,42 @@ describe('withSessionId', () => {
     expect(entry.withSessionId(SessionId.fromString(SESSION_UUID))).toBe(entry);
   });
 
-  it('refuses to return to an id the terminal already used', () => {
+  it('returns to an id the terminal already used, by swapping it with the current one', () => {
+    // This refused until 2026-08-12, and the refusal rested on "the CLI never
+    // reissues an id". A19 measured otherwise: `/resume <id>` inside the
+    // terminal sends `SessionEnd(reason: resume)` and then
+    // `SessionStart(source: resume)` carrying the id the terminal ALREADY had.
+    //
+    // A swap and not an append, because the invariant is what made the refusal
+    // reasonable in the first place: one id must never be both current and
+    // past, or the lookup stops being a lookup.
     const drifted = makeEntry().withSessionId(SessionId.fromString(NEXT_SESSION_UUID));
 
-    expect(() => drifted.withSessionId(SessionId.fromString(SESSION_UUID))).toThrow(
-      ValidationError
-    );
+    const returned = drifted.withSessionId(SessionId.fromString(SESSION_UUID));
+
+    expect(returned.sessionId.value).toBe(SESSION_UUID);
+    expect(returned.sessionIdHistory.map((id) => id.value)).toStrictEqual([NEXT_SESSION_UUID]);
+    // Both are still this terminal's, which is what keeps an event still in
+    // flight from the conversation it just left routable to this record.
+    expect(returned.matchesSession(SessionId.fromString(NEXT_SESSION_UUID))).toBe(true);
+    expect(returned.matchesSession(SessionId.fromString(SESSION_UUID))).toBe(true);
+  });
+
+  it('leaves the history in the order the conversations were left', () => {
+    const third = 'b7c8d9e0-3f4a-4b5c-8d6e-7f8a9b0c1d2e';
+    const twice = makeEntry()
+      .withSessionId(SessionId.fromString(NEXT_SESSION_UUID))
+      .withSessionId(SessionId.fromString(third));
+
+    const returned = twice.withSessionId(SessionId.fromString(SESSION_UUID));
+
+    expect(returned.sessionId.value).toBe(SESSION_UUID);
+    // The first conversation leaves the history because it is current again;
+    // the other two keep their order, most recently left last.
+    expect(returned.sessionIdHistory.map((id) => id.value)).toStrictEqual([
+      NEXT_SESSION_UUID,
+      third,
+    ]);
   });
 
   it('still matches events addressed to a previous session', () => {
