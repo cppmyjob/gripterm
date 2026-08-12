@@ -9,41 +9,11 @@ import {
   terminalClosed,
   type SilentTerminal,
 } from '../../packages/core/src/index';
-import { FixedClock, RecordingLogger } from '../helpers/port-fakes';
+import { FakeScheduler, FixedClock, RecordingLogger } from '../helpers/port-fakes';
 import { OBSERVED_AT, SESSION_UUID, TERMINAL_UUID, makeEntry } from '../helpers/domain-fixtures';
-import type { Disposable, Scheduler } from '../../packages/core/src/index';
 
 const TERMINAL = TerminalId.fromString(TERMINAL_UUID);
 const SILENCE_MS = 20_000;
-
-/** A scheduler a test drives by hand: nothing runs until it is told to run. */
-class FakeScheduler implements Scheduler {
-  public readonly armed: { ms: number, action: () => void, cancelled: boolean }[] = [];
-
-  public get live(): { ms: number, action: () => void, cancelled: boolean }[] {
-    return this.armed.filter((timer) => !timer.cancelled);
-  }
-
-  public after(ms: number, action: () => void): Disposable {
-    const timer = { ms, action, cancelled: false };
-    this.armed.push(timer);
-    return {
-      dispose: (): void => {
-        timer.cancelled = true;
-      },
-    };
-  }
-
-  /** Lets the wait expire. Throws rather than passing silently if nothing is waiting. */
-  public elapse(): void {
-    const timer = this.live[0];
-    if (timer === undefined) {
-      throw new Error('nothing was waiting');
-    }
-    timer.cancelled = true;
-    timer.action();
-  }
-}
 
 interface Stand {
   readonly registry: SessionRegistry;

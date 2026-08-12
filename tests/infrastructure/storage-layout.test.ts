@@ -6,6 +6,7 @@ import {
   TerminalId,
   ValidationError,
   isJournalFileName,
+  isJournalPath,
   journalDay,
 } from '../../packages/core/src/index';
 
@@ -132,6 +133,43 @@ describe('the name of a journal file', () => {
       'notes.txt',
     ]) {
       expect(isJournalFileName(name)).toBe(false);
+    }
+  });
+});
+
+/**
+ * What the watcher drops before it debounces. The forms below are the ones the
+ * platform actually produced on this machine on 2026-08-12 -- a relative path
+ * from the watched root, with a backslash -- and the forward-slash spellings are
+ * here because the same store is read on POSIX by the same code.
+ */
+describe('telling journal traffic apart from the rest', () => {
+  const ID = TERMINAL.value;
+
+  it('knows the journal by where it sits, whichever separator the platform used', () => {
+    expect(isJournalPath(`${ID}\\events\\2027-01-05.ndjson`)).toBe(true);
+    expect(isJournalPath(`${ID}/events/2027-01-05.ndjson`)).toBe(true);
+    // The directory itself, which is what its creation is reported as.
+    expect(isJournalPath(`${ID}\\events`)).toBe(true);
+  });
+
+  it('keeps everything else, including what it has never seen before', () => {
+    for (const path of [
+      `${ID}\\record.json`,
+      `${ID}\\observed.json`,
+      `${ID}\\adopting.json`,
+      // Reported when a file appears inside `events/`: writing there stirs the
+      // parent directory too, and that event is indistinguishable from a record
+      // being written.
+      ID,
+      'e5f6a7b8.json',
+      // A name from a build that does not exist yet. Unknown means kept: the
+      // journal is the one thing we know nobody reads, and everything else is a
+      // reason to look again.
+      `${ID}\\workflows\\run-1\\state.json`,
+      'events',
+    ]) {
+      expect(isJournalPath(path)).toBe(false);
     }
   });
 });

@@ -107,10 +107,21 @@ export {
 } from './infrastructure/store/journal-reader';
 export { FileSessionSettingsStore } from './infrastructure/store/file-session-settings-store';
 export {
+  DEFAULT_DEBOUNCE_MS,
+  RepositoryWatcher,
+  nodeDirectoryWatch,
+  watchedName,
+  type DirectoryEvents,
+  type DirectoryHandle,
+  type DirectoryWatch,
+  type RepositoryWatcherOptions,
+} from './infrastructure/store/repository-watcher';
+export {
   STORAGE_DIRECTORY_MODE,
   STORAGE_SCHEMA_VERSION,
   StorageLayout,
   isJournalFileName,
+  isJournalPath,
   journalDay,
 } from './infrastructure/store/storage-layout';
 export { writeAtomic, type AtomicWriteOptions } from './infrastructure/store/atomic-file';

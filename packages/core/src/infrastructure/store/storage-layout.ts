@@ -179,6 +179,35 @@ export function isJournalFileName(name: string): boolean {
 
 const JOURNAL_FILE_NAME = /^\d{4}-\d{2}-\d{2}\.ndjson$/;
 
+/**
+ * Whether a path the directory watcher reported is journal traffic.
+ *
+ * The path is relative to `terminals/`, so ours look like
+ * `<terminalId>\events\2026-08-12.ndjson` -- measured on this machine on
+ * 2026-08-12, backslash included, which is why both separators are accepted here
+ * instead of `path.sep` being assumed.
+ *
+ * The journal is written on every hook event and read by no window, so it is the
+ * one high-frequency source in the store; it is dropped BEFORE the debounce,
+ * because otherwise one window's terminal warms every other window's battery
+ * (§4.8).
+ *
+ * What the measurement also showed, and what the obvious sentence "the journal is
+ * filtered out" would hide: ten appends produce twelve callbacks, of which this
+ * drops eleven. The twelfth is a `change` on the terminal DIRECTORY -- writing
+ * inside `events/` stirs its parent -- and it is indistinguishable from a record
+ * being written, so it stays and the debounce absorbs it. The filter removes the
+ * per-line traffic, not all of it.
+ */
+export function isJournalPath(relative: string): boolean {
+  return relative.split(PATH_SEPARATOR)[JOURNAL_SEGMENT] === EVENTS_DIRECTORY;
+}
+
+const PATH_SEPARATOR = /[\\/]/;
+
+/** `<terminalId>/events/...`: the directory is always the second segment. */
+const JOURNAL_SEGMENT = 1;
+
 const MONTH_OFFSET = 1;
 const DATE_FIELD_WIDTH = 2;
 const YEAR_WIDTH = 4;

@@ -4,6 +4,7 @@ import type {
   ErrorDetails,
   IdGenerator,
   Logger,
+  Scheduler,
   TerminalExit,
   TerminalGateway,
   TerminalHandle,
@@ -36,6 +37,49 @@ export class FixedClock implements Clock {
 
   public advance(ms: number): void {
     this._nowMs += ms;
+  }
+}
+
+/** One waiting call, as `FakeScheduler` keeps it. */
+export interface ArmedTimer {
+  ms: number;
+  action: () => void;
+  cancelled: boolean;
+}
+
+/**
+ * A scheduler a test drives by hand: nothing runs until it is told to run.
+ *
+ * Here rather than beside its first test because there are two consumers now --
+ * `ObservabilityWatch` and `RepositoryWatcher` -- and a second copy of a fake is
+ * a second answer to "what does `after` promise". They would drift where nobody
+ * looks: one of them cancelling on dispose and the other not.
+ */
+export class FakeScheduler implements Scheduler {
+  public readonly armed: ArmedTimer[] = [];
+
+  public get live(): ArmedTimer[] {
+    return this.armed.filter((timer) => !timer.cancelled);
+  }
+
+  public after(ms: number, action: () => void): Disposable {
+    const timer = { ms, action, cancelled: false };
+    this.armed.push(timer);
+    return {
+      dispose: (): void => {
+        timer.cancelled = true;
+      },
+    };
+  }
+
+  /** Lets the wait expire. Throws rather than passing silently if nothing is waiting. */
+  public elapse(): void {
+    const timer = this.live[0];
+    if (timer === undefined) {
+      throw new Error('nothing was waiting');
+    }
+    timer.cancelled = true;
+    timer.action();
   }
 }
 
