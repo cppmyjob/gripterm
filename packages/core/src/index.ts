@@ -60,6 +60,14 @@ export {
   type TerminalRepository,
 } from './domain/repositories/terminal-repository';
 
+export {
+  observedAfter,
+  projectObserved,
+  type ObservedAfterParams,
+  type ProjectedEvent,
+  type Projection,
+  type ProjectionParams,
+} from './domain/services/observed-projection';
 export { type EventJournal } from './domain/ports/event-journal';
 export { type HookDelivery } from './domain/entities/hook-delivery';
 

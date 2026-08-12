@@ -1,11 +1,12 @@
-import { ObservedState } from '../entities/observed-state';
 import { isHookEvent } from '../events/terminal-event';
+import { observedAfter } from './observed-projection';
 import type { Clock } from '../ports/clock';
 import type { Disposable } from '../ports/disposable';
 import type { HookDelivery } from '../entities/hook-delivery';
 import type { HookEvent, TerminalEvent } from '../events/terminal-event';
 import type { HookEventReader } from '../ports/hook-event-reader';
 import type { HookEventSink } from '../ports/hook-event-sink';
+import type { ObservedState } from '../entities/observed-state';
 import type { Logger } from '../ports/logger';
 import type { PersistedTerminalState } from '../entities/terminal-state';
 import type { SessionId } from '../entities/session-id';
@@ -66,36 +67,6 @@ type SessionRouting =
   | { readonly kind: 'foreign' };
 
 const CURRENT: SessionRouting = { kind: 'current' };
-
-/**
- * What each event says about the tool a terminal is running.
- *
- * A total record rather than a `switch`, so that a new member of `TerminalEvent`
- * breaks the build here and has to decide -- without the unreachable `default`
- * branch a `switch` would need in order to say the same thing.
- *
- *   * `name`  -- this event puts a tool in front of the user;
- *   * `clear` -- the tool has finished, or the turn, session or process is over;
- *   * `keep`  -- the event says nothing about tools either way.
- */
-const TOOL_RULES: Readonly<Record<TerminalEvent['kind'], 'clear' | 'keep' | 'name'>> = {
-  SessionStart: 'clear',
-  SessionEnd: 'clear',
-  UserPromptSubmit: 'clear',
-  PreToolUse: 'name',
-  PostToolUse: 'clear',
-  PostToolUseFailure: 'clear',
-  PermissionRequest: 'name',
-  Notification: 'keep',
-  Stop: 'clear',
-  StopFailure: 'clear',
-  CwdChanged: 'keep',
-  ResumeTimedOut: 'keep',
-  ProcessGone: 'clear',
-  TerminalClosed: 'clear',
-  LaunchExitedNonZero: 'clear',
-  ResumeExitedNonZero: 'clear',
-};
 
 /**
  * The projection of the base for one window, and the only object that decides
@@ -359,7 +330,11 @@ export class SessionRegistry implements HookEventSink {
   }
 
   /**
-   * Observed state after the event.
+   * Observed state after the event, by the same rule the replay of a journal
+   * uses (`observedAfter`). One rule and not two: a second copy would be a
+   * second answer to "what does `PreToolUse` mean", and the two would disagree
+   * exactly where nobody looks -- a terminal restored from its journal showing a
+   * different tool from the one the live window showed a minute earlier.
    *
    * The time comes from the clock rather than from `HookDelivery.receivedAt`,
    * although both are within a millisecond of each other here. `ingest` is one
@@ -372,18 +347,11 @@ export class SessionRegistry implements HookEventSink {
     event: TerminalEvent,
     transition: StateTransition
   ): ObservedState {
-    const previous = entry.observed;
-    return ObservedState.create({
-      state: transition.kind === 'moved' ? transition.to : transition.state,
-      lastEventAt: this._options.clock.now(),
-      currentTool: toolAfter(event, previous.currentTool),
-      lastAssistantMessage: messageAfter(event, previous.lastAssistantMessage),
-      // Neither has any other producer than the statusline forwarder (M1.8a),
-      // and `pid` comes from the gateway. Resetting them on every event would
-      // make those channels look broken.
-      cost: previous.cost,
-      contextWindow: previous.contextWindow,
-      pid: previous.pid,
+    return observedAfter({
+      previous: entry.observed,
+      event,
+      transition,
+      at: this._options.clock.now(),
     });
   }
 
@@ -410,26 +378,3 @@ export class SessionRegistry implements HookEventSink {
   }
 }
 
-function toolAfter(event: TerminalEvent, previous: string | null): string | null {
-  const rule = TOOL_RULES[event.kind];
-  if (rule === 'keep') {
-    return previous;
-  }
-  // A `name` event whose `tool_name` was absent still means a tool is running;
-  // it is the one we were not told the name of, and never the previous one --
-  // showing a finished tool as the running one is a lie with no expiry.
-  return rule === 'name' && 'toolName' in event ? event.toolName : null;
-}
-
-function messageAfter(event: TerminalEvent, previous: string | null): string | null {
-  if (event.kind === 'Stop') {
-    // A missing detail never costs what we already know, which is the parser's
-    // rule carried through to the store.
-    return event.lastAssistantMessage ?? previous;
-  }
-  if (event.kind === 'SessionStart') {
-    // A new conversation does not inherit the previous one's last words.
-    return null;
-  }
-  return previous;
-}
