@@ -84,6 +84,11 @@ export {
   StorageLayout,
 } from './infrastructure/store/storage-layout';
 export { writeAtomic, type AtomicWriteOptions } from './infrastructure/store/atomic-file';
+export { readJsonFile, writeJsonFile, type JsonRead } from './infrastructure/store/json-file';
+export {
+  FileTerminalRepository,
+  type FileTerminalRepositoryOptions,
+} from './infrastructure/store/file-terminal-repository';
 export {
   StorageMigrator,
   type StorageOrigin,
