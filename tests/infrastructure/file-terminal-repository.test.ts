@@ -6,6 +6,7 @@ import {
   FileTerminalRepository,
   HumanMetadata,
   NotFoundError,
+  ObservedState,
   OwnerId,
   OwnerRef,
   SessionId,
@@ -13,7 +14,13 @@ import {
   TerminalId,
   encodeRecord,
 } from '../../packages/core/src/index';
-import type { Logger, OwnerLiveness, OwnerPresence, TerminalEntry } from '../../packages/core/src/index';
+import type {
+  Logger,
+  OwnerLiveness,
+  OwnerPresence,
+  PersistedTerminalState,
+  TerminalEntry,
+} from '../../packages/core/src/index';
 import { NEXT_SESSION_UUID, TERMINAL_UUID, makeEntry, makeOwnerRef } from '../helpers/domain-fixtures';
 
 /**
@@ -104,6 +111,22 @@ function entryOwnedBy(ownerId: string, overrides: Parameters<typeof makeEntry>[0
   return makeEntry({ owner: makeOwnerRef(ownerId), ...overrides });
 }
 
+function observedIn(state: PersistedTerminalState): ObservedState {
+  return ObservedState.create({
+    state,
+    lastEventAt: new Date('2026-08-12T10:00:00.000Z'),
+    currentTool: null,
+    lastAssistantMessage: null,
+    cost: null,
+    contextWindow: null,
+    pid: null,
+  });
+}
+
+function renamedTo(displayName: string): HumanMetadata {
+  return HumanMetadata.create({ displayName, task: null, notes: [], tags: [], color: null });
+}
+
 /** Puts a record on disk without going through the repository's own rules. */
 async function plant(entry: TerminalEntry): Promise<void> {
   const directory = layout.terminalDir(entry.terminalId);
@@ -142,6 +165,77 @@ describe('writing', () => {
       'observed.json',
       'record.json',
     ]);
+  });
+
+  /*
+   * The half of M2.6 that lives here. The observed snapshot is written on every
+   * debounced pass; `record.json` is the same bytes on almost all of them, and
+   * writing a file whose content did not change is a no-op with side effects --
+   * every other window's watcher fires and answers by re-reading the base, and
+   * the file it re-reads is the one holding the task and the notes, which is the
+   * only thing in this store nothing can rebuild.
+   *
+   * A sentinel on disk rather than a timestamp: mtime resolution is coarse
+   * enough on this platform to make a passing test mean nothing.
+   */
+  it('leaves the record alone when only the observed half moved', async () => {
+    const entry = entryOwnedBy(MINE);
+    const repository = repositoryFor(MINE);
+    await repository.write(entry);
+    await writeFile(layout.recordFile(entry.terminalId), '{"sentinel":true}', 'utf8');
+
+    await repository.write(entry.withObserved(observedIn('working')));
+
+    expect(await readFile(layout.recordFile(entry.terminalId), 'utf8')).toBe('{"sentinel":true}');
+    const snapshot = JSON.parse(
+      await readFile(layout.observedFile(entry.terminalId), 'utf8')
+    ) as { state: string };
+    expect(snapshot.state).toBe('working');
+  });
+
+  it('writes the record again as soon as its own content moves', async () => {
+    const entry = entryOwnedBy(MINE);
+    const repository = repositoryFor(MINE);
+    await repository.write(entry);
+    await writeFile(layout.recordFile(entry.terminalId), '{"sentinel":true}', 'utf8');
+
+    await repository.write(entry.withMetadata(renamedTo('something else')));
+
+    const record = JSON.parse(
+      await readFile(layout.recordFile(entry.terminalId), 'utf8')
+    ) as { metadata: { displayName: string } };
+    expect(record.metadata.displayName).toBe('something else');
+  });
+
+  it('remembers only what it managed to write', async () => {
+    // A record remembered as stored and then not stored would be skipped for as
+    // long as this window lives -- the one way this optimisation could lose
+    // somebody's task and notes rather than merely save a write.
+    const entry = entryOwnedBy(MINE);
+    const repository = repositoryFor(MINE);
+    // A directory where the file goes: `rename` cannot land on it, so the record
+    // half fails while the observed half has already succeeded.
+    await mkdir(layout.recordFile(entry.terminalId), { recursive: true });
+    await expect(repository.write(entry)).rejects.toThrow();
+
+    await rm(layout.recordFile(entry.terminalId), { recursive: true });
+    await repository.write(entry);
+
+    expect((await repository.readAll()).length).toBe(1);
+  });
+
+  it('forgets what it wrote when the record is removed', async () => {
+    // Otherwise a record written again under the same id and the same content --
+    // which is what restoring one looks like -- would be recognised as already
+    // there and never written back.
+    const entry = entryOwnedBy(MINE);
+    const repository = repositoryFor(MINE);
+    await repository.write(entry);
+    await repository.remove(entry.terminalId);
+
+    await repository.write(entry);
+
+    expect((await repository.readAll()).length).toBe(1);
   });
 
   it('tells its listeners, so a window redraws without polling itself', async () => {

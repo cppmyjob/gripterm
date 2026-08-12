@@ -56,6 +56,19 @@ export interface FileTerminalRepositoryOptions {
  */
 export class FileTerminalRepository implements TerminalRepository {
   private readonly _listeners = new Set<RepositoryListener>();
+  /**
+   * What this window last wrote into each `record.json`, serialised.
+   *
+   * Memory rather than a read, and it is the single-writer rule cashed in: while
+   * this window is alive nobody else may write these files, so what we put there
+   * is what is there. See `_store` for what it is for.
+   *
+   * The one shape it can be wrong about is a record taken from a live window by
+   * a FORCED adoption (`AdoptOptions.force`), which is a person saying they have
+   * looked and this window is gone. It is then wrong about a record it should
+   * not be writing at all.
+   */
+  private readonly _records = new Map<string, string>();
 
   constructor(private readonly _options: FileTerminalRepositoryOptions) {}
 
@@ -139,6 +152,10 @@ export class FileTerminalRepository implements TerminalRepository {
     await this._require(id);
     await rm(this._options.layout.recordFile(id), { force: true });
     await rm(this._options.layout.observedFile(id), { force: true });
+    // Forgotten here as well, or a record written again under the same id and
+    // the same content -- which is what restoring one looks like -- would be
+    // recognised as already on disk and never written back.
+    this._records.delete(id.value);
     this._notify();
   }
 
@@ -228,22 +245,40 @@ export class FileTerminalRepository implements TerminalRepository {
   }
 
   /**
-   * Writes both halves, the record LAST.
+   * Writes both halves, the record LAST -- and the record only when it moved.
    *
-   * A crash between the two leaves the observed snapshot ahead of the record,
-   * which the codec absorbs -- it is a cache and is allowed to be wrong. The
-   * other order would leave a record pointing at a snapshot that never arrived,
-   * and the reader would have no way to tell that from a snapshot legitimately
-   * lost.
+   * The order first. A crash between the two leaves the observed snapshot ahead
+   * of the record, which the codec absorbs -- it is a cache and is allowed to be
+   * wrong. The other order would leave a record pointing at a snapshot that
+   * never arrived, and the reader would have no way to tell that from a snapshot
+   * legitimately lost.
+   *
+   * Then the skip, which is the other half of M2.6. The observed half is written
+   * on every debounced pass; the record half is the same bytes on almost all of
+   * them, and writing a file whose content did not change is a no-op with three
+   * side effects and no benefit: every other window's watcher fires and answers
+   * by re-reading the whole base; a reader in one of them meets our `rename` and
+   * pays the retry ladder for it (measured `EPERM`, §2.1a); and a crash mid-write
+   * leaves a scratch file behind. It is also the file holding the task and the
+   * notes, which is the one thing in this store nothing can rebuild, so the
+   * asymmetry runs the right way: skipping costs nothing, writing costs a little
+   * every time, and the little is paid a few thousand times an hour.
    */
   private async _store(entry: TerminalEntry): Promise<void> {
     const { layout } = this._options;
-    await mkdir(layout.terminalDir(entry.terminalId), {
-      recursive: true,
-      mode: STORAGE_DIRECTORY_MODE,
-    });
-    await writeJsonFile(layout.observedFile(entry.terminalId), encodeObserved(entry.observed));
-    await writeJsonFile(layout.recordFile(entry.terminalId), encodeRecord(entry));
+    const id = entry.terminalId;
+    await mkdir(layout.terminalDir(id), { recursive: true, mode: STORAGE_DIRECTORY_MODE });
+    await writeJsonFile(layout.observedFile(id), encodeObserved(entry.observed));
+
+    const record = encodeRecord(entry);
+    const written = JSON.stringify(record);
+    if (written === this._records.get(id.value)) {
+      return;
+    }
+    await writeJsonFile(layout.recordFile(id), record);
+    // After the write, never before: a record remembered as stored and then not
+    // stored would be skipped for as long as this window lives.
+    this._records.set(id.value, written);
   }
 
   /**

@@ -5,6 +5,7 @@ import { stat } from 'node:fs/promises';
 import {
   AttentionNotifier,
   BaseProjection,
+  BaseWriter,
   ClaudeCodeCommandFactory,
   FileEventJournal,
   FileOwnerPresence,
@@ -153,6 +154,14 @@ let receiver: HookEventServer | null = null;
  * closed.
  */
 let presence: OwnerHeartbeat | null = null;
+
+/**
+ * This window's writer, held here because its shutdown is a FLUSH: the last
+ * thing that happens to a terminal is its close, and a window that went without
+ * writing that down leaves a record claiming to be at work on a tool that
+ * stopped running when the editor did.
+ */
+let scribe: BaseWriter | null = null;
 
 /**
  * Entry point and composition root.
@@ -383,13 +392,24 @@ async function shareTheBase(parts: {
   const projection = new BaseProjection({ repository, registry, logger });
   context.subscriptions.push(projection);
 
+  // The other direction, and the reason this window is a writer of the base and
+  // not only a reader of it (M2.6). Started before anything can register a
+  // terminal, though it does not depend on that -- it takes whatever the
+  // registry already holds.
+  const writer = new BaseWriter({ repository, registry, scheduler, logger });
+  scribe = writer;
+  context.subscriptions.push(writer);
+  writer.start();
+
   const watcher = new RepositoryWatcher({ layout: storage, scheduler, logger });
   context.subscriptions.push(watcher);
-  // Both signals lead to the same place. The watcher's is other windows, after
-  // a debounce; the repository's is this window's own writes, at once -- a
-  // person who renames a terminal should not watch the row lag behind them.
+  // One signal, not two. The repository's own `watch` was subscribed here until
+  // M2.6 gave this window something to write, and it then had a cost and no
+  // effect: a re-read provoked by OUR write can only produce what the registry
+  // already holds -- `replaceForeign` skips the records we own -- so it was a
+  // full read of the base per write for nothing. What this window does to its
+  // own list, it sees through the registry; what other windows do, it sees here.
   context.subscriptions.push(watcher.watch(() => void projection.refresh()));
-  context.subscriptions.push(repository.watch(() => void projection.refresh()));
   watcher.start();
   // The base as it is right now, before anything changes: a window that only
   // reacted to changes would show an empty list until somebody else moved.
@@ -425,17 +445,27 @@ async function prepareStorage(layout: StorageLayout, logger: Logger): Promise<St
 }
 
 export async function deactivate(): Promise<void> {
-  // Everything else is owned by the context. These two are awaited: the socket
-  // must be closed before the host lets go, or a reload races its own port; and
-  // the presence file must be gone before this window is, or the window looks
-  // `unknown` to the others for a minute after it has plainly closed.
-  const keeper = presence;
-  presence = null;
-  await keeper?.stop();
-
+  // Everything else is owned by the context. These three are awaited, and their
+  // order is the design rather than the order they were written in: stop taking
+  // events, write down what we have, and only then say we are gone. Reversed, a
+  // window would announce its absence while still writing -- which is an
+  // invitation to another window to adopt a record we are in the middle of.
   const server = receiver;
   receiver = null;
+  // Before the writer, or an event arriving mid-flush would be observed and
+  // never written. A port released after the host has gone is a port that was
+  // not released, which is why this one is awaited at all.
   await server?.stop();
+
+  const writer = scribe;
+  scribe = null;
+  await writer?.stop();
+
+  const keeper = presence;
+  presence = null;
+  // The presence file must be gone before this window is, or it looks `unknown`
+  // to every other window for a minute after it has plainly closed.
+  await keeper?.stop();
 }
 
 /**

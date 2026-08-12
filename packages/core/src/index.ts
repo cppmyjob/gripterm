@@ -65,6 +65,11 @@ export {
   type BaseProjectionOptions,
 } from './domain/services/base-projection';
 export {
+  BaseWriter,
+  DEFAULT_WRITE_DEBOUNCE_MS,
+  type BaseWriterOptions,
+} from './domain/services/base-writer';
+export {
   DEFAULT_STORAGE_DIRECTORY,
   chooseStorageDir,
   type StorageDirChoice,
