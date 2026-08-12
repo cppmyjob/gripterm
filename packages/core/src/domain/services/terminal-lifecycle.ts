@@ -5,6 +5,7 @@ import { SessionId } from '../entities/session-id';
 import { TerminalEntry } from '../entities/terminal-entry';
 import { TerminalId } from '../entities/terminal-id';
 import { launchExitedNonZero, resumeExitedNonZero, terminalClosed } from '../events/terminal-event';
+import { observedAtStart } from './observed-projection';
 import type { AgentCommandFactory } from '../ports/agent-command-factory';
 import type { Clock } from '../ports/clock';
 import type { Disposable } from '../ports/disposable';
@@ -48,6 +49,25 @@ export interface LaunchRequest {
  */
 export type DiscardOutcome = 'discarded' | 'still-running' | 'unknown-terminal';
 
+/**
+ * What to do with the pane once the process is running.
+ *
+ * Two values rather than a boolean, because the call site is where this is read:
+ * `start(entry, 'resume', 'hidden')` says what happens, and `start(entry,
+ * 'resume', false)` says nothing at all.
+ *
+ * It is NOT derived from the intent, although today the two agree. A restore
+ * started by the window at activation is nobody's request and must not take the
+ * screen; a restore started by a person pressing "adopt" (M2.14) is exactly
+ * their request. The caller knows which it is and nothing else does -- the same
+ * reason `LaunchIntent` is a parameter (§4.4).
+ */
+export type StartVisibility =
+  /** Somebody pressed a button: show the terminal and put the cursor in it. */
+  | 'focus'
+  /** Nobody asked: create it and leave the screen alone (M2.11). */
+  | 'hidden';
+
 /** What a terminal was doing between being started and being closed. */
 interface Watched {
   readonly handle: TerminalHandle;
@@ -64,6 +84,11 @@ interface Watched {
  * workflow engine of §4.12 will call it too rather than invoking commands. A
  * second creation path is how two of the three grow a subtly different idea of
  * what a terminal is.
+ *
+ * **Every start stamps the record `launching`**, and that is a rule rather than
+ * bookkeeping: three things downstream ask for that state and nothing else sets
+ * it on the restore path (see `observedAtStart`). Putting it in each caller
+ * would be three chances to forget it, and forgetting it is silent.
  *
  * **It knows which agent it is starting only through `AgentCommandFactory`.**
  * The flags belong to one CLI and live under `domain/agents/`; the linter fails
@@ -134,7 +159,11 @@ export class TerminalLifecycleService implements Disposable {
    * `launch_failed` from `resume_failed` when the process exits non-zero, since
    * both happen in `launching` (§4.3).
    */
-  public async start(entry: TerminalEntry, intent: LaunchIntent): Promise<TerminalEntry> {
+  public async start(
+    entry: TerminalEntry,
+    intent: LaunchIntent,
+    visibility: StartVisibility = 'focus'
+  ): Promise<TerminalEntry> {
     const { terminalId } = entry;
     if (this._watched.has(terminalId.value)) {
       // Two processes on one conversation is the failure the whole ownership
@@ -145,11 +174,18 @@ export class TerminalLifecycleService implements Disposable {
       });
     }
 
-    const command = await this._options.commands.commandFor(entry, intent);
+    // From here the record says it is starting, whatever it was doing when its
+    // window died. A restored one arrives from the store wearing `working` or
+    // `idle`, and three rules downstream -- a non-zero exit read as a FAILED
+    // restore (§4.3), the resume timeout, the silence watch -- ask for
+    // `launching` and do nothing at all without it.
+    const starting = entry.withObserved(observedAtStart(entry.observed, this._options.clock.now()));
+
+    const command = await this._options.commands.commandFor(starting, intent);
     const plan = this._options.strategy.buildPlan({
       terminalId,
-      name: entry.metadata.displayName,
-      cwd: entry.launch.cwd,
+      name: starting.metadata.displayName,
+      cwd: starting.launch.cwd,
       command,
     });
 
@@ -162,7 +198,7 @@ export class TerminalLifecycleService implements Disposable {
     // No `await` between these two. The editor cannot deliver a close event in
     // the middle of synchronous code, so there is no window in which the
     // terminal exists, is registered, and is unwatched.
-    this._options.registry.register(entry);
+    this._options.registry.register(starting);
     this._watch(handle, intent);
 
     if (plan.initialInput !== null) {
@@ -170,17 +206,45 @@ export class TerminalLifecycleService implements Disposable {
       // A12 live exactly here and nowhere else (see `ShellLaunchStrategy`).
       handle.sendText(plan.initialInput, true);
     }
-    // Takes the focus: somebody asked for a terminal, and leaving the cursor
-    // where it was would be answering a different request.
-    handle.show(false);
+    if (visibility === 'focus') {
+      // Takes the focus: somebody asked for a terminal, and leaving the cursor
+      // where it was would be answering a different request.
+      handle.show(false);
+    }
 
     this._options.logger.info('a terminal was started', {
       terminalId: terminalId.value,
-      sessionId: entry.sessionId.value,
+      sessionId: starting.sessionId.value,
       intent,
+      visibility,
       mode: this._options.strategy.mode,
     });
-    return entry;
+    return starting;
+  }
+
+  /**
+   * Brings a terminal this window started to the front, WITHOUT taking the
+   * focus.
+   *
+   * The other half of `visibility: 'hidden'`, and deliberately not the same
+   * operation as `gripterm.focusTerminal`. That one answers a person pressing a
+   * button, so it moves the cursor; this one answers a restore that finished on
+   * its own, so the pane appears and the cursor stays where the person put it. A
+   * window coming back with five terminals would otherwise take the focus five
+   * times and leave it wherever the race ended.
+   *
+   * A terminal that is no longer there is not an error: between a restore
+   * starting and its first event, `--resume` can fail and take the pane with it.
+   */
+  public reveal(terminalId: TerminalId): void {
+    const watched = this._watched.get(terminalId.value);
+    if (watched === undefined) {
+      this._options.logger.info('there was no terminal left to reveal', {
+        terminalId: terminalId.value,
+      });
+      return;
+    }
+    watched.handle.show(true);
   }
 
   /**

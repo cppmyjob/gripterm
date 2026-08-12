@@ -9,6 +9,9 @@ export default defineConfig({
   extensionDevelopmentPath: 'packages/extension',
   version: 'stable',
   mocha: {
-    timeout: 60000,
+    // Two minutes because one test waits out a real restore: the twenty-second
+    // wait of `RestoreOrchestrator` is the thing under test there, and a real
+    // `claude` has to be started before it even begins.
+    timeout: 120000,
   },
 });

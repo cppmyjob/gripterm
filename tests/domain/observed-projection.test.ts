@@ -4,6 +4,7 @@ import {
   ObservedState,
   SessionId,
   TerminalStateMachine,
+  observedAtStart,
   projectObserved,
 } from '../../packages/core/src/index';
 import type {
@@ -161,6 +162,59 @@ describe('a history with more than one conversation in it', () => {
 
     expect(projection.observed.state).toBe('working');
     expect(projection).toMatchObject({ applied: 2, foreign: 0 });
+  });
+});
+
+describe('the snapshot of a record whose process is being started', () => {
+  /** A record as its window left it: mid-turn, with a tool running and a pid. */
+  function working(): ObservedState {
+    return ObservedState.create({
+      state: 'working',
+      lastEventAt: at(1),
+      currentTool: 'Bash',
+      lastAssistantMessage: 'I will read the file first',
+      cost: CostSnapshot.create(0.42, 1000),
+      contextWindow: ContextWindowSnapshot.create(12.5),
+      pid: 4242,
+    });
+  }
+
+  it('says launching, whatever the record was doing when its window died', async () => {
+    // Three rules downstream ask for exactly this state and do nothing without
+    // it: a non-zero exit read as a FAILED restore (§4.3), the resume timeout,
+    // and the silence watch.
+    expect(observedAtStart(working(), at(9)).state).toBe('launching');
+  });
+
+  it('stamps the moment the start was asked for', async () => {
+    expect(observedAtStart(working(), at(9)).lastEventAt).toStrictEqual(at(9));
+  });
+
+  it('forgets the tool, because the process running it is gone', async () => {
+    expect(observedAtStart(working(), at(9)).currentTool).toBeNull();
+  });
+
+  it('forgets the pid, because that number belongs to a previous life', async () => {
+    // Windows hands pids out again aggressively, so a kept pid is a question
+    // asked about a stranger -- and the answer authorises or forbids a restore.
+    expect(observedAtStart(working(), at(9)).pid).toBeNull();
+  });
+
+  it('keeps what is still true of the conversation', async () => {
+    // It is the SAME conversation: what it last said, what it has cost and how
+    // full its context is do not stop being true because the process restarted.
+    const started = observedAtStart(working(), at(9));
+
+    expect(started.lastAssistantMessage).toBe('I will read the file first');
+    expect(started.cost).toStrictEqual(working().cost);
+    expect(started.contextWindow).toStrictEqual(working().contextWindow);
+  });
+
+  it('changes nothing about a terminal that is being launched for the first time', async () => {
+    // The launch path builds exactly this state already, so passing through
+    // must be a no-op -- otherwise one of the two paths is describing something
+    // that did not happen.
+    expect(observedAtStart(launching(), START)).toStrictEqual(launching());
   });
 });
 

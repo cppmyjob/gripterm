@@ -28,6 +28,15 @@ export {
 } from './domain/services/restore-planner';
 
 export {
+  DEFAULT_RESUME_TIMEOUT_MS,
+  RestoreOrchestrator,
+  type RestoreAttempt,
+  type RestoreOrchestratorOptions,
+  type RestoreOutcome,
+  type RestoreReport,
+} from './domain/services/restore-orchestrator';
+
+export {
   launchReadiness,
   type LaunchInputs,
   type LaunchReadiness,
@@ -102,6 +111,7 @@ export {
 
 export {
   observedAfter,
+  observedAtStart,
   projectObserved,
   type ObservedAfterParams,
   type ProjectedEvent,
@@ -135,6 +145,10 @@ export {
   type DirectoryReader,
 } from './infrastructure/transcript-index';
 export { agentListingFrom, readAgentListing } from './infrastructure/cli-agents';
+export {
+  gatherRestoreInputs,
+  type RestoreInputSources,
+} from './infrastructure/restore-inputs';
 export { SystemIdGenerator } from './infrastructure/system-id-generator';
 export {
   DEFAULT_JOURNAL_POLICY,
@@ -406,6 +420,7 @@ export {
   TerminalLifecycleService,
   type DiscardOutcome,
   type LaunchRequest,
+  type StartVisibility,
   type TerminalLifecycleOptions,
 } from './domain/services/terminal-lifecycle';
 

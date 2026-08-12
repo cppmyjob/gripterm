@@ -71,6 +71,38 @@ export function observedAfter(params: ObservedAfterParams): ObservedState {
   });
 }
 
+/**
+ * The snapshot of a record whose process is being started right now -- a new
+ * terminal, or a conversation being resumed (M2.11).
+ *
+ * It exists because a restored record arrives from the store wearing whatever it
+ * was doing when its window died, and three separate rules downstream ask
+ * whether it is `launching`: a non-zero exit is a FAILED restore only from there
+ * (§4.3), the resume timeout applies only from there, and the silence watch arms
+ * only for it. A record restored as `working` would therefore fail silently in
+ * all three -- so the stamp is applied by the one method that makes it true,
+ * rather than by each caller remembering to.
+ *
+ * What it keeps is as deliberate as what it clears. The conversation is the same
+ * one it always was, so its last words, its cost and its context are still the
+ * truth about it until the resumed process says otherwise. The tool is not: that
+ * tool stopped when the process running it did. And the pid least of all -- it is
+ * a number from a previous life, which on Windows some unrelated process may hold
+ * by now, and everything downstream that asks "is it still running" would be
+ * asking about a stranger.
+ */
+export function observedAtStart(previous: ObservedState, at: Date): ObservedState {
+  return ObservedState.create({
+    state: 'launching',
+    lastEventAt: at,
+    currentTool: null,
+    lastAssistantMessage: previous.lastAssistantMessage,
+    cost: previous.cost,
+    contextWindow: previous.contextWindow,
+    pid: null,
+  });
+}
+
 /** One event of a history, with the moment the journal recorded for it. */
 export interface ProjectedEvent {
   readonly event: TerminalEvent;

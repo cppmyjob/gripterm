@@ -1,6 +1,7 @@
 import {
   ConflictError,
   HookEventParser,
+  ObservedState,
   ProcessLaunchStrategy,
   SessionRegistry,
   ShellLaunchStrategy,
@@ -287,6 +288,93 @@ describe('TerminalLifecycleService starts a terminal', () => {
       intent: 'resume',
     });
     expect(gateway.specs).toHaveLength(2);
+  });
+});
+
+describe('TerminalLifecycleService starts a terminal nobody asked for', () => {
+  /** A record as a restore finds it in the store: mid-turn, from a window that is gone. */
+  function midTurn(): TerminalEntry {
+    return makeEntry({
+      observed: ObservedState.create({
+        state: 'working',
+        lastEventAt: new Date(STARTED_AT.getTime() - 3_600_000),
+        currentTool: 'Bash',
+        lastAssistantMessage: 'I will read the file first',
+        cost: null,
+        contextWindow: null,
+        pid: 4242,
+      }),
+    });
+  }
+
+  it('leaves the screen alone when it was told to', async () => {
+    // A window coming back with five terminals would otherwise open five panes
+    // and leave the cursor in whichever one answered last (M2.11).
+    const { lifecycle, gateway } = stand();
+    const entry = midTurn();
+
+    await lifecycle.start(entry, 'resume', 'hidden');
+
+    expect(gateway.handleFor(entry.terminalId).shownWith).toStrictEqual([]);
+  });
+
+  it('says which it did, because the log is where a missing pane is explained', async () => {
+    const { lifecycle, logger } = stand();
+
+    await lifecycle.start(midTurn(), 'resume', 'hidden');
+
+    expect(logger.infos.at(-1)?.details).toMatchObject({ intent: 'resume', visibility: 'hidden' });
+  });
+
+  it('stamps the record launching, whatever it was doing when its window died', async () => {
+    // Without this a non-zero exit would read as an ordinary end rather than a
+    // failed restore, the resume timeout would not apply, and the silence watch
+    // would not arm -- three rules, all of them silent when they fail (§4.3).
+    const { lifecycle, registry } = stand();
+    const entry = midTurn();
+
+    await lifecycle.start(entry, 'resume', 'hidden');
+
+    const started = registry.get(entry.terminalId);
+    expect(started?.observed.state).toBe('launching');
+    expect(started?.observed.lastEventAt).toStrictEqual(STARTED_AT);
+    expect(started?.observed.currentTool).toBeNull();
+    expect(started?.observed.pid).toBeNull();
+  });
+
+  it('hands the caller the record it registered, not the one it was given', async () => {
+    // The orchestrator writes what comes back, so a stale instance here would
+    // put the pre-restore state back on the disk a moment later.
+    const { lifecycle, registry } = stand();
+
+    const started = await lifecycle.start(midTurn(), 'resume', 'hidden');
+
+    expect(registry.get(started.terminalId)).toBe(started);
+  });
+});
+
+describe('TerminalLifecycleService reveals a terminal', () => {
+  it('shows it without taking the focus, because nobody asked to be taken there', async () => {
+    const { lifecycle, gateway } = stand();
+    const entry = await lifecycle.start(makeEntry(), 'resume', 'hidden');
+
+    lifecycle.reveal(entry.terminalId);
+
+    expect(gateway.handleFor(entry.terminalId).shownWith).toStrictEqual([true]);
+  });
+
+  it('says so and does nothing when the terminal has already gone', async () => {
+    // Between a restore starting and its first event, `--resume` can fail and
+    // take the pane with it. Not an error: there is nothing left to show.
+    const { lifecycle, logger, gateway } = stand();
+    const entry = await lifecycle.start(makeEntry(), 'resume', 'hidden');
+    gateway.handleFor(entry.terminalId).close(1);
+
+    lifecycle.reveal(entry.terminalId);
+
+    expect(gateway.handleFor(entry.terminalId).shownWith).toStrictEqual([]);
+    expect(logger.infos.at(-1)?.message).toContain('no terminal left to reveal');
+    expect(logger.warnings).toStrictEqual([]);
   });
 });
 

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { homedir } from 'node:os';
+import { homedir, uptime } from 'node:os';
 import { join } from 'node:path';
 import { stat } from 'node:fs/promises';
 import {
@@ -19,6 +19,7 @@ import {
   ProcessLaunchStrategy,
   RepositoryWatcher,
   RequestAuthenticator,
+  RestoreOrchestrator,
   SessionRegistry,
   ShellLaunchStrategy,
   StorageLayout,
@@ -30,13 +31,18 @@ import {
   TerminalMetadataService,
   TerminalStateMachine,
   claudeSettingsLocations,
+  claudeTranscriptsDirectory,
   describeCliVersion,
   findExecutable,
+  gatherRestoreInputs,
   launchReadiness,
   newActivationToken,
   ownerRefFor,
+  planRestore,
   probeVersionOutput,
+  readAgentListing,
   readClaudeSettings,
+  readTranscriptIndex,
   reviewHookPolicies,
   shellKindFor,
 } from '@gripterm/core';
@@ -51,7 +57,9 @@ import type {
   ListeningAddress,
   Logger,
   OwnerIdentity,
+  OwnerPresence,
   StoragePreparation,
+  TerminalRepository,
   WatchReport,
 } from '@gripterm/core';
 import { registerCloseTerminal } from './commands/close-terminal';
@@ -94,6 +102,18 @@ const FORWARDER_SCRIPT = join('assets', 'gripterm-forwarder.js');
  */
 const VERSION_TIMEOUT_MS = 10_000;
 
+/**
+ * How long to wait for `claude agents --json`, which a restore asks before it
+ * starts anything.
+ *
+ * The same ceiling as the version probe, and it buys the same thing: a CLI that
+ * does not answer leaves the listing `unavailable`, and `unavailable` refuses
+ * every restore rather than permitting one. Waiting longer would delay an
+ * activation; waiting less would turn a busy machine into a window that brings
+ * nothing back.
+ */
+const AGENT_LISTING_TIMEOUT_MS = 10_000;
+
 const MS_PER_SECOND = 1000;
 
 /**
@@ -116,6 +136,8 @@ export interface Readiness {
   readonly storage: StoragePreparation;
   /** Where the store is, after the setting and the fallback have been applied. */
   readonly storageDir: string;
+  /** What became of the terminals this window could have brought back (M2.11). */
+  readonly restore: RestoreSummary;
   /**
    * Whether this window is reading the base and watching it.
    *
@@ -126,6 +148,25 @@ export interface Readiness {
    */
   readonly sharing: boolean;
 }
+
+/**
+ * What activation did about the records left behind by windows that are gone.
+ *
+ * Three answers and not two, because "we did not try" and "we tried and it broke"
+ * send a person to different places -- and because the first of them is the
+ * normal answer in a test host, where starting somebody's conversations would be
+ * a side effect of running a test suite.
+ */
+export type RestoreSummary =
+  | { readonly kind: 'skipped', readonly reason: string }
+  | {
+    readonly kind: 'ran';
+    readonly planned: number;
+    readonly started: number;
+    /** Records the planner refused. Every one of them has a reason (M2.10). */
+    readonly refused: number;
+  }
+  | { readonly kind: 'failed', readonly reason: string };
 
 /**
  * What the extension hands back from `activate`.
@@ -141,6 +182,10 @@ export interface GriptermApi {
   readonly lifecycle: TerminalLifecycleService;
   readonly identity: OwnerIdentity;
   readonly readiness: Readiness;
+  /** `null` when this window is not reading the shared store. */
+  readonly repository: TerminalRepository | null;
+  /** `null` for the same reason: a restore is an operation on the base. */
+  readonly restore: RestoreOrchestrator | null;
 }
 
 /**
@@ -207,7 +252,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
 
   const storage = new StorageLayout(readStorageDir(logger));
   const store = await prepareStorage(storage, logger);
-  const sharing = await shareTheBase({ context, storage, store, registry, identity, clock, logger });
+  const shared = await shareTheBase({ context, storage, store, registry, identity, clock, logger });
   // Per activation, held in memory, never written down: it is only meaningful
   // together with the port below, and the two are born and die together (§4.7).
   const token = newActivationToken();
@@ -265,6 +310,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
 
   const metadata = new TerminalMetadataService({ registry, clock, logger });
 
+  // Built whether or not it is about to be used: the integration suite drives a
+  // restore of its own record through it, in the one place where a real
+  // `claude --resume` and a real terminal can be watched (A9).
+  const orchestrator = shared === null
+    ? null
+    : new RestoreOrchestrator({
+      repository: shared.repository,
+      registry,
+      lifecycle,
+      scheduler: new SystemScheduler(),
+      logger,
+    });
+  if (orchestrator !== null) {
+    context.subscriptions.push(orchestrator);
+  }
+
   context.subscriptions.push(registerNewTerminal(lifecycle, registry, logger));
   context.subscriptions.push(registerFocusTerminal(gateway, logger));
   context.subscriptions.push(registerCloseTerminal(lifecycle, registry, logger));
@@ -293,6 +354,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     })
   );
 
+  const restore = await bringTerminalsBack({
+    context,
+    shared,
+    orchestrator,
+    readiness,
+    identity,
+    logger,
+  });
+
   // `appName` is logged beside the kind we made of it, unconditionally. An
   // editor we do not recognise then names itself in the one place a person can
   // send us -- which is how the list in `identifyEditor` grows from evidence
@@ -312,7 +382,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     launchLocation: location,
     storage: storage.baseDir,
     storageVersion: store.kind === 'ready' ? store.version : null,
-    sharingTheBase: sharing,
+    sharingTheBase: shared !== null,
+    restore: restore.kind === 'ran' ? restore.started : restore.kind,
     journalKeepsContent: journal.includeContent,
     journalRetentionDays: journal.retentionDays,
   });
@@ -338,9 +409,93 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
       refusal: readiness.kind === 'refused' ? readiness.reason : null,
       storage: store,
       storageDir: storage.baseDir,
-      sharing,
+      sharing: shared !== null,
+      restore,
     },
+    repository: shared?.repository ?? null,
+    restore: orchestrator,
   };
+}
+
+/**
+ * Brings back the terminals of windows that are gone -- the whole of П2, and the
+ * one thing a person notices about M2.
+ *
+ * It refuses in three situations, and each refusal is a sentence rather than a
+ * silence:
+ *
+ *   * **a test host.** A suite that ran would adopt this machine's records and
+ *     start `claude --resume` on the person's own conversations, as a side
+ *     effect of running tests. `ExtensionMode.Test` is the platform saying so,
+ *     and the integration suite drives its own restore explicitly instead;
+ *   * **a window that is not reading the shared store.** There is nothing to
+ *     read and nobody to adopt from;
+ *   * **a launch pipeline that would refuse.** Every start would throw, and each
+ *     one would leave a record adopted by this window with no process behind it
+ *     (see `RestoreOrchestrator._restore`). Asking first costs nothing; finding
+ *     out record by record costs the person a row for every terminal they had.
+ *
+ * Everything else it catches. `activate` never throws (see its note), and a
+ * restore that failed halfway is a window with fewer terminals than it hoped
+ * for -- not a window with no list, no log and no explanation.
+ */
+async function bringTerminalsBack(parts: {
+  readonly context: vscode.ExtensionContext;
+  readonly shared: SharedBase | null;
+  readonly orchestrator: RestoreOrchestrator | null;
+  readonly readiness: ReturnType<typeof launchReadiness>;
+  readonly identity: OwnerIdentity;
+  readonly logger: Logger;
+}): Promise<RestoreSummary> {
+  const { readiness, shared, orchestrator, logger } = parts;
+  if (parts.context.extensionMode === vscode.ExtensionMode.Test) {
+    return refuse('this is a test host, and a test run must not resume anybody\'s conversations', logger);
+  }
+  if (shared === null || orchestrator === null) {
+    return refuse('this window is not reading the shared store', logger);
+  }
+  if (readiness.kind === 'refused') {
+    return refuse(readiness.reason, logger);
+  }
+
+  try {
+    const plan = planRestore(
+      await gatherRestoreInputs({
+        repository: shared.repository,
+        presence: shared.presence,
+        windowFolders: parts.identity.workspaceFolders,
+        readTranscripts: async () =>
+          await readTranscriptIndex(
+            claudeTranscriptsDirectory({
+              platform: process.platform,
+              home: homedir(),
+              configDir: process.env.CLAUDE_CONFIG_DIR,
+            })
+          ),
+        readAgents: async () => await readAgentListing(readiness.cliPath, AGENT_LISTING_TIMEOUT_MS),
+        // Both from one instant, because the boot rule subtracts one from the
+        // other (`precedesBoot`).
+        nowMs: Date.now(),
+        uptimeSeconds: uptime(),
+        logger,
+      })
+    );
+    const report = await orchestrator.run(plan);
+    return {
+      kind: 'ran',
+      planned: plan.steps.length,
+      started: report.started,
+      refused: report.skipped.length,
+    };
+  } catch (cause: unknown) {
+    logger.error('this window could not bring its terminals back', { reason: String(cause) });
+    return { kind: 'failed', reason: String(cause) };
+  }
+}
+
+function refuse(reason: string, logger: Logger): RestoreSummary {
+  logger.info('this window did not try to bring any terminals back', { reason });
+  return { kind: 'skipped', reason };
 }
 
 /**
@@ -363,6 +518,12 @@ function sentenceFor(report: WatchReport): string {
   return `Gripterm has lost track of "${name}": it is answering a conversation nothing announced, so its row is out of date. The conversation is ${report.sessionId.value}. See the Gripterm log.`;
 }
 
+/** The two halves of the base a restore needs: the records, and who is out there. */
+interface SharedBase {
+  readonly repository: TerminalRepository;
+  readonly presence: OwnerPresence;
+}
+
 /**
  * Joins this window to the base every window on the machine shares.
  *
@@ -373,12 +534,13 @@ function sentenceFor(report: WatchReport): string {
  * repository's own writes lead to one re-read that hands the result to the
  * registry (§4.6).
  *
- * Returns whether any of it happened. It is refused, rather than half-done, in
- * two cases -- an unusable directory and a window that could not write its own
- * presence file -- and both leave a working window that shows only its own
- * terminals. That is the honest degradation: reading a base this window cannot
- * write itself into would show other windows' terminals as adoptable while
- * this window is invisible to them, which is the one shape §4.8 forbids.
+ * Returns the two halves a restore needs, or `null` when none of it happened. It
+ * is refused, rather than half-done, in two cases -- an unusable directory and a
+ * window that could not write its own presence file -- and both leave a working
+ * window that shows only its own terminals. That is the honest degradation:
+ * reading a base this window cannot write itself into would show other windows'
+ * terminals as adoptable while this window is invisible to them, which is the one
+ * shape §4.8 forbids.
  */
 async function shareTheBase(parts: {
   readonly context: vscode.ExtensionContext;
@@ -388,14 +550,14 @@ async function shareTheBase(parts: {
   readonly identity: OwnerIdentity;
   readonly clock: SystemClock;
   readonly logger: Logger;
-}): Promise<boolean> {
+}): Promise<SharedBase | null> {
   const { context, storage, registry, identity, clock, logger } = parts;
   if (parts.store.kind === 'refused') {
     logger.warn('this window will not read the shared store, so it lists only its own terminals', {
       path: storage.baseDir,
       reason: parts.store.reason,
     });
-    return false;
+    return null;
   }
 
   const scheduler = new SystemScheduler();
@@ -408,7 +570,7 @@ async function shareTheBase(parts: {
       path: storage.ownersDir,
       reason: String(cause),
     });
-    return false;
+    return null;
   }
   presence = heartbeat;
   context.subscriptions.push(heartbeat);
@@ -450,7 +612,7 @@ async function shareTheBase(parts: {
   // The base as it is right now, before anything changes: a window that only
   // reacted to changes would show an empty list until somebody else moved.
   await projection.refresh();
-  return true;
+  return { repository, presence: owner };
 }
 
 /**
