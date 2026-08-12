@@ -8,6 +8,13 @@ export {
 } from './domain/agents/claude-code/cli-version';
 
 export {
+  AGENT_LISTING_ARGS,
+  parseAgentListing,
+} from './domain/agents/claude-code/agent-listing';
+
+export type { AgentListing, AgentRecord } from './domain/entities/agent-record';
+
+export {
   launchReadiness,
   type LaunchInputs,
   type LaunchReadiness,
@@ -103,6 +110,8 @@ export { SystemClock } from './infrastructure/system-clock';
 export { SystemScheduler } from './infrastructure/system-scheduler';
 export { findExecutable, type ExecutableSearch } from './infrastructure/executable-lookup';
 export { probeVersionOutput, type VersionProbe } from './infrastructure/cli-probe';
+export { runCli, type CliRun, type CliRunOptions } from './infrastructure/cli-run';
+export { agentListingFrom, readAgentListing } from './infrastructure/cli-agents';
 export { SystemIdGenerator } from './infrastructure/system-id-generator';
 export {
   DEFAULT_JOURNAL_POLICY,

@@ -78,6 +78,14 @@ describe('SessionId', () => {
   it('mints from a generator: we supply the id at launch with --session-id', () => {
     expect(SessionId.create(stubIdGenerator(SESSION_UUID)).value).toBe(SESSION_UUID);
   });
+
+  it('reads an id that was never promised to be one without throwing', () => {
+    // `claude agents --json` does not validate the field -- measured: the text
+    // `not-a-uuid` reached its output verbatim. Such an id matches nothing we
+    // minted; what it must not do is raise on the restore path.
+    expect(SessionId.tryFromString(SESSION_UUID.toUpperCase())?.value).toBe(SESSION_UUID);
+    expect(SessionId.tryFromString('not-a-uuid')).toBeNull();
+  });
 });
 
 describe('the separation of the two id types', () => {

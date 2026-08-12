@@ -32,6 +32,25 @@ export class SessionId {
     return new SessionId(parseUuid(raw, 'sessionId'));
   }
 
+  /**
+   * The same, for a string that arrived from outside and was never promised to
+   * be an id -- the twin of `TerminalId.tryFromString`, and here it has a
+   * measured reason rather than a symmetrical one.
+   *
+   * `claude agents --json` does not validate the field: a session record whose
+   * `sessionId` was the text `not-a-uuid` reached the output verbatim
+   * (2026-08-12, A24). Such an id can equal nothing we ever minted, so it is
+   * nothing to us -- but reading the list must not become an exception on the
+   * restore path over it.
+   */
+  public static tryFromString(raw: string): SessionId | null {
+    try {
+      return SessionId.fromString(raw);
+    } catch {
+      return null;
+    }
+  }
+
   public equals(other: SessionId): boolean {
     return this.value === other.value;
   }
