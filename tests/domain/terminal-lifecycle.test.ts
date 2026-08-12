@@ -110,7 +110,9 @@ function request(displayName = 'auth-refactor'): LaunchRequest {
 function trail(registry: SessionRegistry): { readonly closed: boolean, readonly state: string }[] {
   const seen: { closed: boolean, state: string }[] = [];
   registry.subscribe((change: RegistryChange) => {
-    seen.push({ closed: change.entry.closedAt !== null, state: change.entry.observed.state });
+    if (change.kind === 'entry') {
+      seen.push({ closed: change.entry.closedAt !== null, state: change.entry.observed.state });
+    }
   });
   return seen;
 }
@@ -132,7 +134,7 @@ function closeEvents(logger: RecordingLogger): unknown[] {
 function signals(registry: SessionRegistry): string[] {
   const seen: string[] = [];
   registry.subscribe((change: RegistryChange) => {
-    if (change.transition?.kind === 'moved') {
+    if (change.kind === 'entry' && change.transition?.kind === 'moved') {
       seen.push(change.transition.signal);
     }
   });

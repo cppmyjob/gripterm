@@ -39,7 +39,9 @@ export class TerminalTreeDataProvider implements vscode.TreeDataProvider<Termina
   }
 
   public getTreeItem(entry: TerminalEntry): vscode.TreeItem {
-    const shown = presentTerminal(entry);
+    // `knows` is what tells our records from the ones the base projected in, and
+    // it decides which buttons the row offers -- see `CONTEXT_FOREIGN`.
+    const shown = presentTerminal(entry, { ours: this._registry.knows(entry.terminalId) });
     const item = new vscode.TreeItem(shown.label);
     item.id = entry.terminalId.value;
     item.description = shown.description;

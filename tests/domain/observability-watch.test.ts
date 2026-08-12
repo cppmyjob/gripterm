@@ -212,3 +212,18 @@ describe('noticing that a terminal is not being observed', () => {
     expect(scheduler.armed).toEqual([]);
   });
 });
+
+/**
+ * A record another window owns is that window's to watch, and it is watching.
+ * Announcing "Gripterm is not seeing this terminal" about one would be true,
+ * useless, and indistinguishable from the failure this class exists to report.
+ */
+describe('the silence of other windows is not ours to report', () => {
+  it('starts no timer for a launching terminal that came from the base', () => {
+    const { registry, scheduler } = stand();
+
+    registry.replaceForeign([launching()]);
+
+    expect(scheduler.armed).toEqual([]);
+  });
+});

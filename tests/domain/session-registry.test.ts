@@ -9,6 +9,7 @@ import {
   TerminalStateMachine,
   processGone,
   terminalClosed,
+  type EntryChange,
   type HookEventContext,
   type NotificationEvent,
   type NotificationType,
@@ -31,6 +32,7 @@ import {
   TERMINAL_UUID,
   makeEntry,
   makeMetadata,
+  makeOwnerRef,
 } from '../helpers/domain-fixtures';
 import { FixedClock, RecordingLogger } from '../helpers/port-fakes';
 
@@ -117,7 +119,9 @@ interface Stand {
   readonly registry: SessionRegistry;
   readonly logger: RecordingLogger;
   readonly clock: FixedClock;
-  readonly changes: RegistryChange[];
+  /** Changes about ONE record. The wholesale kind is collected separately, where it is the subject. */
+  readonly changes: EntryChange[];
+  readonly projections: number;
 }
 
 function stand(entry: TerminalEntry | null = makeEntry()): Stand {
@@ -132,11 +136,24 @@ function stand(entry: TerminalEntry | null = makeEntry()): Stand {
   if (entry !== null) {
     registry.register(entry);
   }
-  const changes: RegistryChange[] = [];
+  const changes: EntryChange[] = [];
+  let projections = 0;
   registry.subscribe((change) => {
-    changes.push(change);
+    if (change.kind === 'entry') {
+      changes.push(change);
+      return;
+    }
+    projections += 1;
   });
-  return { registry, logger, clock, changes };
+  return {
+    registry,
+    logger,
+    clock,
+    changes,
+    get projections(): number {
+      return projections;
+    },
+  };
 }
 
 /** The entry as the registry holds it now. Fails loudly rather than returning undefined. */
@@ -645,5 +662,131 @@ describe('SessionRegistry is the sink, and the only thing that reads a body', ()
     expect(logger.warnings.map((line) => line.message)).toContain(
       'an event named a terminal this window does not hold'
     );
+  });
+});
+
+/**
+ * The other half of the projection, and the reason §4.6 calls the registry a
+ * projection rather than a source: what other windows are doing arrives here
+ * wholesale, from the base, and never becomes something this window may act on.
+ */
+describe('SessionRegistry projects what other windows own', () => {
+  const FOREIGN = TerminalId.fromString('9d5f8e21-4a3b-4c6d-8e7f-0a1b2c3d4e5f');
+
+  function foreignEntry(id: TerminalId = OTHER_TERMINAL): TerminalEntry {
+    return makeEntry({ terminalId: id, owner: makeOwnerRef('another-window') });
+  }
+
+  it('lists them after our own, keeping the order they arrived in', () => {
+    const { registry } = stand();
+
+    registry.replaceForeign([foreignEntry(), foreignEntry(FOREIGN)]);
+
+    expect(registry.list().map((entry) => entry.terminalId.value)).toStrictEqual([
+      TERMINAL_UUID,
+      OTHER_TERMINAL.value,
+      FOREIGN.value,
+    ]);
+  });
+
+  it('replaces the whole projection, so a record gone from the base goes from the list', () => {
+    // The signal that brings us here carries no delta -- the file watcher can
+    // lose a batch and say only that it lost one -- so "what is not in this
+    // list is not there any more" is the only reading available.
+    const { registry } = stand();
+    registry.replaceForeign([foreignEntry(), foreignEntry(FOREIGN)]);
+
+    registry.replaceForeign([foreignEntry(FOREIGN)]);
+
+    expect(registry.list().map((entry) => entry.terminalId.value)).toStrictEqual([
+      TERMINAL_UUID,
+      FOREIGN.value,
+    ]);
+  });
+
+  /*
+   * What is in memory here is newer than what is on disk by however long the
+   * write debounce is (M2.6). A base that overwrote our own record would show a
+   * terminal a second behind its own window -- and the row would flicker
+   * backwards on every re-read.
+   */
+  it('never overwrites a record this window holds, even when the base offers one', () => {
+    const { registry } = stand();
+    const stale = makeEntry({ observed: observedIn('launching') });
+
+    registry.replaceForeign([stale]);
+
+    expect(registry.get(TERMINAL)?.observed.state).toBe('idle');
+    expect(registry.list()).toHaveLength(1);
+  });
+
+  it('drops the projected copy when this window takes the record on', () => {
+    // Which is what adoption does every time it succeeds (M2.10). Two rows for
+    // one terminal is the visible half; the invisible half is that one of them
+    // can never be acted on.
+    const { registry } = stand(null);
+    registry.replaceForeign([foreignEntry()]);
+
+    registry.register(makeEntry({ terminalId: OTHER_TERMINAL }));
+
+    expect(registry.list()).toHaveLength(1);
+    expect(registry.knows(OTHER_TERMINAL)).toBe(true);
+  });
+
+  it('does not let a foreign record be acted on, looked up or amended', () => {
+    // `get` is what every command resolves a row through, so answering here
+    // would put "only the owning window may write" back into each of them.
+    const { registry, logger } = stand(null);
+    registry.replaceForeign([foreignEntry()]);
+
+    expect(registry.get(OTHER_TERMINAL)).toBeUndefined();
+    expect(registry.knows(OTHER_TERMINAL)).toBe(false);
+    expect(registry.stateOf(OTHER_TERMINAL)).toBeNull();
+    expect(registry.ingest(OTHER_TERMINAL, stop(SESSION))).toStrictEqual({
+      kind: 'unknown-terminal',
+    });
+    registry.amend(foreignEntry());
+    expect(logger.warnings.map((line) => line.message)).toContain(
+      'an amendment named a terminal this window does not hold'
+    );
+  });
+
+  it('announces the replacement as one wholesale change, not as an entry moving', () => {
+    // The distinction is load-bearing: a notifier that read this as an entry
+    // change would interrupt a person about another window's terminal, and the
+    // silence watch would start a timer for one.
+    const world = stand();
+
+    world.registry.replaceForeign([foreignEntry(), foreignEntry(FOREIGN)]);
+
+    expect(world.changes).toHaveLength(0);
+    expect(world.projections).toBe(1);
+  });
+
+  it('names no terminal when a listener throws on the wholesale change', () => {
+    // The tree is one of these listeners, and it redraws every row on this
+    // signal. A log line that named some terminal anyway would send whoever
+    // reads it to look at a record that had nothing to do with the failure.
+    const { registry, logger } = stand();
+    registry.subscribe(() => {
+      throw new Error('the tree blew up mid-redraw');
+    });
+
+    expect(() => {
+      registry.replaceForeign([foreignEntry()]);
+    }).not.toThrow();
+    expect(logger.errors.at(-1)?.details).toMatchObject({ terminalId: null });
+  });
+
+  it('announces an empty base too, because emptying the list is news', () => {
+    const world = stand();
+    world.registry.replaceForeign([foreignEntry()]);
+
+    world.registry.replaceForeign([]);
+
+    expect(world.projections).toBe(2);
+    expect(world.registry.list().map((entry) => entry.terminalId.value)).toStrictEqual([
+      TERMINAL_UUID,
+    ]);
   });
 });

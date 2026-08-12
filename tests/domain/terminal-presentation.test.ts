@@ -1,4 +1,5 @@
 import {
+  CONTEXT_FOREIGN,
   CONTEXT_LIVE,
   CONTEXT_OVER,
   ContextWindowSnapshot,
@@ -107,13 +108,43 @@ describe('presentTerminal marks what a menu may offer', () => {
     expect(closed.observed.state).toBe('idle');
     expect(presentTerminal(closed).contextValue).toBe(CONTEXT_OVER);
   });
+
+  /*
+   * A record another window owns and is still using. `focus` would raise
+   * nothing and `close` would be a write into a record this window may not
+   * write, so the row offers neither -- and says why in the tooltip, because
+   * the only other sign is the absence of two buttons.
+   */
+  it('offers nothing on a working terminal that belongs to another window', () => {
+    const shown = presentTerminal(inState('working'), { ours: false });
+
+    expect(shown.contextValue).toBe(CONTEXT_FOREIGN);
+    expect(shown.state).toBe<TerminalState>('working');
+    expect(shown.tooltipLines).toContain('opened in another window');
+  });
+
+  it('says nothing about another window on a row of our own', () => {
+    expect(presentTerminal(inState('working')).tooltipLines).not.toContain(
+      'opened in another window'
+    );
+  });
+
+  /*
+   * The owner is gone, so this is no longer "somebody else is using it" but
+   * "there is something to do here" -- M2.10 restores exactly these.
+   */
+  it('calls a foreign record whose window has gone over, not foreign', () => {
+    expect(
+      presentTerminal(inState('working'), { ours: false, liveness: 'dead' }).contextValue
+    ).toBe(CONTEXT_OVER);
+  });
 });
 
 describe('presentTerminal lays detached over the stored state', () => {
   it('shows a dead owner as detached without touching the record', () => {
     const entry = inState('working');
 
-    const shown = presentTerminal(entry, 'dead');
+    const shown = presentTerminal(entry, { liveness: 'dead' });
 
     expect(shown.state).toBe<TerminalState>('detached');
     expect(entry.observed.state).toBe('working');
@@ -122,15 +153,15 @@ describe('presentTerminal lays detached over the stored state', () => {
   it('shows a stale heartbeat as detached too', () => {
     // For DRAWING the two are the same answer. They stay apart where it costs
     // something: adoption refuses `unknown` without an explicit force.
-    expect(presentTerminal(inState('working'), 'unknown').state).toBe<TerminalState>('detached');
+    expect(presentTerminal(inState('working'), { liveness: 'unknown' }).state).toBe<TerminalState>('detached');
   });
 
   it('says nothing about detachment when the owner is live', () => {
-    expect(presentTerminal(inState('working'), 'live').state).toBe<TerminalState>('working');
+    expect(presentTerminal(inState('working'), { liveness: 'live' }).state).toBe<TerminalState>('working');
   });
 
   it('offers no actions on a detached terminal', () => {
-    expect(presentTerminal(inState('idle'), 'dead').contextValue).toBe(CONTEXT_OVER);
+    expect(presentTerminal(inState('idle'), { liveness: 'dead' }).contextValue).toBe(CONTEXT_OVER);
   });
 });
 

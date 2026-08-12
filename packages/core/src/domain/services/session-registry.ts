@@ -22,7 +22,7 @@ export interface SessionRegistryOptions {
 }
 
 /**
- * What a listener is told.
+ * One record this window holds moved, arrived or was amended.
  *
  * It carries the TRANSITION and not just the changed entry, and that is forced
  * rather than convenient: `launch_failed` and an ordinary `ended` are the same
@@ -33,10 +33,32 @@ export interface SessionRegistryOptions {
  * `transition` is null when the entry did not move: it was registered, or
  * amended by this window rather than by an event.
  */
-export interface RegistryChange {
+export interface EntryChange {
+  readonly kind: 'entry';
   readonly entry: TerminalEntry;
   readonly transition: StateTransition | null;
 }
+
+/**
+ * The records belonging to OTHER windows were replaced, all of them at once.
+ *
+ * Deliberately carries nothing -- not the entries, not a delta. It comes from
+ * `replaceForeign`, whose caller has just re-read the whole base because the
+ * file watcher can lose a batch and say so only by handing over no name at all
+ * (M2.5); a listener given a delta here would trust something the platform
+ * cannot promise.
+ *
+ * It is a separate member of the union, rather than an entry change with a null
+ * transition, so that every listener has to DECIDE about it in front of the
+ * compiler. Two of them decide "nothing": interrupting a person about a terminal
+ * another window owns, or starting a silence timer for it, are both things this
+ * window has no standing to do.
+ */
+export interface ProjectionChange {
+  readonly kind: 'projection';
+}
+
+export type RegistryChange = EntryChange | ProjectionChange;
 
 export type RegistryListener = (change: RegistryChange) => void;
 
@@ -84,15 +106,19 @@ const CURRENT: SessionRouting = { kind: 'current' };
  *   * owner liveness is not here. It lives in the reconciler's own map, so that
  *     it can never reach a persisted field (§4.3, §4.6).
  *
- * `replaceForeign` from the §4.6 sketch is NOT implemented. Its caller is the
- * repository watcher of M2.5, and M1's base is a map with exactly one owner --
- * there are no foreign entries to project. A method with no caller, tested
- * against an imagined one, is the work that gets redone; the seam it belongs to
- * (`TerminalRepository`) already exists.
+ * Since M2.5 it holds two collections and not one: the records this window owns,
+ * and a read-only projection of everyone else's. They are separate MAPS rather
+ * than one map with a flag, because the difference is not decoration -- `ingest`,
+ * `amend`, `get` and `stateOf` all answer for this window's records only, and a
+ * single collection would make "only the owning window may apply an event" a
+ * rule held by a condition somebody could forget instead of by the lookup
+ * itself.
  */
 export class SessionRegistry implements HookEventSink {
   private readonly _options: SessionRegistryOptions;
   private readonly _entries = new Map<string, TerminalEntry>();
+  /** Other windows' records, as the base last showed them. Never written back. */
+  private readonly _foreign = new Map<string, TerminalEntry>();
   private readonly _listeners = new Set<RegistryListener>();
 
   constructor(options: SessionRegistryOptions) {
@@ -111,7 +137,34 @@ export class SessionRegistry implements HookEventSink {
       });
     }
     this._entries.set(entry.terminalId.value, entry);
-    this._notify({ entry, transition: null });
+    // A record this window has just taken on is no longer somebody else's, and
+    // leaving the projected copy in place would show it twice -- which is what
+    // adoption (M2.10) does every time it succeeds.
+    this._foreign.delete(entry.terminalId.value);
+    this._notify({ kind: 'entry', entry, transition: null });
+  }
+
+  /**
+   * The records of other windows, as the base last showed them.
+   *
+   * Called by the repository watcher after `readAll()` (§4.6) -- which is the
+   * whole of "a change in another window is visible here", and the reason the
+   * argument is the ENTIRE list rather than what changed: the watcher cannot
+   * know what changed, and neither can the platform underneath it.
+   *
+   * Records this window owns are skipped even when the base offers them, because
+   * what is in memory here is newer than what is on disk by however long the
+   * write debounce is (M2.6). The base is the source of truth about OTHER
+   * windows; about ours, we are.
+   */
+  public replaceForeign(entries: readonly TerminalEntry[]): void {
+    this._foreign.clear();
+    for (const entry of entries) {
+      if (!this._entries.has(entry.terminalId.value)) {
+        this._foreign.set(entry.terminalId.value, entry);
+      }
+    }
+    this._notify({ kind: 'projection' });
   }
 
   /**
@@ -132,15 +185,30 @@ export class SessionRegistry implements HookEventSink {
       return;
     }
     this._entries.set(next.terminalId.value, next);
-    this._notify({ entry: next, transition: null });
+    this._notify({ kind: 'entry', entry: next, transition: null });
   }
 
+  /**
+   * A record THIS window holds. Another window's is deliberately not returned.
+   *
+   * Every caller of this is about to act -- focus it, close it, amend it -- and
+   * none of those are things this window may do to a record it does not own. A
+   * lookup that answered for foreign records would make each of those callers
+   * carry the check instead.
+   */
   public get(terminalId: TerminalId): TerminalEntry | undefined {
     return this._entries.get(terminalId.value);
   }
 
+  /**
+   * Everything to draw: this window's records first, then everyone else's.
+   *
+   * The order is not alphabetical and not by urgency -- a list that reorders
+   * itself while being read is a list you click the wrong row in -- so within
+   * each group it stays the order they arrived in.
+   */
   public list(): readonly TerminalEntry[] {
-    return [...this._entries.values()];
+    return [...this._entries.values(), ...this._foreign.values()];
   }
 
   /**
@@ -258,7 +326,7 @@ export class SessionRegistry implements HookEventSink {
     const renamed = routing.kind === 'renamed' ? entry.withSessionId(routing.sessionId) : entry;
     const next = renamed.withObserved(this._observedAfter(entry, event, transition));
     this._entries.set(terminalId.value, next);
-    this._notify({ entry: next, transition });
+    this._notify({ kind: 'entry', entry: next, transition });
     return { kind: 'accepted', entry: next, transition };
   }
 
@@ -370,7 +438,9 @@ export class SessionRegistry implements HookEventSink {
         listener(change);
       } catch (cause: unknown) {
         this._options.logger.error('a registry listener threw while being told of a change', {
-          terminalId: change.entry.terminalId.value,
+          // A projection change names no terminal, and inventing one for the
+          // log would send whoever reads it looking at the wrong record.
+          terminalId: change.kind === 'entry' ? change.entry.terminalId.value : null,
           cause,
         });
       }

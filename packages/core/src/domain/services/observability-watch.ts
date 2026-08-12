@@ -72,6 +72,15 @@ export class ObservabilityWatch implements Disposable {
   }
 
   private _onChange(change: RegistryChange): void {
+    if (change.kind !== 'entry') {
+      // A record another window owns is that window's to watch, and it is
+      // watching. Starting a silence timer for one here would announce "Gripterm
+      // is not seeing this terminal" about a terminal we were never wired to
+      // -- true, useless, and indistinguishable from the failure this class
+      // exists to report.
+      return;
+    }
+
     const id = change.entry.terminalId.value;
     if (this._settled.has(id)) {
       return;

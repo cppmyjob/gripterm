@@ -364,15 +364,19 @@ export {
 } from './domain/services/terminal-summary';
 
 export {
+  CONTEXT_FOREIGN,
   CONTEXT_LIVE,
   CONTEXT_OVER,
   presentTerminal,
+  type PresentationContext,
   type TerminalPresentation,
 } from './domain/services/terminal-presentation';
 
 export {
   SessionRegistry,
+  type EntryChange,
   type IngestOutcome,
+  type ProjectionChange,
   type RegistryChange,
   type RegistryListener,
   type SessionRegistryOptions,

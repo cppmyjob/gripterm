@@ -36,6 +36,21 @@ export const CONTEXT_LIVE = 'gripterm.terminal.live';
  */
 export const CONTEXT_OVER = 'gripterm.terminal.over';
 
+/**
+ * A record another window owns, whose window is still there.
+ *
+ * Nothing is offered on it, and that is the point: the terminal is alive and
+ * working, but it lives in a window this one cannot reach -- `focus` would raise
+ * nothing and `close` would be a write into a record this window is forbidden to
+ * write (§4.8). A button that does nothing teaches a person that the whole list
+ * is decorative.
+ *
+ * A foreign record whose owner is GONE does not get this value: it gets
+ * `CONTEXT_OVER` by way of `detached`, which is the state that means "there is
+ * something to be done here" -- restoring it (M2.10).
+ */
+export const CONTEXT_FOREIGN = 'gripterm.terminal.foreign';
+
 interface StateAppearance {
   readonly iconId: string;
   readonly colorId: string | null;
@@ -94,21 +109,30 @@ const APPEARANCE: Readonly<Record<TerminalState, StateAppearance>> = {
 const MESSAGE_LIMIT = 160;
 
 /**
- * One entry, ready to draw.
+ * What the list knows about a row that the record itself does not carry.
  *
- * `liveness` is the OWNER's, not the terminal's, and it is the only input that
- * is not part of the record. This is the single place `detached` is applied:
- * it is never stored, because only a foreign process could write it into a file
- * it does not own, and the overlay is free to undo -- once the heartbeat is
- * fresh again it simply stops applying (§4.3).
- *
- * In M1 nothing supplies it: the base has exactly one owner, so the default is
- * the truthful answer. The reconciler that computes it arrives in M2.12.
+ * Both default to the answer that was true while the base had exactly one
+ * owner, so a caller that has neither still gets a truthful row.
  */
+export interface PresentationContext {
+  /**
+   * The OWNER's liveness, not the terminal's. Computed by the reconciler
+   * (M2.12) and never stored: only a foreign process could write `detached`
+   * into a file it does not own, and an overlay is free to undo -- once the
+   * heartbeat is fresh again it simply stops applying (§4.3).
+   */
+  readonly liveness?: OwnerLiveness;
+  /** Whether THIS window owns the record. False for what the base projected in. */
+  readonly ours?: boolean;
+}
+
+/** One entry, ready to draw. */
 export function presentTerminal(
   entry: TerminalEntry,
-  liveness: OwnerLiveness = 'live'
+  context: PresentationContext = {}
 ): TerminalPresentation {
+  const liveness = context.liveness ?? 'live';
+  const ours = context.ours ?? true;
   const state = displayedState(entry, liveness);
   const appearance = APPEARANCE[state];
 
@@ -116,11 +140,22 @@ export function presentTerminal(
     state,
     label: entry.metadata.displayName,
     description: description(entry, appearance),
-    tooltipLines: tooltipLines(entry, appearance),
+    tooltipLines: tooltipLines(entry, appearance, ours),
     iconId: appearance.iconId,
     colorId: appearance.colorId,
-    contextValue: appearance.live && entry.isRestorable() ? CONTEXT_LIVE : CONTEXT_OVER,
+    contextValue: contextValueFor(entry, appearance, ours),
   };
+}
+
+function contextValueFor(
+  entry: TerminalEntry,
+  appearance: StateAppearance,
+  ours: boolean
+): string {
+  if (!appearance.live || !entry.isRestorable()) {
+    return CONTEXT_OVER;
+  }
+  return ours ? CONTEXT_LIVE : CONTEXT_FOREIGN;
 }
 
 function displayedState(entry: TerminalEntry, liveness: OwnerLiveness): TerminalState {
@@ -136,8 +171,18 @@ function description(entry: TerminalEntry, appearance: StateAppearance): string 
   return currentTool === null ? appearance.words : `${appearance.words} · ${currentTool}`;
 }
 
-function tooltipLines(entry: TerminalEntry, appearance: StateAppearance): readonly string[] {
+function tooltipLines(
+  entry: TerminalEntry,
+  appearance: StateAppearance,
+  ours: boolean
+): readonly string[] {
   const lines = [`${entry.metadata.displayName} — ${appearance.words}`];
+  if (!ours) {
+    // The row otherwise looks exactly like one of ours, and the only other sign
+    // is an absence -- the buttons that are not there. An absence explains
+    // nothing to the person wondering why.
+    lines.push('opened in another window');
+  }
   if (entry.metadata.task !== null) {
     lines.push(entry.metadata.task);
   }

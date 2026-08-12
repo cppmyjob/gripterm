@@ -254,3 +254,32 @@ describe('the signals a person may configure', () => {
     expect(ATTENTION_SIGNALS).not.toContain('detached');
   });
 });
+
+/**
+ * Other windows' records arrive here wholesale (M2.5), and none of them is a
+ * reason to interrupt anybody. The rule is held by the compiler -- a projection
+ * change carries no entry to notify about -- and by this test, which is what
+ * would notice if somebody gave it one.
+ */
+describe('AttentionNotifier says nothing about other windows', () => {
+  it('stays quiet when the base brings in a terminal waiting for permission', () => {
+    const { registry, presenter } = stand();
+
+    registry.replaceForeign([
+      makeEntry({
+        terminalId: TerminalId.fromString('9d5f8e21-4a3b-4c6d-8e7f-0a1b2c3d4e5f'),
+        observed: ObservedState.create({
+          state: 'waiting_permission',
+          lastEventAt: OBSERVED_AT,
+          currentTool: 'Bash',
+          lastAssistantMessage: null,
+          cost: null,
+          contextWindow: null,
+          pid: null,
+        }),
+      }),
+    ]);
+
+    expect(presenter.shown).toEqual([]);
+  });
+});

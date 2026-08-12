@@ -107,6 +107,14 @@ export class AttentionNotifier implements Disposable {
   }
 
   private _onChange(change: RegistryChange): void {
+    if (change.kind !== 'entry') {
+      // Other windows' records, arriving wholesale from the base. Never a
+      // notification: this window did not see any of it happen, cannot say
+      // which of them moved, and a toast offering to focus a terminal that
+      // lives in another window is an interruption with nothing behind it.
+      return;
+    }
+
     const { transition } = change;
     // `stayed` is the same state again, `ignored` was dropped, and `null` is a
     // registration -- an entry appearing in the list is not news to interrupt
