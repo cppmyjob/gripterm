@@ -27,6 +27,7 @@ import {
   SystemIdGenerator,
   SystemScheduler,
   TerminalLifecycleService,
+  TerminalMetadataService,
   TerminalStateMachine,
   claudeSettingsLocations,
   describeCliVersion,
@@ -53,7 +54,9 @@ import type {
   StoragePreparation,
 } from '@gripterm/core';
 import { registerCloseTerminal } from './commands/close-terminal';
+import { registerDeleteTerminal } from './commands/delete-terminal';
 import { registerFocusTerminal } from './commands/focus-terminal';
+import { registerMetadataCommands } from './commands/edit-metadata';
 import { registerNewTerminal } from './commands/new-terminal';
 import {
   readJournalPolicy,
@@ -69,6 +72,7 @@ import { windowIdentity } from './adapters/vscode-window-identity';
 import { say } from './ui/say';
 import { StatusBarPresenter } from './ui/status-bar-presenter';
 import { VsCodeAttentionPresenter } from './ui/vscode-attention-presenter';
+import { TerminalDecorationProvider } from './ui/terminal-decorations';
 import { TERMINALS_VIEW_ID, TerminalTreeDataProvider } from './ui/terminal-tree';
 
 /** The agent this build knows how to start, by the name it goes by on a PATH. */
@@ -231,6 +235,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   context.subscriptions.push(
     vscode.window.createTreeView(TERMINALS_VIEW_ID, { treeDataProvider: tree })
   );
+  // The person's own colour, on the row's label. The icon's colour belongs to
+  // the state, and the two must not be confusable (M2.7).
+  const decorations = new TerminalDecorationProvider(registry);
+  context.subscriptions.push(decorations);
+  context.subscriptions.push(vscode.window.registerFileDecorationProvider(decorations));
   context.subscriptions.push(new StatusBarPresenter(registry));
 
   context.subscriptions.push(
@@ -257,9 +266,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     })
   );
 
+  const metadata = new TerminalMetadataService({ registry, clock, logger });
+
   context.subscriptions.push(registerNewTerminal(lifecycle, registry, logger));
   context.subscriptions.push(registerFocusTerminal(gateway, logger));
   context.subscriptions.push(registerCloseTerminal(lifecycle, registry, logger));
+  context.subscriptions.push(registerDeleteTerminal(lifecycle, registry, logger));
+  context.subscriptions.push(...registerMetadataCommands(metadata, registry, logger));
   context.subscriptions.push(
     vscode.commands.registerCommand('gripterm.showLogs', () => {
       output.show(true);
@@ -387,9 +400,15 @@ async function shareTheBase(parts: {
     layout: storage,
     owner: ownerRefFor(identity),
     presence: owner,
+    clock,
     logger,
   });
-  const projection = new BaseProjection({ repository, registry, logger });
+  const projection = new BaseProjection({
+    repository,
+    registry,
+    owner: ownerRefFor(identity),
+    logger,
+  });
   context.subscriptions.push(projection);
 
   // The other direction, and the reason this window is a writer of the base and

@@ -32,7 +32,37 @@
       {
         "command": "gripterm.closeTerminal",
         "title": "Gripterm: Close Terminal",
+        "icon": "$(close)"
+      },
+      {
+        "command": "gripterm.deleteTerminal",
+        "title": "Gripterm: Delete Record",
         "icon": "$(trash)"
+      },
+      {
+        "command": "gripterm.renameTerminal",
+        "title": "Gripterm: Rename Terminal",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "gripterm.setTask",
+        "title": "Gripterm: Set Task",
+        "icon": "$(target)"
+      },
+      {
+        "command": "gripterm.addNote",
+        "title": "Gripterm: Add Note",
+        "icon": "$(note)"
+      },
+      {
+        "command": "gripterm.editTags",
+        "title": "Gripterm: Edit Tags",
+        "icon": "$(tag)"
+      },
+      {
+        "command": "gripterm.setColor",
+        "title": "Gripterm: Set Colour",
+        "icon": "$(symbol-color)"
       },
       {
         "command": "gripterm.showLogs",
@@ -60,14 +90,69 @@
           "group": "inline"
         },
         {
+          "command": "gripterm.renameTerminal",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.live",
+          "group": "1_edit@1"
+        },
+        {
+          "command": "gripterm.renameTerminal",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.over",
+          "group": "1_edit@1"
+        },
+        {
+          "command": "gripterm.setTask",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.live",
+          "group": "1_edit@2"
+        },
+        {
+          "command": "gripterm.setTask",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.over",
+          "group": "1_edit@2"
+        },
+        {
+          "command": "gripterm.addNote",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.live",
+          "group": "1_edit@3"
+        },
+        {
+          "command": "gripterm.addNote",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.over",
+          "group": "1_edit@3"
+        },
+        {
+          "command": "gripterm.editTags",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.live",
+          "group": "1_edit@4"
+        },
+        {
+          "command": "gripterm.editTags",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.over",
+          "group": "1_edit@4"
+        },
+        {
+          "command": "gripterm.setColor",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.live",
+          "group": "1_edit@5"
+        },
+        {
+          "command": "gripterm.setColor",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.over",
+          "group": "1_edit@5"
+        },
+        {
           "command": "gripterm.closeTerminal",
           "when": "view == gripterm.terminals && viewItem == gripterm.terminal.live",
-          "group": "1_act"
+          "group": "2_act@1"
         },
         {
           "command": "gripterm.showLogs",
           "when": "view == gripterm.terminals && viewItem == gripterm.terminal.over",
-          "group": "1_act"
+          "group": "2_act@1"
+        },
+        {
+          "command": "gripterm.deleteTerminal",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.over",
+          "group": "2_act@2"
         }
       ],
       "commandPalette": [

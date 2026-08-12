@@ -39,6 +39,9 @@ import {
  */
 
 const STARTED_AT = new Date('2026-08-11T12:00:00.000Z');
+
+/** A terminal id no stand ever produces. */
+const ABSENT = '11111111-2222-4333-8444-555555555555';
 const EXECUTABLE = 'C:/Users/x/.local/bin/claude.exe';
 
 class StubAgentCommands implements AgentCommandFactory {
@@ -538,5 +541,68 @@ describe('one terminal closing is one terminal closing', () => {
 
     expect(registry.get(second.terminalId)?.observed.state).toBe('launching');
     expect(registry.get(first.terminalId)?.observed.state).toBe('ended');
+  });
+});
+
+describe('deleting the record of a terminal', () => {
+  it('drops it from the list once its terminal is gone', async () => {
+    const { lifecycle, gateway, registry } = stand();
+    const entry = await lifecycle.launch(request());
+    gateway.handleFor(entry.terminalId).close(undefined);
+
+    expect(lifecycle.discard(entry.terminalId)).toBe('discarded');
+
+    expect(registry.knows(entry.terminalId)).toBe(false);
+    expect(registry.list()).toStrictEqual([]);
+  });
+
+  it('refuses while this window still has a process for it', async () => {
+    // The evidence is the watch and not the record's state: a record can look
+    // finished while its terminal is still open, and deleting under an open
+    // terminal leaves a pane nothing can name.
+    const { lifecycle, registry, logger } = stand();
+    const entry = await lifecycle.launch(request());
+
+    expect(lifecycle.discard(entry.terminalId)).toBe('still-running');
+
+    expect(registry.knows(entry.terminalId)).toBe(true);
+    expect(logger.warnings.at(-1)?.message).toContain('still running');
+  });
+
+  it('refuses a terminal this window does not hold, and does not shout about it', () => {
+    const { lifecycle, logger } = stand();
+
+    expect(lifecycle.discard(TerminalId.fromString(ABSENT))).toBe('unknown-terminal');
+
+    expect(logger.warnings).toStrictEqual([]);
+    expect(logger.infos.at(-1)?.message).toContain('does not hold');
+  });
+
+  it('does not destroy the terminal, close the record, or touch its neighbours', async () => {
+    const { lifecycle, gateway, registry } = stand();
+    const kept = await lifecycle.launch(request('kept'));
+    const going = await lifecycle.launch(request('going'));
+    gateway.handleFor(going.terminalId).close(undefined);
+
+    lifecycle.discard(going.terminalId);
+
+    expect(gateway.handleFor(going.terminalId).disposed).toBe(false);
+    expect(gateway.handleFor(kept.terminalId).disposed).toBe(false);
+    expect(registry.own().map((entry) => entry.metadata.displayName)).toStrictEqual(['kept']);
+    expect(registry.get(kept.terminalId)?.closedAt).toBeNull();
+  });
+
+  it('is a deliberate change, so the record leaves the store at once', async () => {
+    // The removal reaches the disk through the same listener every other change
+    // takes (M2.6), and this is the shape of it: an id, and no entry.
+    const { lifecycle, gateway, registry } = stand();
+    const entry = await lifecycle.launch(request());
+    gateway.handleFor(entry.terminalId).close(undefined);
+    const seen: RegistryChange[] = [];
+    registry.subscribe((change) => seen.push(change));
+
+    lifecycle.discard(entry.terminalId);
+
+    expect(seen).toStrictEqual([{ kind: 'removed', terminalId: entry.terminalId }]);
   });
 });

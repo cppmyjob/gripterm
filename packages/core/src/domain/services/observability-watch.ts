@@ -72,6 +72,19 @@ export class ObservabilityWatch implements Disposable {
   }
 
   private _onChange(change: RegistryChange): void {
+    if (change.kind === 'removed') {
+      // A timer left running for a record a person has just deleted announces
+      // "Gripterm is not seeing this terminal" about a terminal nobody is
+      // looking for -- twenty seconds later, with no row on screen to explain
+      // it.
+      //
+      // The wait is dropped and nothing is remembered, which is the smaller of
+      // the two promises available here: `_settled` would additionally say that
+      // this id is never watched again, and that is a claim about a record
+      // coming back from the dead which nothing today can make true or false.
+      this._stopWaiting(change.terminalId.value);
+      return;
+    }
     if (change.kind !== 'entry') {
       // A record another window owns is that window's to watch, and it is
       // watching. Starting a silence timer for one here would announce "Gripterm
@@ -111,9 +124,13 @@ export class ObservabilityWatch implements Disposable {
   }
 
   private _settle(id: string): void {
+    this._stopWaiting(id);
+    this._settled.add(id);
+  }
+
+  private _stopWaiting(id: string): void {
     this._waiting.get(id)?.dispose();
     this._waiting.delete(id);
-    this._settled.add(id);
   }
 
   private _onSilent(entry: TerminalEntry, silenceMs: number): void {

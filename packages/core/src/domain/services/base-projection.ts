@@ -1,11 +1,15 @@
 import type { Disposable } from '../ports/disposable';
 import type { Logger } from '../ports/logger';
+import type { OwnerRef } from '../entities/owner-ref';
 import type { SessionRegistry } from './session-registry';
+import type { TerminalEntry } from '../entities/terminal-entry';
 import type { TerminalRepository } from '../repositories/terminal-repository';
 
 export interface BaseProjectionOptions {
   readonly repository: TerminalRepository;
   readonly registry: SessionRegistry;
+  /** This activation. Records carrying it are ours, and never read back in. */
+  readonly owner: OwnerRef;
   readonly logger: Logger;
 }
 
@@ -85,9 +89,29 @@ export class BaseProjection implements Disposable {
     return again;
   }
 
+  /**
+   * A record written by THIS activation, which is never taken back from disk.
+   *
+   * The registry already skips ids it holds, and until M2.7 that was enough. It
+   * stopped being enough the moment a record could be deleted: between the
+   * person pressing delete and the removal reaching the files, the record is in
+   * neither collection and the base still has it -- so a read landing in that
+   * gap would hand it back as somebody else's terminal, in the very window that
+   * had just thrown it away.
+   *
+   * Exact rather than approximate, because `ownerId` names an ACTIVATION and not
+   * a window: no record from an earlier run of this editor can carry it, and a
+   * record another window has adopted carries theirs. What this filter says is
+   * therefore the literal truth -- about our own records, memory is the source
+   * and the disk is a copy (§4.8).
+   */
+  private _isOurs(entry: TerminalEntry): boolean {
+    return entry.owner.ownerId.equals(this._options.owner.ownerId);
+  }
+
   private async _readOnce(): Promise<void> {
     try {
-      const entries = await this._options.repository.readAll();
+      const all = await this._options.repository.readAll();
       if (this._stopped) {
         // The window went while this was reading. Dropping the RESULT rather
         // than refusing to start the read is the check that costs nothing to
@@ -95,7 +119,7 @@ export class BaseProjection implements Disposable {
         // over, and it is this line.
         return;
       }
-      this._options.registry.replaceForeign(entries);
+      this._options.registry.replaceForeign(all.filter((entry) => !this._isOurs(entry)));
     } catch (cause: unknown) {
       this._options.logger.error(
         'the store could not be read, so the list may be missing what other windows are doing',

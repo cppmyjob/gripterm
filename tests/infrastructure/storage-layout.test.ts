@@ -8,6 +8,7 @@ import {
   isJournalFileName,
   isJournalPath,
   journalDay,
+  trashStamp,
 } from '../../packages/core/src/index';
 
 const BASE = join('C:', 'gripterm-base');
@@ -171,5 +172,54 @@ describe('telling journal traffic apart from the rest', () => {
     ]) {
       expect(isJournalPath(path)).toBe(false);
     }
+  });
+});
+
+describe('where a discarded record goes', () => {
+  /*
+   * `trash/` was named in §4.8 and deliberately absent from the layout until
+   * something wrote it. M2.7 is what writes it, and M2.15 sweeps it.
+   */
+  const layout = new StorageLayout(BASE);
+  const id = TERMINAL;
+  // Local, deliberately: the stamp is read by the person who deleted something
+  // this afternoon, so it is their afternoon.
+  const at = new Date(2026, 7, 12, 14, 33, 7);
+
+  it('stamps the moment without a character a file system objects to', () => {
+    expect(trashStamp(at)).toBe('2026-08-12_14-33-07');
+    // No colons anywhere: legal on POSIX, an alternate data stream on NTFS.
+    expect(trashStamp(at)).not.toContain(':');
+  });
+
+  it('pads every field, so the names sort into the order they happened', () => {
+    const early = trashStamp(new Date(2026, 0, 2, 3, 4, 5));
+    const later = trashStamp(new Date(2026, 0, 2, 3, 4, 6));
+
+    expect(early).toBe('2026-01-02_03-04-05');
+    expect([later, early].sort()).toStrictEqual([early, later]);
+  });
+
+  it('gives each record a directory of its own under the stamp', () => {
+    expect(layout.trashDir).toBe(join(BASE, 'trash'));
+    expect(layout.discardedTerminalDir(at, id)).toBe(
+      join(layout.trashDir, '2026-08-12_14-33-07', TERMINAL.value)
+    );
+  });
+
+  it('keeps the two file names, which is what makes putting them back a move', () => {
+    const home = layout.discardedTerminalDir(at, id);
+
+    expect(layout.discardedRecordFile(at, id)).toBe(join(home, 'record.json'));
+    expect(layout.discardedObservedFile(at, id)).toBe(join(home, 'observed.json'));
+    // The same two names they had under `terminals/`, which is the whole of the
+    // rollback: a person moves them back and the record is there again.
+    expect(layout.recordFile(id).endsWith('record.json')).toBe(true);
+    expect(layout.observedFile(id).endsWith('observed.json')).toBe(true);
+  });
+
+  it('stays inside the base, because it is formed from a validated id', () => {
+    expect(layout.discardedTerminalDir(at, id).startsWith(layout.trashDir)).toBe(true);
+    expect(layout.discardedTerminalDir(at, id)).not.toContain('..');
   });
 });

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { presentTerminal } from '@gripterm/core';
+import { terminalUri } from './terminal-decorations';
 import type { Disposable, SessionRegistry, TerminalEntry } from '@gripterm/core';
 
 export const TERMINALS_VIEW_ID = 'gripterm.terminals';
@@ -44,6 +45,12 @@ export class TerminalTreeDataProvider implements vscode.TreeDataProvider<Termina
     const shown = presentTerminal(entry, { ours: this._registry.knows(entry.terminalId) });
     const item = new vscode.TreeItem(shown.label);
     item.id = entry.terminalId.value;
+    // Names no file and is never opened. It exists so that the person's own
+    // colour has something to attach to: a decoration is the only way the
+    // platform offers to colour a row's label, and the icon's colour is spoken
+    // for by the state (M2.7). The label above is given explicitly, so the uri
+    // does not become the row's name.
+    item.resourceUri = terminalUri(entry.terminalId);
     item.description = shown.description;
     item.tooltip = shown.tooltipLines.join('\n');
     item.contextValue = shown.contextValue;

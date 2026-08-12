@@ -66,6 +66,49 @@ suite('the lifecycle commands', () => {
     assert.deepEqual([...new Set(named)].sort(), [CONTEXT_LIVE, CONTEXT_OVER].sort());
   });
 
+  /*
+   * M2.7 added five edit commands offered on both kinds of row, and one
+   * deletion offered on neither kind but the finished one. Written out as a
+   * table rather than left to the reading above, because the failure it guards
+   * is silent in both directions: a `when` clause that never matches is a menu
+   * entry nobody ever sees, and one that matches too much offers deletion of a
+   * terminal that is still running.
+   *
+   * `=~` was used here first, with the two row values in one regular
+   * expression. It was replaced by the plain `==` this manifest already proves,
+   * because nothing available to this suite evaluates a `when` clause -- so a
+   * mistake in the escaping would have been a menu that silently never appeared
+   * and a test that stayed green.
+   */
+  test('offer the edits on both kinds of row, and deletion only on a finished one', async () => {
+    await api();
+    const rowsFor = (command: string): string[] =>
+      menuItems()
+        .filter((item) => item.command === command)
+        .map((item) => /viewItem == ([\w.]+)/u.exec(item.when)?.[1] ?? '')
+        .sort();
+
+    for (const command of [
+      'gripterm.renameTerminal',
+      'gripterm.setTask',
+      'gripterm.addNote',
+      'gripterm.editTags',
+      'gripterm.setColor',
+    ]) {
+      assert.deepEqual(rowsFor(command), [CONTEXT_LIVE, CONTEXT_OVER].sort(), command);
+    }
+    assert.deepEqual(rowsFor('gripterm.deleteTerminal'), [CONTEXT_OVER]);
+    assert.deepEqual(rowsFor('gripterm.closeTerminal'), [CONTEXT_LIVE]);
+  });
+
+  test('are all registered, including the six M2.7 added', async () => {
+    const commands = await vscode.commands.getCommands(true);
+
+    for (const item of menuItems()) {
+      assert.ok(commands.includes(item.command), `${item.command} is not registered`);
+    }
+  });
+
   test('do nothing dramatic when there is no terminal to close', async () => {
     // The palette path with an empty list. It says so and returns; a command
     // that waited on the notification it just raised would never return at all.

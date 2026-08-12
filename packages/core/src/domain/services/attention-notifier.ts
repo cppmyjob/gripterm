@@ -108,10 +108,12 @@ export class AttentionNotifier implements Disposable {
 
   private _onChange(change: RegistryChange): void {
     if (change.kind !== 'entry') {
-      // Other windows' records, arriving wholesale from the base. Never a
-      // notification: this window did not see any of it happen, cannot say
-      // which of them moved, and a toast offering to focus a terminal that
-      // lives in another window is an interruption with nothing behind it.
+      // Two things, and neither is news. Other windows' records arrive
+      // wholesale from the base: this window did not see any of it happen,
+      // cannot say which of them moved, and a toast offering to focus a
+      // terminal that lives in another window is an interruption with nothing
+      // behind it. A deletion is the person's own act of a moment ago, and
+      // telling somebody what they have just done is the definition of noise.
       return;
     }
 

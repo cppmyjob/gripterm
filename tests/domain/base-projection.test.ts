@@ -94,7 +94,11 @@ function stand(repository: TerminalRepository): Stand {
     clock: new FixedClock(OBSERVED_AT),
     logger,
   });
-  return { registry, logger, projection: new BaseProjection({ repository, registry, logger }) };
+  return {
+    registry,
+    logger,
+    projection: new BaseProjection({ repository, registry, owner: makeOwnerRef(), logger }),
+  };
 }
 
 function listed(registry: SessionRegistry): string[] {
@@ -201,6 +205,33 @@ describe('when the base cannot be read', () => {
 
     expect(logger.errors[0]?.message).toContain('the store could not be read');
     // The window still shows what it holds itself.
+    expect(listed(registry)).toStrictEqual([TERMINAL_UUID]);
+  });
+});
+
+describe('a record this window wrote', () => {
+  it('is never taken back from the base, even when the list no longer holds it', async () => {
+    // The gap this closes is small and reachable: between a person deleting a
+    // record and the removal reaching the files, the record is held by nobody
+    // and the base still has it. Without the owner filter a read landing there
+    // hands it back as somebody else's terminal, in the window that threw it
+    // away.
+    const repository = new InMemoryTerminalRepository(makeOwnerRef());
+    await repository.write(makeEntry());
+    const { registry, projection } = stand(repository);
+
+    await projection.refresh();
+
+    expect(listed(registry)).toStrictEqual([]);
+  });
+
+  it('is taken back once another window has adopted it, because it is theirs now', async () => {
+    const repository = new InMemoryTerminalRepository(makeOwnerRef('another-window'));
+    await repository.write(makeEntry({ owner: makeOwnerRef('another-window') }));
+    const { registry, projection } = stand(repository);
+
+    await projection.refresh();
+
     expect(listed(registry)).toStrictEqual([TERMINAL_UUID]);
   });
 });

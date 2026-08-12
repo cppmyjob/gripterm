@@ -58,7 +58,28 @@ export interface ProjectionChange {
   readonly kind: 'projection';
 }
 
-export type RegistryChange = EntryChange | ProjectionChange;
+/**
+ * A record this window held is gone, because a person threw it away (M2.7).
+ *
+ * It carries the id and not the entry, which is the shape of what happened: the
+ * entry is what a listener would draw, and there is nothing to draw. The two
+ * listeners that must act on it act on the id alone -- the writer discards the
+ * record from the store, and the observability watch cancels a silence timer
+ * that would otherwise announce "Gripterm is not seeing this terminal" about a
+ * terminal nobody is looking for.
+ *
+ * Its own member of the union rather than an entry change carrying a flag, for
+ * the same reason `ProjectionChange` is one: a listener that read the flag
+ * wrongly would draw a deleted terminal, while a listener that ignores this
+ * member draws nothing -- and drawing nothing is the right answer for the three
+ * that do ignore it.
+ */
+export interface RemovalChange {
+  readonly kind: 'removed';
+  readonly terminalId: TerminalId;
+}
+
+export type RegistryChange = EntryChange | ProjectionChange | RemovalChange;
 
 export type RegistryListener = (change: RegistryChange) => void;
 
@@ -186,6 +207,31 @@ export class SessionRegistry implements HookEventSink {
     }
     this._entries.set(next.terminalId.value, next);
     this._notify({ kind: 'entry', entry: next, transition: null });
+  }
+
+  /**
+   * Drops a record this window holds, because the person deleted it (M2.7).
+   *
+   * Refuses an id it does not hold, exactly as `amend` does and for the same
+   * reason: a caller naming a terminal this window never had is a caller working
+   * from a stale list, and doing nothing is the only answer that cannot make it
+   * worse. Another window's record is not touched either -- deleting one is a
+   * write into a file this window may not write (§4.8).
+   *
+   * The store is NOT touched here. This class writes nothing; the removal
+   * travels to the disk the same way every other change does, through the
+   * listener the writer registered (M2.6). That matters for the order: a write
+   * of this record still queued behind us is replaced by the removal rather than
+   * racing it.
+   */
+  public forget(terminalId: TerminalId): void {
+    if (!this._entries.delete(terminalId.value)) {
+      this._options.logger.warn('a removal named a terminal this window does not hold', {
+        terminalId: terminalId.value,
+      });
+      return;
+    }
+    this._notify({ kind: 'removed', terminalId });
   }
 
   /**
@@ -453,13 +499,30 @@ export class SessionRegistry implements HookEventSink {
         listener(change);
       } catch (cause: unknown) {
         this._options.logger.error('a registry listener threw while being told of a change', {
-          // A projection change names no terminal, and inventing one for the
-          // log would send whoever reads it looking at the wrong record.
-          terminalId: change.kind === 'entry' ? change.entry.terminalId.value : null,
+          terminalId: terminalIdOf(change),
           cause,
         });
       }
     }
+  }
+}
+
+/**
+ * Which record a change is about, for a log line.
+ *
+ * A projection change names no terminal, and inventing one would send whoever
+ * reads it looking at the wrong record. The other two do name one, and a
+ * listener that threw while being told a record was deleted is worth being able
+ * to find.
+ */
+function terminalIdOf(change: RegistryChange): string | null {
+  switch (change.kind) {
+    case 'entry':
+      return change.entry.terminalId.value;
+    case 'removed':
+      return change.terminalId.value;
+    case 'projection':
+      return null;
   }
 }
 

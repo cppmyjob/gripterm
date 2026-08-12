@@ -86,6 +86,27 @@ export async function writeAtomic(
   }
 }
 
+/**
+ * Moves a file, waiting out the same hazard `writeAtomic` waits out.
+ *
+ * Its own exported name rather than a second copy of the ladder, because the
+ * hazard is the same one and was measured once: a `rename` whose source or
+ * target a concurrent reader holds open fails with `EPERM` on Windows (§2.1a),
+ * and every window in this design reads every other window's files.
+ *
+ * There is no scratch file here and there does not need to be one. Nothing is
+ * being replaced -- the destination is a directory a caller has just created --
+ * so the move is either done or not done, and a reader of the source sees the
+ * old file until it is gone.
+ */
+export async function moveAtomic(
+  from: string,
+  to: string,
+  options: AtomicWriteOptions = {}
+): Promise<void> {
+  await renameWithRetry(from, to, options.backoffMs ?? BACKOFF_MS);
+}
+
 async function renameWithRetry(
   from: string,
   to: string,

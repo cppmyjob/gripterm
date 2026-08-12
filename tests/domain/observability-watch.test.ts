@@ -227,3 +227,31 @@ describe('the silence of other windows is not ours to report', () => {
     expect(scheduler.armed).toEqual([]);
   });
 });
+
+describe('a terminal whose record the person deleted', () => {
+  it('is not waited for any longer', () => {
+    // Twenty seconds later there would be no row on screen to explain the
+    // sentence, and the sentence would be about a terminal nobody is looking
+    // for.
+    const { registry, scheduler } = stand();
+    registry.register(launching());
+    expect(scheduler.live).toHaveLength(1);
+
+    registry.forget(TERMINAL);
+
+    expect(scheduler.live).toStrictEqual([]);
+  });
+
+  it('would be watched again if it ever came back, because nothing is remembered', () => {
+    // The smaller of the two promises available here. Saying "this id is never
+    // watched again" would be a claim about a record returning from the dead,
+    // and nothing today can make it true or false.
+    const { registry, scheduler } = stand();
+    registry.register(launching());
+    registry.forget(TERMINAL);
+
+    registry.register(launching());
+
+    expect(scheduler.live).toHaveLength(1);
+  });
+});

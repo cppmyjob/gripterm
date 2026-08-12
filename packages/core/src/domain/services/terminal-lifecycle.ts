@@ -38,6 +38,16 @@ export interface LaunchRequest {
   readonly recipe: LaunchRecipe;
 }
 
+/**
+ * What `discard` did.
+ *
+ * Three answers rather than a boolean, because the caller says something
+ * different about each: a person who asked to delete a running terminal is told
+ * to close it first, and a person whose record had already gone is told nothing
+ * at all -- the thing they wanted is already true.
+ */
+export type DiscardOutcome = 'discarded' | 'still-running' | 'unknown-terminal';
+
 /** What a terminal was doing between being started and being closed. */
 interface Watched {
   readonly handle: TerminalHandle;
@@ -210,6 +220,50 @@ export class TerminalLifecycleService implements Disposable {
     // terminal raises the close event (A15), which lands in `_onClosed` like
     // any other close.
     watched.handle.dispose();
+  }
+
+  /**
+   * The person is throwing the record away: the row, the name, the task, the
+   * notes and the tags (M2.7).
+   *
+   * What it does NOT touch is the point of the whole operation. The Claude Code
+   * conversation is not ours -- it lives in the CLI's own store and this
+   * extension never writes there -- and neither is the event journal, which is
+   * the one thing in our store no later version can go back for (§10.1а). What
+   * goes is our record of the terminal, and it goes to `trash/` rather than to
+   * nothing, so the answer to "I did not mean that" is a file move (§I.3).
+   *
+   * **Refused while this window still has a process for the terminal**, and the
+   * evidence is `_watched` rather than the record's state: a record can look
+   * finished -- `orphaned` is a process that died without saying so -- while its
+   * terminal is still open in the editor. Deleting under an open terminal leaves
+   * a pane nothing can name and events arriving for a record nobody holds. The
+   * menus offer this only on rows that are over, so the refusal is the second
+   * line of defence and not the first; it is here because the first one lives in
+   * a manifest, and a manifest is not a rule.
+   *
+   * It lives on this service and not beside the metadata edits for one reason:
+   * that precondition is knowledge only this object has.
+   */
+  public discard(terminalId: TerminalId): DiscardOutcome {
+    if (this._watched.has(terminalId.value)) {
+      this._options.logger.warn('a record was not deleted, because its terminal is still running', {
+        terminalId: terminalId.value,
+      });
+      return 'still-running';
+    }
+    if (!this._options.registry.knows(terminalId)) {
+      this._options.logger.info('a deletion named a terminal this window does not hold', {
+        terminalId: terminalId.value,
+      });
+      return 'unknown-terminal';
+    }
+
+    this._options.registry.forget(terminalId);
+    this._options.logger.info('a terminal record was deleted by the person who owns it', {
+      terminalId: terminalId.value,
+    });
+    return 'discarded';
   }
 
   public dispose(): void {

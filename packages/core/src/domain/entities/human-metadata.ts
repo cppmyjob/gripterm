@@ -59,6 +59,50 @@ export class HumanMetadata {
     return new HumanMetadata({ ...params, displayName, tags });
   }
 
+  /**
+   * The name in the list. Blank is refused rather than normalised: a row with
+   * no name is a row nobody can point at, and the caller asking for one has a
+   * person in front of it who can be told.
+   */
+  public withDisplayName(next: string): HumanMetadata {
+    return this._with({ displayName: next });
+  }
+
+  /**
+   * What this terminal is FOR, or nothing.
+   *
+   * Blank collapses to `null`, and that is the difference from a name: an empty
+   * task is a task nobody set, and storing `''` would make "has a task" a
+   * question with two right answers -- one of which every reader would have to
+   * remember to ask.
+   */
+  public withTask(next: string | null): HumanMetadata {
+    return this._with({ task: blankToNull(next) });
+  }
+
+  /** Appends. Notes are a log of what a person thought, not a field to overwrite. */
+  public withNote(note: Note): HumanMetadata {
+    return this._with({ notes: [...this.notes, note] });
+  }
+
+  public withTags(next: readonly string[]): HumanMetadata {
+    return this._with({ tags: next });
+  }
+
+  /**
+   * A theme colour id, or nothing.
+   *
+   * Deliberately NOT checked against a list of known ids. The set of theme
+   * colours belongs to the editor and grows with it, a record can be written by
+   * a build newer than the one reading it, and an unknown id costs exactly the
+   * default colour. Refusing one would make this the authority on somebody
+   * else's list, and would turn a cosmetic disagreement into a record that
+   * cannot be read.
+   */
+  public withColor(next: string | null): HumanMetadata {
+    return this._with({ color: blankToNull(next) });
+  }
+
   public equals(other: HumanMetadata): boolean {
     return (
       this.displayName === other.displayName &&
@@ -73,4 +117,28 @@ export class HumanMetadata {
       })
     );
   }
+
+  /**
+   * Every mutator goes through `create`, so a change is validated by the same
+   * rule as a construction. The alternative -- assigning into a copy -- is how
+   * an object acquires a state its constructor would have refused.
+   */
+  private _with(changes: Partial<HumanMetadataParams>): HumanMetadata {
+    return HumanMetadata.create({
+      displayName: this.displayName,
+      task: this.task,
+      notes: this.notes,
+      tags: this.tags,
+      color: this.color,
+      ...changes,
+    });
+  }
+}
+
+function blankToNull(value: string | null): string | null {
+  if (value === null) {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? null : trimmed;
 }

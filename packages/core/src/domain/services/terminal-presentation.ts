@@ -18,8 +18,23 @@ export interface TerminalPresentation {
   readonly description: string;
   readonly tooltipLines: readonly string[];
   readonly iconId: string;
-  /** A theme colour id, or `null` to leave the host's default. */
+  /**
+   * The STATE's colour, for the icon. A theme colour id, or `null` to leave the
+   * host's default.
+   */
   readonly colorId: string | null;
+  /**
+   * The PERSON's colour, for the row's label. `null` when they set none.
+   *
+   * Two colours on one row, and keeping them on separate surfaces is the whole
+   * design rather than a detail of drawing. Colour is what a person scans a list
+   * with, and the icon's colour answers "does this one need me" -- which is the
+   * question П1 exists about. A personal colour laid over that would trade the
+   * only automatic signal on the row for a manual one, quietly, for whoever
+   * happened to use the feature. So the icon stays the tool's judgement and the
+   * label becomes the person's filing.
+   */
+  readonly labelColorId: string | null;
   /** What a menu's `when` clause tests. See `CONTEXT_LIVE`. */
   readonly contextValue: string;
 }
@@ -143,6 +158,7 @@ export function presentTerminal(
     tooltipLines: tooltipLines(entry, appearance, ours),
     iconId: appearance.iconId,
     colorId: appearance.colorId,
+    labelColorId: entry.metadata.color,
     contextValue: contextValueFor(entry, appearance, ours),
   };
 }
@@ -186,6 +202,12 @@ function tooltipLines(
   if (entry.metadata.task !== null) {
     lines.push(entry.metadata.task);
   }
+  if (entry.metadata.tags.length > 0) {
+    // Hashes rather than commas: a tag is read at a glance and the marker is
+    // what makes the line skippable for somebody looking for the task.
+    lines.push(entry.metadata.tags.map((tag) => `#${tag}`).join(' '));
+  }
+  appendLatestNote(entry, lines);
   lines.push(entry.launch.cwd);
   if (entry.observed.lastAssistantMessage !== null) {
     lines.push(truncate(entry.observed.lastAssistantMessage));
@@ -199,6 +221,29 @@ function tooltipLines(
   // Last, because it is the line a person copies rather than reads.
   lines.push(`session ${entry.sessionId.value}`);
   return lines;
+}
+
+/**
+ * The last note, and how many there are.
+ *
+ * One note and not all of them: a tooltip is a glance, and a terminal somebody
+ * has been thinking about for a week would otherwise draw a wall over the list
+ * it is a tooltip for. The count is what stops that being a lie -- "there is
+ * more here" is the part a person needs in order to go and look.
+ *
+ * The LAST note rather than the newest by timestamp. They are appended, so the
+ * two agree; sorting by `at` would additionally have to decide what to do about
+ * two notes written in the same millisecond, and would answer differently on
+ * different days for the same record.
+ */
+function appendLatestNote(entry: TerminalEntry, lines: string[]): void {
+  const { notes } = entry.metadata;
+  const latest = notes.at(-1);
+  if (latest === undefined) {
+    return;
+  }
+  const text = truncate(latest.text);
+  lines.push(notes.length === 1 ? text : `${text} (${notes.length} notes)`);
 }
 
 /**

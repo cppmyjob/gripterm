@@ -46,6 +46,15 @@ export interface TerminalRepository {
   write: (entry: TerminalEntry) => Promise<void>;
   /** Compare-and-swap on `revision`: `ConflictError` when it moved meanwhile. */
   adopt: (id: TerminalId, expected: number, options?: AdoptOptions) => Promise<TerminalEntry>;
+  /**
+   * Takes a record out of the base, because a person threw it away.
+   *
+   * What "out" means is the implementation's, and the file store's answer is
+   * `trash/` rather than deletion: the record holds the task and the notes, and
+   * §I.3 forbids an irreversible act without a way back that was made first. The
+   * port does not promise which, because a base that is a database would answer
+   * differently and both answers are honest.
+   */
   remove: (id: TerminalId) => Promise<void>;
   /** Push, not polling. */
   watch: (listener: RepositoryListener) => Disposable;

@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import {
   ConflictError,
   FileTerminalRepository,
@@ -22,6 +22,7 @@ import type {
   TerminalEntry,
 } from '../../packages/core/src/index';
 import { NEXT_SESSION_UUID, TERMINAL_UUID, makeEntry, makeOwnerRef } from '../helpers/domain-fixtures';
+import { FixedClock } from '../helpers/port-fakes';
 
 /**
  * The base as several windows actually meet it: a directory, on a real file
@@ -36,6 +37,9 @@ import { NEXT_SESSION_UUID, TERMINAL_UUID, makeEntry, makeOwnerRef } from '../he
 const MINE = 'window-mine';
 const THEIRS = 'window-theirs';
 const OTHER_TERMINAL = '9f6b1a20-4d2e-4c88-b3f1-2a7c9e5d0011';
+
+/** The moment a discarded record is stamped with, so its trash path is known. */
+const DISCARDED_AT = new Date('2026-08-12T14:33:07.500Z');
 
 class StubPresence implements OwnerPresence {
   private readonly _liveness = new Map<string, OwnerLiveness>();
@@ -103,6 +107,7 @@ function repositoryFor(ownerId: string): FileTerminalRepository {
     layout,
     owner: makeOwnerRef(ownerId),
     presence,
+    clock: new FixedClock(DISCARDED_AT),
     logger,
   });
 }
@@ -489,12 +494,23 @@ describe('adopting', () => {
   });
 });
 
+/** Every file under `dir`, as paths relative to it, sorted. */
+async function tree(dir: string): Promise<string[]> {
+  const found: string[] = [];
+  for (const item of await readdir(dir, { withFileTypes: true, recursive: true })) {
+    if (item.isFile()) {
+      found.push(relative(dir, join(item.parentPath, item.name)).replaceAll('\\', '/'));
+    }
+  }
+  return found.sort();
+}
+
 describe('removing', () => {
   /*
    * The journal is the one thing in this store no later version can go back
    * for (§10.1а). A command that takes a row out of a list has no business
-   * destroying it -- `Clean Up Storage` (M2.15) moves the directory, and even
-   * that does not delete.
+   * destroying it -- `Clean Up Storage` (M2.15) sweeps the trash, and even that
+   * does not delete.
    */
   it('forgets the record and keeps the history', async () => {
     const entry = entryOwnedBy(MINE);
@@ -526,6 +542,95 @@ describe('removing', () => {
     await repository.remove(entry.terminalId);
 
     expect(told).toBe(1);
+  });
+
+  /*
+   * The three below are §I.3 in one place: the record holds the task, the notes
+   * and the tags, which nothing can rebuild, so it is MOVED rather than
+   * destroyed and the way back is tested rather than argued.
+   */
+  it('moves the two files to the trash instead of deleting them', async () => {
+    const entry = entryOwnedBy(MINE);
+    await repositoryFor(MINE).write(entry);
+
+    await repositoryFor(MINE).remove(entry.terminalId);
+
+    const home = layout.discardedTerminalDir(DISCARDED_AT, entry.terminalId);
+    expect((await readdir(home)).sort()).toStrictEqual(['observed.json', 'record.json']);
+    expect(await repositoryFor(MINE).readAll()).toStrictEqual([]);
+  });
+
+  it('can be undone by moving them back, with no tool and no format to understand', async () => {
+    const entry = entryOwnedBy(MINE, {
+      metadata: HumanMetadata.create({
+        displayName: 'auth-refactor',
+        task: 'Move token validation into its own service',
+        notes: [],
+        tags: ['backend'],
+        color: 'terminal.ansiCyan',
+      }),
+    });
+    await repositoryFor(MINE).write(entry);
+    await repositoryFor(MINE).remove(entry.terminalId);
+
+    // Exactly what a person does with a file manager: the two files back into
+    // the terminal's own directory, which never left.
+    const id = entry.terminalId;
+    await rename(layout.discardedRecordFile(DISCARDED_AT, id), layout.recordFile(id));
+    await rename(layout.discardedObservedFile(DISCARDED_AT, id), layout.observedFile(id));
+
+    const back = await repositoryFor(MINE).readAll();
+    expect(back).toHaveLength(1);
+    expect(back[0]?.metadata.task).toBe('Move token validation into its own service');
+    expect(back[0]?.metadata.tags).toStrictEqual(['backend']);
+    expect(back[0]?.observed.state).toBe(entry.observed.state);
+  });
+
+  it('goes ahead when there is no snapshot to move, and says so quietly', async () => {
+    // The observed half is a cache whose loss costs nothing, so refusing to
+    // delete a record over it would leave the person with a row they asked
+    // twice to be rid of. A record planted by hand has no `observed.json`,
+    // which is also what a record restored from the trash by hand looks like.
+    const entry = entryOwnedBy(MINE);
+    await plant(entry);
+
+    await repositoryFor(MINE).remove(entry.terminalId);
+
+    expect(await repositoryFor(MINE).readAll()).toStrictEqual([]);
+    expect(await readdir(layout.discardedTerminalDir(DISCARDED_AT, entry.terminalId))).toStrictEqual(
+      ['record.json']
+    );
+    expect(logger.lines).toContain('info: a discarded record left its observed snapshot behind');
+  });
+
+  it('touches nothing but the two files of the record it was asked about', async () => {
+    // The acceptance criterion of M2.7 read as a file-system fact: deleting a
+    // row does not delete the conversation. The decoys stand for the two things
+    // a person fears losing -- the CLI's own store, which this codebase never
+    // writes to, and our journal.
+    const entry = entryOwnedBy(MINE);
+    const neighbour = entryOwnedBy(MINE, { terminalId: TerminalId.fromString(OTHER_TERMINAL) });
+    await repositoryFor(MINE).write(entry);
+    await repositoryFor(MINE).write(neighbour);
+
+    const conversation = join(base, 'projects', 'D--Projects-foo');
+    await mkdir(conversation, { recursive: true });
+    await writeFile(join(conversation, `${entry.sessionId.value}.jsonl`), '{"type":"user"}\n', 'utf8');
+    await mkdir(layout.eventsDir(entry.terminalId), { recursive: true });
+    await writeFile(layout.journalFile(entry.terminalId, DISCARDED_AT), '{"v":1}\n', 'utf8');
+    await writeFile(layout.settingsFile(entry.terminalId), '{}', 'utf8');
+
+    const before = await tree(base);
+    await repositoryFor(MINE).remove(entry.terminalId);
+    const after = await tree(base);
+
+    const id = entry.terminalId.value;
+    expect(before.filter((path) => !after.includes(path))).toStrictEqual([
+      `terminals/${id}/observed.json`,
+      `terminals/${id}/record.json`,
+    ]);
+    // And what appeared is the same two files, in the trash and nowhere else.
+    expect(after.filter((path) => !before.includes(path)).every((path) => path.startsWith('trash/'))).toBe(true);
   });
 });
 

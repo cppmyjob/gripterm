@@ -6,7 +6,9 @@ import { STORAGE_DIRECTORY_MODE } from './storage-layout';
 import { TerminalId } from '../../domain/entities/terminal-id';
 import { asRecord, asString } from '../../domain/json/json-readers';
 import { decodeEntry, encodeObserved, encodeRecord } from './record-codec';
+import { moveAtomic } from './atomic-file';
 import { readJsonFile, writeJsonFile } from './json-file';
+import type { Clock } from '../../domain/ports/clock';
 import type { Disposable } from '../../domain/ports/disposable';
 import type { JsonRead } from './json-file';
 import type { Logger } from '../../domain/ports/logger';
@@ -34,6 +36,8 @@ export interface FileTerminalRepositoryOptions {
   readonly owner: OwnerRef;
   /** Answers whether the CURRENT owner of a record is still there. */
   readonly presence: OwnerPresence;
+  /** Stamps the trash directory a discarded record goes to, and nothing else. */
+  readonly clock: Clock;
   readonly logger: Logger;
 }
 
@@ -134,13 +138,31 @@ export class FileTerminalRepository implements TerminalRepository {
   }
 
   /**
-   * Forgets the record, and deliberately NOT its history.
+   * Puts the record in the trash, and deliberately does NOT destroy anything.
    *
-   * `record.json` and `observed.json` go; the terminal's directory and its event
-   * journal stay. The journal is the one thing in this store that no later
-   * version can go back for (§10.1а), and a command that removes a row from a
-   * list has no business destroying it. The empty directory is collected by
-   * `Clean Up Storage` (M2.15), which moves rather than deletes.
+   * **It moves rather than deletes**, and that is the rule of §I.3 rather than a
+   * kindness: `record.json` holds the task, the notes and the tags, which are
+   * the one thing in this store nothing can rebuild, and a confirmation dialog
+   * is not a rollback -- it is a question asked before the point of no return,
+   * not a way back from it. `trash/<stamp>/<terminalId>/` holds the two files
+   * under their own names, so undoing a deletion is moving a directory back and
+   * needs neither this build nor any tool. M2.15 inherits the shape and adds the
+   * sweep that keeps it from growing forever.
+   *
+   * **The journal, the settings file and the directory stay where they are.**
+   * The journal is the one artefact no later version can go back for (§10.1а),
+   * and a command that removes a row from a list has no business destroying it.
+   * Nor is the Claude Code conversation touched, here or anywhere else in this
+   * codebase: it lives in the CLI's own store, and deleting our record of a
+   * terminal is not a decision about anybody's conversation (M2.7).
+   *
+   * **The observed half goes first and the record last**, which is the same
+   * order `_store` writes them in and for the same reason: a crash in the middle
+   * leaves a record whose snapshot is missing, which the codec absorbs, rather
+   * than a snapshot whose record is missing, which is indistinguishable from
+   * rubbish. A snapshot that cannot be moved at all does not stop the deletion:
+   * it is a cache, its loss costs nothing, and refusing to delete a record over
+   * it would leave the person with a row they asked twice to be rid of.
    *
    * One consequence, named rather than discovered: a record that cannot be READ
    * cannot be removed here either, because `_require` cannot find it. Such a
@@ -150,12 +172,24 @@ export class FileTerminalRepository implements TerminalRepository {
    */
   public async remove(id: TerminalId): Promise<void> {
     await this._require(id);
-    await rm(this._options.layout.recordFile(id), { force: true });
-    await rm(this._options.layout.observedFile(id), { force: true });
+    const { layout } = this._options;
+    const at = this._options.clock.now();
+
+    await mkdir(layout.discardedTerminalDir(at, id), {
+      recursive: true,
+      mode: STORAGE_DIRECTORY_MODE,
+    });
+    await this._discardObserved(at, id);
+    await moveAtomic(layout.recordFile(id), layout.discardedRecordFile(at, id));
+
     // Forgotten here as well, or a record written again under the same id and
     // the same content -- which is what restoring one looks like -- would be
     // recognised as already on disk and never written back.
     this._records.delete(id.value);
+    this._options.logger.info('a terminal record was moved to the trash', {
+      terminalId: id.value,
+      path: layout.discardedTerminalDir(at, id),
+    });
     this._notify();
   }
 
@@ -175,6 +209,19 @@ export class FileTerminalRepository implements TerminalRepository {
         this._listeners.delete(listener);
       },
     };
+  }
+
+  /** See `remove`: the snapshot is a cache, so its move is allowed to fail. */
+  private async _discardObserved(at: Date, id: TerminalId): Promise<void> {
+    const { layout } = this._options;
+    try {
+      await moveAtomic(layout.observedFile(id), layout.discardedObservedFile(at, id));
+    } catch (cause: unknown) {
+      this._options.logger.info('a discarded record left its observed snapshot behind', {
+        terminalId: id.value,
+        reason: String(cause),
+      });
+    }
   }
 
   private async _terminalDirectories(): Promise<readonly string[]> {

@@ -40,12 +40,15 @@ const JOURNAL_SUFFIX = '.ndjson';
  */
 const LEGACY_JOURNAL_FILE = 'events.ndjson';
 
-/*
- * `trash/` is named in the layout of §4.8 and is deliberately absent here:
- * M2.15 has not chosen how a discarded record is stamped, and a getter for a
- * path nothing writes is a promise made before the decision it describes.
- * `events/` was in that sentence until M2.4a decided its shape.
+/**
+ * Where a record goes when a person throws it away (M2.7).
+ *
+ * This directory was named in §4.8 and deliberately absent from this class until
+ * something wrote it, on the rule that a getter for a path nothing writes is a
+ * promise made before the decision it describes. M2.7 is the milestone that
+ * writes it; M2.15 sweeps it, and inherits the shape rather than choosing it.
  */
+const TRASH_DIRECTORY = 'trash';
 
 /**
  * What an owner id may look like once it is a file name.
@@ -130,6 +133,10 @@ export class StorageLayout {
     return join(this._baseDir, TERMINALS_DIRECTORY);
   }
 
+  public get trashDir(): string {
+    return join(this._baseDir, TRASH_DIRECTORY);
+  }
+
   /** Throws `ValidationError` on an id that would not be safe as a file name. */
   public ownerFile(ownerId: OwnerId): string {
     return join(this.ownersDir, `${requireSafeOwnerId(ownerId.value)}.json`);
@@ -169,6 +176,39 @@ export class StorageLayout {
   /** M1's single journal file. Read, never written -- see `LEGACY_JOURNAL_FILE`. */
   public legacyJournalFile(terminalId: TerminalId): string {
     return join(this.terminalDir(terminalId), LEGACY_JOURNAL_FILE);
+  }
+
+  /**
+   * A discarded record's new home, `trash/<stamp>/<terminalId>/`.
+   *
+   * Takes the MOMENT and not a formatted stamp, for the reason stated at the top
+   * of this class: every path here is formed from a `TerminalId`, which is a
+   * validated uuid, so nothing about it can leave the base. A stamp passed in as
+   * a string would be the second member that can, and this one would be reached
+   * from a delete rather than from a heartbeat.
+   *
+   * Two records thrown away in the same second share the stamp and not the
+   * directory, which is what makes the name safe to reuse: the same record twice
+   * in one second is not reachable, because the first delete takes it out of
+   * every list it could be deleted from again.
+   */
+  public discardedTerminalDir(at: Date, terminalId: TerminalId): string {
+    return join(this.trashDir, trashStamp(at), terminalId.value);
+  }
+
+  /**
+   * The two files keep their names on the way to the trash, and that is the
+   * rollback: moving them back into `terminals/<terminalId>/` restores the
+   * record exactly, with no tool and no format to understand (§I.3). Back into
+   * the directory rather than over it -- the journal and the settings file never
+   * left, so the terminal's own directory is still there with them in it.
+   */
+  public discardedRecordFile(at: Date, terminalId: TerminalId): string {
+    return join(this.discardedTerminalDir(at, terminalId), RECORD_FILE);
+  }
+
+  public discardedObservedFile(at: Date, terminalId: TerminalId): string {
+    return join(this.discardedTerminalDir(at, terminalId), OBSERVED_FILE);
   }
 }
 
@@ -231,6 +271,25 @@ export function journalDay(at: Date): string {
   const month = String(at.getMonth() + MONTH_OFFSET).padStart(DATE_FIELD_WIDTH, '0');
   const day = String(at.getDate()).padStart(DATE_FIELD_WIDTH, '0');
   return `${year}-${month}-${day}`;
+}
+
+/**
+ * When a record was discarded, as a directory name.
+ *
+ * Local time and second granularity, and the same bargain as `journalDay`: the
+ * name is written for a person going to look for something they deleted this
+ * afternoon, so it is their afternoon. Fixed-width, so lexicographic order is
+ * chronological order and the sweep of M2.15 can compare strings rather than
+ * parse dates back out of directory names.
+ *
+ * No colons. They are legal in a path on POSIX and are an alternate data stream
+ * on NTFS, where `trash/12:04:33` is not a directory but a silent nothing.
+ */
+export function trashStamp(at: Date): string {
+  const hours = String(at.getHours()).padStart(DATE_FIELD_WIDTH, '0');
+  const minutes = String(at.getMinutes()).padStart(DATE_FIELD_WIDTH, '0');
+  const seconds = String(at.getSeconds()).padStart(DATE_FIELD_WIDTH, '0');
+  return `${journalDay(at)}_${hours}-${minutes}-${seconds}`;
 }
 
 function requireSafeOwnerId(value: string): string {

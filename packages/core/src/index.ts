@@ -143,8 +143,13 @@ export {
   isJournalFileName,
   isJournalPath,
   journalDay,
+  trashStamp,
 } from './infrastructure/store/storage-layout';
-export { writeAtomic, type AtomicWriteOptions } from './infrastructure/store/atomic-file';
+export {
+  moveAtomic,
+  writeAtomic,
+  type AtomicWriteOptions,
+} from './infrastructure/store/atomic-file';
 export { readJsonFile, writeJsonFile, type JsonRead } from './infrastructure/store/json-file';
 export {
   FileTerminalRepository,
@@ -363,9 +368,22 @@ export { terminalIdFrom } from './domain/services/terminal-target';
 
 export {
   TerminalLifecycleService,
+  type DiscardOutcome,
   type LaunchRequest,
   type TerminalLifecycleOptions,
 } from './domain/services/terminal-lifecycle';
+
+export {
+  NAME_REQUIRED,
+  NOTE_REQUIRED,
+  TERMINAL_COLORS,
+  TerminalMetadataService,
+  formatTags,
+  isBlank,
+  parseTags,
+  type ColorChoice,
+  type TerminalMetadataOptions,
+} from './domain/services/terminal-metadata';
 
 export {
   ATTENTION_SIGNALS,
@@ -397,6 +415,7 @@ export {
   type IngestOutcome,
   type ProjectionChange,
   type RegistryChange,
+  type RemovalChange,
   type RegistryListener,
   type SessionRegistryOptions,
 } from './domain/services/session-registry';

@@ -66,6 +66,8 @@ async function settle(): Promise<void> {
 /** A store that records what it was given, and can be held open or made to fail. */
 class SlowStore implements TerminalRepository {
   public readonly written: TerminalEntry[] = [];
+  /** Records this store was told to discard, in the order it was told. */
+  public readonly removed: TerminalId[] = [];
   public attempts = 0;
   public inFlight = 0;
   /** The most that were ever in flight together. Anything above one is a lost ordering. */
@@ -76,22 +78,21 @@ class SlowStore implements TerminalRepository {
   private _failWith: Error | null = null;
 
   public async write(entry: TerminalEntry): Promise<void> {
-    this.attempts += 1;
-    this.inFlight += 1;
-    this.peak = Math.max(this.peak, this.inFlight);
-    try {
-      if (this._held) {
-        await new Promise<void>((resolve) => {
-          this._waiting.push(resolve);
-        });
-      }
-      if (this._failWith !== null) {
-        throw this._failWith;
-      }
+    await this._visit(() => {
       this.written.push(entry);
-    } finally {
-      this.inFlight -= 1;
-    }
+    });
+  }
+
+  /**
+   * Held and failed by the same switches as `write`, because the writer's rules
+   * about ordering and about failure are not two rules -- a deletion that
+   * overtook a write would leave the record on disk with nothing left to remove
+   * it.
+   */
+  public async remove(id: TerminalId): Promise<void> {
+    await this._visit(() => {
+      this.removed.push(id);
+    });
   }
 
   /** From here on, writes wait for `release`. */
@@ -113,6 +114,7 @@ class SlowStore implements TerminalRepository {
 
   public forget(): void {
     this.written.length = 0;
+    this.removed.length = 0;
     this.attempts = 0;
   }
 
@@ -128,13 +130,29 @@ class SlowStore implements TerminalRepository {
     throw new Error('not part of this test');
   }
 
-  public async remove(): Promise<void> {
-    throw new Error('not part of this test');
-  }
-
   public watch(): { dispose: () => void } {
     return { dispose: (): void => undefined };
   }
+
+  private async _visit(land: () => void): Promise<void> {
+    this.attempts += 1;
+    this.inFlight += 1;
+    this.peak = Math.max(this.peak, this.inFlight);
+    try {
+      if (this._held) {
+        await new Promise<void>((resolve) => {
+          this._waiting.push(resolve);
+        });
+      }
+      if (this._failWith !== null) {
+        throw this._failWith;
+      }
+      land();
+    } finally {
+      this.inFlight -= 1;
+    }
+  }
+
 }
 
 interface Stand {
@@ -437,5 +455,96 @@ describe('when the window goes', () => {
     await settle();
 
     expect(store.attempts).toBe(0);
+  });
+});
+
+describe('a record the person threw away', () => {
+  it('is discarded from the store at once, without waiting for the debounce', async () => {
+    const { registry, store, scheduler, writer } = stand();
+    registry.register(makeEntry());
+    writer.start();
+    await settle();
+    store.forget();
+
+    registry.forget(TERMINAL);
+    await settle();
+
+    expect(ids(store.written)).toStrictEqual([]);
+    expect(store.removed.map((id) => id.value)).toStrictEqual([TERMINAL_UUID]);
+    // Nothing left waiting: a deletion is a deliberate act and there is no
+    // burst of them to absorb.
+    expect(scheduler.live).toStrictEqual([]);
+  });
+
+  it('replaces a write of the same record that was still waiting its turn', async () => {
+    // The queue holds one thing per terminal, so the only question is which
+    // thing. A record stored after it was deleted is a row that comes back.
+    const { registry, store, scheduler, writer } = stand();
+    registry.register(makeEntry());
+    writer.start();
+    await settle();
+    store.forget();
+
+    registry.ingest(TERMINAL, preToolUse('Bash'));
+    expect(scheduler.live).toHaveLength(1);
+
+    registry.forget(TERMINAL);
+    await settle();
+
+    expect(ids(store.written)).toStrictEqual([]);
+    expect(store.removed.map((id) => id.value)).toStrictEqual([TERMINAL_UUID]);
+    // The waiting deadline is cancelled rather than left to fire on a queue the
+    // deletion has already emptied.
+    expect(scheduler.live).toStrictEqual([]);
+  });
+
+  it('does not overtake a write already in flight', async () => {
+    const { registry, store, writer } = stand();
+    registry.register(makeEntry());
+    writer.start();
+    store.hold();
+    registry.register(makeEntry({ terminalId: OTHER }));
+
+    registry.forget(TERMINAL);
+    await store.release();
+    await settle();
+
+    expect(store.peak).toBe(1);
+    expect(store.removed.map((id) => id.value)).toStrictEqual([TERMINAL_UUID]);
+  });
+
+  it('says so when the store refuses, and does not try again', async () => {
+    const { registry, store, logger, writer } = stand();
+    registry.register(makeEntry());
+    writer.start();
+    await settle();
+    store.forget();
+    store.failWith(new Error('EBUSY'));
+
+    registry.forget(TERMINAL);
+    await settle();
+
+    expect(store.attempts).toBe(1);
+    expect(store.removed).toStrictEqual([]);
+    // The consequence is the opposite of a failed write, so it has its own
+    // sentence: the record is still there, not missing.
+    expect(logger.errors.at(-1)?.message).toContain('still in the store');
+    expect(logger.errors.at(-1)?.details?.terminalId).toBe(TERMINAL_UUID);
+  });
+
+  it('is discarded by `stop`, when the window went before the pass ran', async () => {
+    const { registry, store, writer } = stand();
+    registry.register(makeEntry());
+    writer.start();
+    await settle();
+    store.forget();
+    store.hold();
+
+    registry.forget(TERMINAL);
+    const stopped = writer.stop();
+    await store.release();
+    await stopped;
+
+    expect(store.removed.map((id) => id.value)).toStrictEqual([TERMINAL_UUID]);
   });
 });

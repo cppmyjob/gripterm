@@ -122,6 +122,8 @@ interface Stand {
   /** Changes about ONE record. The wholesale kind is collected separately, where it is the subject. */
   readonly changes: EntryChange[];
   readonly projections: number;
+  /** Ids the registry said it had dropped, in order. */
+  readonly removals: string[];
 }
 
 function stand(entry: TerminalEntry | null = makeEntry()): Stand {
@@ -137,19 +139,29 @@ function stand(entry: TerminalEntry | null = makeEntry()): Stand {
     registry.register(entry);
   }
   const changes: EntryChange[] = [];
+  const removals: string[] = [];
   let projections = 0;
+  // A total switch rather than an `else`: a fourth kind of change must arrive
+  // here as a compiler error and not as a silently miscounted projection.
   registry.subscribe((change) => {
-    if (change.kind === 'entry') {
-      changes.push(change);
-      return;
+    switch (change.kind) {
+      case 'entry':
+        changes.push(change);
+        return;
+      case 'removed':
+        removals.push(change.terminalId.value);
+        return;
+      case 'projection':
+        projections += 1;
+        return;
     }
-    projections += 1;
   });
   return {
     registry,
     logger,
     clock,
     changes,
+    removals,
     get projections(): number {
       return projections;
     },
@@ -802,5 +814,83 @@ describe('SessionRegistry projects what other windows own', () => {
     expect(world.registry.list().map((entry) => entry.terminalId.value)).toStrictEqual([
       TERMINAL_UUID,
     ]);
+  });
+});
+
+describe('a record this window is told to forget', () => {
+  it('leaves the list, and says which one left', () => {
+    const { registry, changes, removals } = stand();
+    changes.length = 0;
+
+    registry.forget(TERMINAL);
+
+    expect(registry.knows(TERMINAL)).toBe(false);
+    expect(registry.get(TERMINAL)).toBeUndefined();
+    expect(registry.own()).toStrictEqual([]);
+    expect(registry.list()).toStrictEqual([]);
+    expect(removals).toStrictEqual([TERMINAL_UUID]);
+    // Not an entry change: there is no entry to draw.
+    expect(changes).toStrictEqual([]);
+  });
+
+  it('takes its events with it, so nothing arrives for a record nobody holds', () => {
+    const { registry } = stand();
+
+    registry.forget(TERMINAL);
+
+    expect(registry.ingest(TERMINAL, terminalClosed())).toStrictEqual({ kind: 'unknown-terminal' });
+    expect(registry.stateOf(TERMINAL)).toBeNull();
+  });
+
+  it('refuses an id it does not hold, exactly as an amendment does', () => {
+    const { registry, logger, removals } = stand();
+
+    registry.forget(OTHER_TERMINAL);
+
+    expect(removals).toStrictEqual([]);
+    expect(logger.warnings.at(-1)?.message).toContain('does not hold');
+    expect(logger.warnings.at(-1)?.details?.terminalId).toBe(OTHER_TERMINAL.value);
+    // The one it does hold is untouched.
+    expect(registry.knows(TERMINAL)).toBe(true);
+  });
+
+  it('does not reach into another window records', () => {
+    // Deleting one would be a write into a file this window may not write.
+    const { registry, removals } = stand();
+    const foreign = makeEntry({
+      terminalId: OTHER_TERMINAL,
+      owner: makeOwnerRef('another-window'),
+    });
+    registry.replaceForeign([foreign]);
+
+    registry.forget(OTHER_TERMINAL);
+
+    expect(registry.list().map((entry) => entry.terminalId.value)).toContain(OTHER_TERMINAL.value);
+    expect(removals).toStrictEqual([]);
+  });
+
+  it('is not undone by the next read of the base', () => {
+    // `replaceForeign` skips ids this window holds, and a forgotten id is held
+    // by nobody -- so the guard that keeps a deleted row from coming back as
+    // somebody else's is in `BaseProjection`, and this is what it guards.
+    const { registry } = stand();
+    const ours = makeEntry();
+    registry.forget(TERMINAL);
+
+    registry.replaceForeign([ours]);
+
+    expect(registry.list()).toHaveLength(1);
+    expect(registry.knows(TERMINAL)).toBe(false);
+  });
+
+  it('names the record in the log when a listener throws about its removal', () => {
+    const { registry, logger } = stand();
+    registry.subscribe(() => {
+      throw new Error('a listener that cannot cope');
+    });
+
+    registry.forget(TERMINAL);
+
+    expect(logger.errors.at(-1)?.details?.terminalId).toBe(TERMINAL_UUID);
   });
 });

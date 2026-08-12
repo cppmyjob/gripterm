@@ -3,6 +3,7 @@ import type { Logger } from '../ports/logger';
 import type { RegistryChange, SessionRegistry } from './session-registry';
 import type { Scheduler } from '../ports/scheduler';
 import type { TerminalEntry } from '../entities/terminal-entry';
+import type { TerminalId } from '../entities/terminal-id';
 import type { TerminalRepository } from '../repositories/terminal-repository';
 
 /**
@@ -19,6 +20,18 @@ import type { TerminalRepository } from '../repositories/terminal-repository';
  * the whole base. Short debounce, storm of reads; long debounce, stale rows.
  */
 export const DEFAULT_WRITE_DEBOUNCE_MS = 500;
+
+/**
+ * One terminal's next appointment with the disk.
+ *
+ * A union rather than an entry that may be `null`, because the two are not the
+ * same operation and the difference must survive the queue: a record queued to
+ * be stored and then deleted must reach the disk as a deletion, and a `null`
+ * standing for "gone" is a value every later reader has to be told about.
+ */
+type PendingChange =
+  | { readonly kind: 'store', readonly entry: TerminalEntry }
+  | { readonly kind: 'discard', readonly terminalId: TerminalId };
 
 export interface BaseWriterOptions {
   readonly repository: TerminalRepository;
@@ -56,6 +69,11 @@ export interface BaseWriterOptions {
  * keeps the burst away from the file holding the only thing in this store that
  * nothing can rebuild.
  *
+ * **A deletion travels the same road** (M2.7), which is what keeps it in order.
+ * It replaces whatever store of that record was queued rather than racing it, so
+ * a record edited and then thrown away in the same second cannot reach the disk
+ * as an edit after it has reached it as a deletion.
+ *
  * **The debounce does not restart on each change**, for the reason measured in
  * M2.5: a resetting one goes quiet exactly while things are happening fastest.
  * The first change of a burst sets the deadline and the rest are absorbed into
@@ -79,8 +97,8 @@ export interface BaseWriterOptions {
  * ever reaches the disk that a newer state has already replaced.
  */
 export class BaseWriter implements Disposable {
-  /** Terminals whose latest state has not reached the store yet, newest state per id. */
-  private readonly _pending = new Map<string, TerminalEntry>();
+  /** Terminals whose latest state has not reached the store yet, one per id. */
+  private readonly _pending = new Map<string, PendingChange>();
   private _subscription: Disposable | null = null;
   private _timer: Disposable | null = null;
   private _writing = false;
@@ -105,7 +123,7 @@ export class BaseWriter implements Disposable {
       this._onChange(change);
     });
     for (const entry of this._options.registry.own()) {
-      this._pending.set(entry.terminalId.value, entry);
+      this._pending.set(entry.terminalId.value, { kind: 'store', entry });
     }
     void this._drain();
   }
@@ -135,15 +153,33 @@ export class BaseWriter implements Disposable {
   }
 
   private _onChange(change: RegistryChange): void {
-    if (change.kind !== 'entry') {
-      return;
+    switch (change.kind) {
+      case 'projection':
+        return;
+
+      case 'removed':
+        // At once, and never on the debounce. A person pressed delete and
+        // confirmed it; a row that lingers in every other window for half a
+        // second after that is a row they will click.
+        this._pending.set(change.terminalId.value, {
+          kind: 'discard',
+          terminalId: change.terminalId,
+        });
+        void this._drain();
+        return;
+
+      case 'entry':
+        this._pending.set(change.entry.terminalId.value, {
+          kind: 'store',
+          entry: change.entry,
+        });
+        if (change.transition === null) {
+          void this._drain();
+          return;
+        }
+        this._arm();
+        return;
     }
-    this._pending.set(change.entry.terminalId.value, change.entry);
-    if (change.transition === null) {
-      void this._drain();
-      return;
-    }
-    this._arm();
   }
 
   private _arm(): void {
@@ -197,8 +233,8 @@ export class BaseWriter implements Disposable {
     try {
       let batch = this._take();
       while (batch.length > 0) {
-        for (const entry of batch) {
-          await this._write(entry);
+        for (const pending of batch) {
+          await this._apply(pending);
         }
         // Anything that changed while the batch was being written is a newer
         // state of a record we have just stored, so it goes round again rather
@@ -212,19 +248,45 @@ export class BaseWriter implements Disposable {
     }
   }
 
-  private _take(): readonly TerminalEntry[] {
+  private _take(): readonly PendingChange[] {
     const batch = [...this._pending.values()];
     this._pending.clear();
     return batch;
   }
 
-  private async _write(entry: TerminalEntry): Promise<void> {
+  private async _apply(pending: PendingChange): Promise<void> {
+    if (pending.kind === 'store') {
+      await this._store(pending.entry);
+      return;
+    }
+    await this._discard(pending.terminalId);
+  }
+
+  private async _store(entry: TerminalEntry): Promise<void> {
     try {
       await this._options.repository.write(entry);
     } catch (cause: unknown) {
       this._options.logger.error(
         'a terminal could not be written to the store, so it is known only to this window',
         { terminalId: entry.terminalId.value, reason: String(cause) }
+      );
+    }
+  }
+
+  /**
+   * The failure here is worth its own sentence, because its consequence is the
+   * opposite of the one above: a record that could not be written is missing
+   * from other windows, while a record that could not be discarded is still
+   * THERE -- gone from this list, and back in every list on the machine as soon
+   * as this window closes and stops holding it out of the projection.
+   */
+  private async _discard(terminalId: TerminalId): Promise<void> {
+    try {
+      await this._options.repository.remove(terminalId);
+    } catch (cause: unknown) {
+      this._options.logger.error(
+        'a terminal record could not be discarded and is still in the store',
+        { terminalId: terminalId.value, reason: String(cause) }
       );
     }
   }

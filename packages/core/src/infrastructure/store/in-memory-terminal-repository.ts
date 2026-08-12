@@ -70,6 +70,11 @@ export class InMemoryTerminalRepository implements TerminalRepository {
     return entry.adoptedBy(this._owner);
   }
 
+  /**
+   * No trash, and none is owed. The file store keeps a discarded record because
+   * it would otherwise be gone for good; this base dies with the window that
+   * holds it, so everything in it is discarded a few hours later anyway.
+   */
   public async remove(id: TerminalId): Promise<void> {
     this._require(id);
     this._entries.delete(id.value);

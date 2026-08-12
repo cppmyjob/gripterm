@@ -5,8 +5,10 @@ import {
   ContextWindowSnapshot,
   CostSnapshot,
   HumanMetadata,
+  Note,
   ObservedState,
   presentTerminal,
+  type HumanMetadataParams,
   type PersistedTerminalState,
   type TerminalState,
 } from '../../packages/core/src/index';
@@ -234,5 +236,88 @@ describe('presentTerminal says what the row is about', () => {
 
     expect(rich).toContain('$1.50');
     expect(rich).toContain('context 37%');
+  });
+});
+
+describe('what the person put on the row', () => {
+  const bare: HumanMetadataParams = {
+    displayName: 'nameless',
+    task: null,
+    notes: [],
+    tags: [],
+    color: null,
+  };
+
+  function withMetadata(over: Partial<HumanMetadataParams>): ReturnType<typeof makeEntry> {
+    return makeEntry({ metadata: HumanMetadata.create({ ...bare, ...over }) });
+  }
+
+  it('shows the tags as one line, marked so the eye can skip it', () => {
+    const lines = presentTerminal(withMetadata({ tags: ['backend', 'code review'] })).tooltipLines;
+
+    expect(lines).toContain('#backend #code review');
+  });
+
+  it('leaves the line out when there are no tags', () => {
+    expect(presentTerminal(withMetadata({})).tooltipLines).toHaveLength(3);
+  });
+
+  it('shows the last note on its own, when it is the only one', () => {
+    const lines = presentTerminal(
+      withMetadata({ notes: [Note.create(CREATED_AT, 'ask about the migration')] })
+    ).tooltipLines;
+
+    expect(lines).toContain('ask about the migration');
+  });
+
+  it('shows the last note and how many there are, when there are more', () => {
+    // A tooltip is a glance. All of them would draw a wall over the list it is
+    // a tooltip for, and no count would hide that there is more to read.
+    const lines = presentTerminal(
+      withMetadata({
+        notes: [
+          Note.create(CREATED_AT, 'first'),
+          Note.create(OBSERVED_AT, 'second'),
+          Note.create(OBSERVED_AT, 'third'),
+        ],
+      })
+    ).tooltipLines;
+
+    expect(lines).toContain('third (3 notes)');
+    expect(lines).not.toContain('first');
+  });
+
+  it('cuts a long note by the same rule it cuts the agent', () => {
+    const lines = presentTerminal(
+      withMetadata({ notes: [Note.create(CREATED_AT, 'y'.repeat(500))] })
+    ).tooltipLines;
+
+    expect(lines.some((line) => line.endsWith('…') && line.length < 200)).toBe(true);
+  });
+
+  it('hands the colour out for the label, and never for the icon', () => {
+    // Two colours, two surfaces. The icon answers "does this one need me", and
+    // a personal colour laid over it would trade the row's only automatic
+    // signal for a manual one.
+    const shown = presentTerminal(withMetadata({ color: 'terminal.ansiMagenta' }));
+
+    expect(shown.labelColorId).toBe('terminal.ansiMagenta');
+    expect(shown.colorId).not.toBe('terminal.ansiMagenta');
+  });
+
+  it('leaves the label alone when the person chose no colour', () => {
+    expect(presentTerminal(withMetadata({})).labelColorId).toBeNull();
+  });
+
+  it('keeps the colour on a row that is over, because filing outlives the terminal', () => {
+    const shown = presentTerminal(
+      makeEntry({
+        metadata: HumanMetadata.create({ ...bare, color: 'terminal.ansiCyan' }),
+        closedAt: OBSERVED_AT,
+      })
+    );
+
+    expect(shown.contextValue).toBe(CONTEXT_OVER);
+    expect(shown.labelColorId).toBe('terminal.ansiCyan');
   });
 });

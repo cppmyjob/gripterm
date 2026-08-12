@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, open, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { writeAtomic } from '../../packages/core/src/index';
+import { moveAtomic, writeAtomic } from '../../packages/core/src/index';
 
 /**
  * Against a real file system, because the whole subject is what a real one does
@@ -132,4 +132,45 @@ describe('replacing a file without a reader seeing the middle', () => {
   });
 });
 
-/* eslint-enable jest/no-standalone-expect -- the two Windows-only blocks above are the only reason it was off. */
+describe('moving a file out of the way', () => {
+  /*
+   * Same hazard, same ladder, one exported name: a `rename` whose source a
+   * concurrent reader holds open fails with `EPERM` on Windows, and every
+   * window in this design reads every other window's files. A discarded record
+   * is moved to `trash/` rather than deleted (M2.7), so this is the operation
+   * that carries it.
+   */
+  it('takes the file with its content, and leaves nothing at the source', async () => {
+    const from = join(base, 'record.json');
+    const to = join(base, 'trash', 'record.json');
+    await writeFile(from, '{"task":"keep me"}', 'utf8');
+    await mkdir(join(base, 'trash'));
+
+    await moveAtomic(from, to);
+
+    expect(await readFile(to, 'utf8')).toBe('{"task":"keep me"}');
+    expect(await readdir(base)).toStrictEqual(['trash']);
+  });
+
+  it('reports the error of the file system itself when there is nothing to move', async () => {
+    await expect(
+      moveAtomic(join(base, 'gone.json'), join(base, 'trash.json'), { backoffMs: [1, 1] })
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  windowsOnly('retries while a reader holds the file open, and succeeds once it lets go', async () => {
+    const from = join(base, 'record.json');
+    const to = join(base, 'moved.json');
+    await writeFile(from, 'kept', 'utf8');
+    const handle = await open(from, 'r');
+
+    const pending = moveAtomic(from, to, { backoffMs: [10, 30, 90] });
+    setTimeout(() => { void handle.close(); }, 25);
+    await pending;
+
+    expect(await readFile(to, 'utf8')).toBe('kept');
+    expect(await readdir(base)).toStrictEqual(['moved.json']);
+  });
+});
+
+/* eslint-enable jest/no-standalone-expect -- the Windows-only blocks above are the only reason it was off. */
