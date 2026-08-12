@@ -37,6 +37,7 @@ import type {
   AgentCommandFactory,
   ExecutableSearch,
   ForwarderScript,
+  JournalPolicy,
   LaunchLocation,
   LaunchMode,
   LaunchStrategy,
@@ -48,7 +49,7 @@ import type {
 import { registerCloseTerminal } from './commands/close-terminal';
 import { registerFocusTerminal } from './commands/focus-terminal';
 import { registerNewTerminal } from './commands/new-terminal';
-import { readLaunchLocation, readLaunchMode, readToastSignals } from './settings';
+import { readJournalPolicy, readLaunchLocation, readLaunchMode, readToastSignals } from './settings';
 import { UnavailableAgentCommandFactory } from './adapters/unavailable-agent-command-factory';
 import { VsCodeLogger } from './adapters/vscode-logger';
 import { VsCodeTerminalGateway } from './adapters/vscode-terminal-gateway';
@@ -164,7 +165,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   // Per activation, held in memory, never written down: it is only meaningful
   // together with the port below, and the two are born and die together (§4.7).
   const token = newActivationToken();
-  const address = await listen({ token, storage, registry, logger });
+  const journal = readJournalPolicy(logger);
+  const address = await listen({ token, storage, registry, logger, journal });
   const cli = await findCli(logger);
   const forwarder = await findForwarder(context, logger);
 
@@ -242,6 +244,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     launchLocation: location,
     storage: storage.baseDir,
     storageVersion: store.kind === 'ready' ? store.version : null,
+    journalKeepsContent: journal.includeContent,
+    journalRetentionDays: journal.retentionDays,
   });
   if (readiness.kind === 'refused') {
     logger.warn('Gripterm will refuse to start terminals', { reason: readiness.reason });
@@ -314,10 +318,15 @@ async function listen(parts: {
   readonly storage: StorageLayout;
   readonly registry: SessionRegistry;
   readonly logger: Logger;
+  readonly journal: JournalPolicy;
 }): Promise<ListeningAddress | null> {
   const server = new HookEventServer({
     authenticator: new RequestAuthenticator(parts.token),
-    journal: new FileEventJournal(parts.storage),
+    journal: new FileEventJournal({
+      layout: parts.storage,
+      logger: parts.logger,
+      policy: parts.journal,
+    }),
     sink: parts.registry,
     logger: parts.logger,
   });

@@ -76,12 +76,34 @@ export { SystemScheduler } from './infrastructure/system-scheduler';
 export { findExecutable, type ExecutableSearch } from './infrastructure/executable-lookup';
 export { probeVersionOutput, type VersionProbe } from './infrastructure/cli-probe';
 export { SystemIdGenerator } from './infrastructure/system-id-generator';
-export { FileEventJournal } from './infrastructure/store/file-event-journal';
+export {
+  DEFAULT_JOURNAL_POLICY,
+  FileEventJournal,
+  type FileEventJournalOptions,
+  type JournalPolicy,
+} from './infrastructure/store/file-event-journal';
+export {
+  JOURNAL_LINE_VERSION,
+  decodeJournalLine,
+  encodeJournalLine,
+  type EncodeJournalLineParams,
+  type JournalLine,
+  type JournalLineDecode,
+} from './infrastructure/store/journal-line';
+export {
+  journalDayFiles,
+  lastSequenceIn,
+  readJournal,
+  type JournalGap,
+  type JournalRead,
+} from './infrastructure/store/journal-reader';
 export { FileSessionSettingsStore } from './infrastructure/store/file-session-settings-store';
 export {
   STORAGE_DIRECTORY_MODE,
   STORAGE_SCHEMA_VERSION,
   StorageLayout,
+  isJournalFileName,
+  journalDay,
 } from './infrastructure/store/storage-layout';
 export { writeAtomic, type AtomicWriteOptions } from './infrastructure/store/atomic-file';
 export { readJsonFile, writeJsonFile, type JsonRead } from './infrastructure/store/json-file';

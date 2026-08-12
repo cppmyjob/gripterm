@@ -5,6 +5,8 @@ import {
   StorageLayout,
   TerminalId,
   ValidationError,
+  isJournalFileName,
+  journalDay,
 } from '../../packages/core/src/index';
 
 const BASE = join('C:', 'gripterm-base');
@@ -33,6 +35,10 @@ describe('the layout of the store', () => {
     );
     expect(layout.settingsFile(TERMINAL)).toBe(
       join(BASE, 'terminals', TERMINAL.value, 'settings.json')
+    );
+    expect(layout.eventsDir(TERMINAL)).toBe(join(BASE, 'terminals', TERMINAL.value, 'events'));
+    expect(layout.legacyJournalFile(TERMINAL)).toBe(
+      join(BASE, 'terminals', TERMINAL.value, 'events.ndjson')
     );
   });
 
@@ -91,6 +97,41 @@ describe('the layout of the store', () => {
   it('does not mistake a name that merely starts like a device for one', () => {
     for (const raw of ['console', 'com10', 'nullable']) {
       expect(() => layout.ownerFile(OwnerId.fromString(raw))).not.toThrow();
+    }
+  });
+});
+
+describe('the name of a journal file', () => {
+  const layout = new StorageLayout(BASE);
+
+  /*
+   * The day is LOCAL, and that is a decision rather than an oversight: the name
+   * is written for a person, and a person asking what happened yesterday means
+   * their own yesterday. A date built from local parts is therefore the oracle
+   * here -- `new Date(2027, 0, 5, ...)` IS the fifth of January wherever this
+   * runs.
+   */
+  it('is the local day, zero-padded so that names sort chronologically', () => {
+    expect(journalDay(new Date(2027, 0, 5, 12, 0, 0))).toBe('2027-01-05');
+    expect(journalDay(new Date(2026, 11, 31, 23, 59, 59))).toBe('2026-12-31');
+  });
+
+  it('puts the day under events/, with one suffix and nothing else', () => {
+    expect(layout.journalFile(TERMINAL, new Date(2027, 0, 5, 12, 0, 0))).toBe(
+      join(BASE, 'terminals', TERMINAL.value, 'events', '2027-01-05.ndjson')
+    );
+  });
+
+  it('recognises its own names and nothing else', () => {
+    expect(isJournalFileName('2027-01-05.ndjson')).toBe(true);
+    for (const name of [
+      '2027-01-05.ndjson.bak',
+      'events.ndjson',
+      '2027-1-5.ndjson',
+      '2027-01-05.json',
+      'notes.txt',
+    ]) {
+      expect(isJournalFileName(name)).toBe(false);
     }
   });
 });

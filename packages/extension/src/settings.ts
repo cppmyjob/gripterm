@@ -1,11 +1,32 @@
 import * as vscode from 'vscode';
-import { DEFAULT_TOAST_SIGNALS, LAUNCH_MODES, isAttentionSignal, isLaunchLocation } from '@gripterm/core';
-import type { AttentionSignal, LaunchLocation, LaunchMode, Logger } from '@gripterm/core';
+import {
+  DEFAULT_JOURNAL_POLICY,
+  DEFAULT_TOAST_SIGNALS,
+  LAUNCH_MODES,
+  isAttentionSignal,
+  isLaunchLocation,
+} from '@gripterm/core';
+import type {
+  AttentionSignal,
+  JournalPolicy,
+  LaunchLocation,
+  LaunchMode,
+  Logger,
+} from '@gripterm/core';
 
 const SECTION = 'gripterm';
 const TOAST_STATES = 'notify.toastStates';
 const LAUNCH_MODE = 'launch.mode';
 const LAUNCH_LOCATION = 'launch.location';
+const JOURNAL_RETENTION_DAYS = 'journal.retentionDays';
+const JOURNAL_MAX_SIZE_MB = 'journal.maxSizeMb';
+const JOURNAL_INCLUDE_CONTENT = 'journal.includeContent';
+
+const BYTES_PER_KB = 1024;
+const BYTES_PER_MB = BYTES_PER_KB * BYTES_PER_KB;
+
+/** The manifest's defaults and these are the same numbers, taken from core so they cannot drift. */
+const DEFAULT_MAX_SIZE_MB = DEFAULT_JOURNAL_POLICY.maxSizeBytes / BYTES_PER_MB;
 
 /** `process`, on the strength of A13: the TUI comes up as a pty process with no shell under it. */
 const DEFAULT_LAUNCH_MODE: LaunchMode = 'process';
@@ -91,4 +112,58 @@ export function readLaunchLocation(logger: Logger): LaunchLocation {
     using: DEFAULT_LAUNCH_LOCATION,
   });
   return DEFAULT_LAUNCH_LOCATION;
+}
+
+/**
+ * What the journal is allowed to keep, as the person configured it.
+ *
+ * Read once, at activation, like every other setting here: a change takes effect
+ * when the window reloads. That is worth saying out loud for `includeContent`,
+ * because a privacy setting that appears to take effect and does not is worse
+ * than one that plainly asks for a reload.
+ */
+export function readJournalPolicy(logger: Logger): JournalPolicy {
+  const section = vscode.workspace.getConfiguration(SECTION);
+  const includeContent = section.get<unknown>(JOURNAL_INCLUDE_CONTENT);
+
+  return {
+    // Anything that is not exactly `true` leaves the texts out. The default is
+    // off, and a setting we cannot read is not a licence to start writing them.
+    includeContent: includeContent === true,
+    retentionDays: readCount(
+      section,
+      JOURNAL_RETENTION_DAYS,
+      DEFAULT_JOURNAL_POLICY.retentionDays,
+      logger
+    ),
+    maxSizeBytes: readCount(section, JOURNAL_MAX_SIZE_MB, DEFAULT_MAX_SIZE_MB, logger) *
+      BYTES_PER_MB,
+  };
+}
+
+/**
+ * A count the person may set to zero -- "keep nothing but today" is a legitimate
+ * answer -- but not to a negative or to something that is not a number, both of
+ * which would turn retention into arithmetic nobody meant.
+ */
+function readCount(
+  section: vscode.WorkspaceConfiguration,
+  key: string,
+  fallback: number,
+  logger: Logger
+): number {
+  const configured = section.get<unknown>(key);
+  if (configured === undefined) {
+    return fallback;
+  }
+  if (typeof configured === 'number' && Number.isFinite(configured) && configured >= 0) {
+    return configured;
+  }
+
+  logger.warn('a configured journal limit is not a number this build can use', {
+    setting: `${SECTION}.${key}`,
+    configured,
+    using: fallback,
+  });
+  return fallback;
 }

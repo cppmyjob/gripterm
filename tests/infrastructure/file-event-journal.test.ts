@@ -1,125 +1,201 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  DEFAULT_JOURNAL_POLICY,
   FileEventJournal,
   StorageError,
   StorageLayout,
   TerminalId,
   isErrorOfCode,
 } from '../../packages/core/src/index';
+import type { JournalPolicy } from '../../packages/core/src/index';
+import { RecordingLogger } from '../helpers/port-fakes';
 import { TERMINAL_UUID } from '../helpers/domain-fixtures';
 
 /**
- * The oracle for the only thing in M1 that cannot be recovered later.
+ * The oracle for the only thing in this store that cannot be recovered later.
  *
- * §10.1а names five places where M1 could close the road to the strategy, and
- * four of them cost a schema migration if we get them wrong. This one costs
+ * §10.1а names five places where a version could close the road to the strategy,
+ * and four of them cost a schema migration if we get them wrong. This one costs
  * everything: an event consumed and not written is gone, and no later version
- * can go back for it. So the journal exists from the first version of the
- * receiver, and it stores the RAW envelope -- not our reading of it, which is
- * the part that will change.
+ * can go back for it.
  *
  * On a real directory rather than a fake, for the reason M1.6 gave: creating a
- * directory, appending to a file and the shape of an OS refusal are exactly
- * what a fake is free to lie about, and every test built on the lie agrees.
+ * directory, appending to a file and the shape of an OS refusal are exactly what
+ * a fake is free to lie about, and every test built on the lie agrees.
  */
 
 const TERMINAL = TerminalId.fromString(TERMINAL_UUID);
 
+/**
+ * Noon UTC, so that the LOCAL day is the same date in every time zone this can
+ * plausibly run in -- and the expected day is computed with `sv-SE`, which
+ * renders `YYYY-MM-DD`, rather than with the formatter under test.
+ */
+const AT = new Date('2026-08-11T12:00:00.000Z');
+const DAY = AT.toLocaleDateString('sv-SE');
+const NEXT_DAY_AT = new Date(AT.getTime() + 86_400_000);
+const NEXT_DAY = NEXT_DAY_AT.toLocaleDateString('sv-SE');
+
 let root: string;
+let logger: RecordingLogger;
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'gripterm-journal-'));
+  logger = new RecordingLogger();
 });
 
 afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-function journal(): FileEventJournal {
-  return new FileEventJournal(new StorageLayout(root));
+function journal(policy: Partial<JournalPolicy> = {}, base = root): FileEventJournal {
+  return new FileEventJournal({
+    layout: new StorageLayout(base),
+    logger,
+    policy: { ...DEFAULT_JOURNAL_POLICY, ...policy },
+  });
 }
 
-async function linesOf(terminalId = TERMINAL): Promise<string[]> {
-  const path = join(root, 'terminals', terminalId.value, 'events.ndjson');
-  const text = await readFile(path, 'utf8');
+function eventsDir(terminalId = TERMINAL, base = root): string {
+  return join(base, 'terminals', terminalId.value, 'events');
+}
+
+function dayFile(day = DAY, terminalId = TERMINAL, base = root): string {
+  return join(eventsDir(terminalId, base), `${day}.ndjson`);
+}
+
+async function linesOf(day = DAY, terminalId = TERMINAL): Promise<string[]> {
+  const text = await readFile(dayFile(day, terminalId), 'utf8');
   return text.split('\n').filter((line) => line.length > 0);
 }
 
-function entry(raw: string, at = '2026-08-11T09:00:00.000Z'): Parameters<FileEventJournal['append']>[0] {
-  return { terminalId: TERMINAL, receivedAt: new Date(at), raw };
+function entry(raw: string, at = AT): Parameters<FileEventJournal['append']>[0] {
+  return { terminalId: TERMINAL, receivedAt: at, raw };
 }
 
-interface JournalLine {
+interface JournalLineOnDisk {
   readonly v: number;
+  readonly seq: number;
   readonly at: string;
   readonly terminalId: string;
-  readonly raw: string;
+  readonly raw?: string;
+  readonly body?: Record<string, unknown>;
+  readonly dropped?: readonly string[];
 }
 
-/** One line as it was written. Typed here so the assertions are not `any` comparisons. */
-function parseLine(line: string | undefined): JournalLine {
-  return JSON.parse(line ?? '') as JournalLine;
+function parseLine(line: string | undefined): JournalLineOnDisk {
+  return JSON.parse(line ?? '') as JournalLineOnDisk;
 }
 
-describe('FileEventJournal writes a journal, not a snapshot', () => {
-  it('creates the terminal directory on the first append', async () => {
+/** A file of a known size, so that the size cap can be stated rather than approximated. */
+async function fillDay(day: string, bytes: number): Promise<void> {
+  await mkdir(eventsDir(), { recursive: true });
+  await writeFile(dayFile(day), 'x'.repeat(bytes), 'utf8');
+}
+
+describe('the journal writes a history, not a snapshot', () => {
+  it('creates the events directory on the first append', async () => {
     await journal().append(entry('{"hook_event_name":"Stop"}'));
     expect(await linesOf()).toHaveLength(1);
   });
 
   it('appends rather than replaces', async () => {
-    const j = journal();
-    await j.append(entry('{"n":1}'));
-    await j.append(entry('{"n":2}'));
-    await j.append(entry('{"n":3}'));
+    const writer = journal({ includeContent: true });
+    await writer.append(entry('{"n":1}'));
+    await writer.append(entry('{"n":2}'));
+    await writer.append(entry('{"n":3}'));
 
-    const lines = await linesOf();
-    expect(lines).toHaveLength(3);
-    expect(lines.map((line) => parseLine(line).raw)).toStrictEqual([
+    expect((await linesOf()).map((line) => parseLine(line).raw)).toStrictEqual([
       '{"n":1}',
       '{"n":2}',
       '{"n":3}',
     ]);
   });
 
-  it('keeps the arrival time and the terminal beside the body', async () => {
-    await journal().append(entry('{"n":1}', '2026-08-11T09:30:15.250Z'));
-
-    const [line] = await linesOf();
-    expect(parseLine(line)).toStrictEqual({
-      v: 1,
-      at: '2026-08-11T09:30:15.250Z',
-      terminalId: TERMINAL_UUID,
-      raw: '{"n":1}',
-    });
-  });
-
-  it('stamps every line with the schema it was written under', async () => {
-    // §8.2 promises the schema will change and says the field exists. It was
-    // missing until M1.9 read the plan against the code -- a defect worth
-    // fixing before anyone has a history, because a line already on disk cannot
-    // be told apart from a later shape by anything except its own shape.
-    const j = journal();
-    await j.append(entry('{"n":1}'));
-    await j.append(entry('not json at all'));
-
-    expect((await linesOf()).map((line) => parseLine(line).v)).toStrictEqual([1, 1]);
-  });
-
   it('gives each terminal its own journal', async () => {
     const other = TerminalId.fromString('11111111-2222-4333-8444-555555555555');
-    const j = journal();
-    await j.append(entry('{"mine":true}'));
-    await j.append({ terminalId: other, receivedAt: new Date(), raw: '{"theirs":true}' });
+    const writer = journal();
+    await writer.append(entry('{"mine":true}'));
+    await writer.append({ terminalId: other, receivedAt: AT, raw: '{"theirs":true}' });
 
     expect(await linesOf()).toHaveLength(1);
-    expect(await linesOf(other)).toHaveLength(1);
+    expect(await linesOf(DAY, other)).toHaveLength(1);
+  });
+
+  it('names the file for the LOCAL day, because a person asking about yesterday means their own', async () => {
+    await journal().append(entry('{"n":1}'));
+
+    expect(await readdir(eventsDir())).toStrictEqual([`${DAY}.ndjson`]);
   });
 });
 
-describe('FileEventJournal keeps the body byte for byte', () => {
+describe('the counter that lets a reader see a hole', () => {
+  it('numbers the lines from one, in order', async () => {
+    const writer = journal();
+    await writer.append(entry('{"n":1}'));
+    await writer.append(entry('{"n":2}'));
+    await writer.append(entry('{"n":3}'));
+
+    expect((await linesOf()).map((line) => parseLine(line).seq)).toStrictEqual([1, 2, 3]);
+  });
+
+  /*
+   * The counter is recovered from the FILE and never carried in memory across a
+   * restart. A remembered counter would be confidently wrong after every reload
+   * of the window -- and a duplicated number is worse than a missing one,
+   * because it makes a history look whole when it is not.
+   */
+  it('continues the numbering of a file another activation started', async () => {
+    await journal().append(entry('{"n":1}'));
+    await journal().append(entry('{"n":2}'));
+
+    expect((await linesOf()).map((line) => parseLine(line).seq)).toStrictEqual([1, 2]);
+  });
+
+  it('starts a new day at one, and leaves the old file alone', async () => {
+    const writer = journal();
+    await writer.append(entry('{"n":1}', AT));
+    await writer.append(entry('{"n":2}', NEXT_DAY_AT));
+
+    expect((await linesOf(DAY)).map((line) => parseLine(line).seq)).toStrictEqual([1]);
+    expect((await linesOf(NEXT_DAY)).map((line) => parseLine(line).seq)).toStrictEqual([1]);
+  });
+
+  it('does not spend a number on a line that was never written', async () => {
+    // A failed append that still moved the counter would manufacture exactly the
+    // hole the counter exists to report.
+    const writer = journal();
+    await writer.append(entry('{"n":1}'));
+    await rm(eventsDir(), { recursive: true });
+    await writeFile(eventsDir(), 'in the way', 'utf8');
+    await expect(writer.append(entry('{"n":2}'))).rejects.toBeInstanceOf(StorageError);
+
+    await rm(eventsDir());
+    await writer.append(entry('{"n":3}'));
+
+    expect((await linesOf()).map((line) => parseLine(line).seq)).toStrictEqual([2]);
+  });
+});
+
+describe('the content filter, which is on by default', () => {
+  const BODY = '{"hook_event_name":"UserPromptSubmit","user_input":"the password is hunter2"}';
+
+  it('keeps the texts out of the file', async () => {
+    await journal().append(entry(BODY));
+
+    expect(await readFile(dayFile(), 'utf8')).not.toContain('hunter2');
+  });
+
+  it('writes the body whole when the person has asked for it', async () => {
+    await journal({ includeContent: true }).append(entry(BODY));
+
+    expect(parseLine((await linesOf())[0]).raw).toBe(BODY);
+  });
+});
+
+describe('the journal keeps a kept body byte for byte', () => {
   const BODIES: readonly (readonly [string, string])[] = [
     ['ordinary JSON', '{"hook_event_name":"Stop","session_id":"abc"}'],
     // The NDJSON invariant. A body holding a newline that reached the file
@@ -137,51 +213,118 @@ describe('FileEventJournal keeps the body byte for byte', () => {
   ];
 
   it.each(BODIES)('survives %s', async (_label, raw) => {
-    await journal().append(entry(raw));
+    await journal({ includeContent: true }).append(entry(raw));
 
-    const [line] = await linesOf();
-    expect(parseLine(line).raw).toBe(raw);
+    expect(parseLine((await linesOf())[0]).raw).toBe(raw);
   });
 
   it.each(BODIES)('%s still leaves exactly one line', async (_label, raw) => {
-    await journal().append(entry(raw));
+    await journal({ includeContent: true }).append(entry(raw));
     expect(await linesOf()).toHaveLength(1);
   });
 });
 
-describe('FileEventJournal under concurrency', () => {
+describe('retention', () => {
+  it('removes a file older than the person asked to keep, and says which', async () => {
+    await fillDay('2026-07-01', 10);
+    await fillDay('2026-08-01', 10);
+
+    await journal({ retentionDays: 14 }).append(entry('{"n":1}'));
+
+    expect(await readdir(eventsDir())).toStrictEqual([`2026-08-01.ndjson`, `${DAY}.ndjson`]);
+    expect(logger.infos.map((line) => line.details?.path)).toStrictEqual([
+      dayFile('2026-07-01'),
+    ]);
+  });
+
+  it('removes the oldest files until the journal is under its size cap', async () => {
+    await fillDay('2026-08-09', 80);
+    await fillDay('2026-08-10', 80);
+
+    await journal({ maxSizeBytes: 100 }).append(entry('{"n":1}'));
+
+    expect(await readdir(eventsDir())).toStrictEqual(['2026-08-10.ndjson', `${DAY}.ndjson`]);
+  });
+
+  it('never trims the day being written, and says so when that is all that is left', async () => {
+    // Truncating today would lose today's events to save yesterday's disk. The
+    // cap the build cannot honour is reported rather than enforced.
+    await fillDay(DAY, 200);
+
+    await journal({ maxSizeBytes: 100 }).append(entry('{"n":1}'));
+
+    // The file is still there AND still holds what it held: a retention that
+    // deletes today and lets the next append recreate the file passes a test
+    // that only counts names, and loses the day.
+    expect(await readFile(dayFile(), 'utf8')).toContain('x'.repeat(200));
+    expect(await readdir(eventsDir())).toStrictEqual([`${DAY}.ndjson`]);
+    expect(logger.warnings[0]?.message).toContain('over its size cap');
+  });
+
+  it('leaves everything alone when both limits are satisfied', async () => {
+    await fillDay('2026-08-10', 10);
+
+    await journal().append(entry('{"n":1}'));
+
+    expect(await readdir(eventsDir())).toStrictEqual(['2026-08-10.ndjson', `${DAY}.ndjson`]);
+    expect(logger.infos).toStrictEqual([]);
+    expect(logger.warnings).toStrictEqual([]);
+  });
+
+  it('warns and keeps writing when it cannot prune', async () => {
+    // Something shaped like a journal file that is not one. Retention that
+    // cannot run is a disk filling up slowly; an append that fails is an event
+    // lost now, and the second is the one this class exists to prevent.
+    await mkdir(join(eventsDir(), '2026-07-01.ndjson'), { recursive: true });
+
+    await journal().append(entry('{"n":1}'));
+
+    expect(await linesOf()).toHaveLength(1);
+    expect(logger.warnings[0]?.message).toContain('could not be pruned');
+  });
+
+  it('runs once per day rather than on every append', async () => {
+    await fillDay('2026-07-01', 10);
+    const writer = journal();
+
+    await writer.append(entry('{"n":1}'));
+    await writer.append(entry('{"n":2}'));
+    await writer.append(entry('{"n":3}'));
+
+    expect(logger.infos).toHaveLength(1);
+  });
+});
+
+describe('the journal under concurrency', () => {
   it('does not interleave appends issued at once', async () => {
-    const j = journal();
+    const writer = journal({ includeContent: true });
     const count = 40;
 
     // What this DOES prove: forty appends issued in one tick produce forty
-    // well-formed lines and lose none of them.
+    // well-formed lines, lose none of them, and number them without a repeat.
     //
     // What it does NOT prove, said here rather than implied: that the queue
-    // inside the journal is what makes that true. A mutation removing it
-    // survives -- at this size and at 128 KB per line, checked 2026-08-11 --
+    // inside the journal is what makes the first part true. A mutation removing
+    // it survives -- at this size and at 128 KB per line, checked 2026-08-11 --
     // because `O_APPEND` on Windows landed every write whole anyway. The queue
-    // stays because the guarantee is not one the platform makes and a torn line
-    // is a permanent hole in a history nobody reads until later; but it is
-    // recorded as unproven (§8.2), not asserted.
+    // stays because the guarantee is not one the platform makes, and since
+    // M2.4a it also serialises the numbering, which IS proven here.
     const padding = 'x'.repeat(4096);
     await Promise.all(
       Array.from({ length: count }, async (_unused, index) => {
-        await j.append(entry(`{"n":${index},"pad":"${padding}"}`));
+        await writer.append(entry(`{"n":${index},"pad":"${padding}"}`));
       })
     );
 
     const lines = await linesOf();
     expect(lines).toHaveLength(count);
-    // Every line parses: a torn write shows up here and nowhere else.
-    const numbers = lines.map((line) => (JSON.parse(parseLine(line).raw) as { n: number }).n);
-    expect([...numbers].sort((a, b) => a - b)).toStrictEqual(
-      Array.from({ length: count }, (_unused, index) => index)
+    expect(lines.map((line) => parseLine(line).seq).sort((a, b) => a - b)).toStrictEqual(
+      Array.from({ length: count }, (_unused, index) => index + 1)
     );
   });
 });
 
-describe('FileEventJournal when the file system refuses', () => {
+describe('the journal when the file system refuses', () => {
   it('reports a StorageError naming the path', async () => {
     // A FILE where the terminal directory has to go: `mkdir` cannot proceed.
     await writeFile(join(root, 'terminals'), 'in the way', 'utf8');
@@ -195,20 +338,20 @@ describe('FileEventJournal when the file system refuses', () => {
 
     expect(caught).toBeInstanceOf(StorageError);
     expect(isErrorOfCode(caught, 'STORAGE_ERROR')).toBe(true);
-    expect(String((caught as StorageError).details.path)).toContain('events.ndjson');
+    expect(String((caught as StorageError).details.path)).toContain(`${DAY}.ndjson`);
   });
 
   it('does not poison the queue for later appends', async () => {
     // A journal that stopped working after one refusal would lose every event
     // from then on, silently -- the exact failure this file exists to prevent.
-    const blocked = new FileEventJournal(new StorageLayout(join(root, 'nested')));
-    await writeFile(join(root, 'nested'), 'in the way', 'utf8');
+    const nested = join(root, 'nested');
+    const blocked = journal({ includeContent: true }, nested);
+    await writeFile(nested, 'in the way', 'utf8');
     await expect(blocked.append(entry('{"n":1}'))).rejects.toBeInstanceOf(StorageError);
 
-    await rm(join(root, 'nested'));
+    await rm(nested);
     await blocked.append(entry('{"n":2}'));
 
-    const path = join(root, 'nested', 'terminals', TERMINAL_UUID, 'events.ndjson');
-    expect(await readFile(path, 'utf8')).toContain('{\\"n\\":2}');
+    expect(await readFile(dayFile(DAY, TERMINAL, nested), 'utf8')).toContain('{\\"n\\":2}');
   });
 });

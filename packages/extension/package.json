@@ -138,6 +138,26 @@
           ],
           "default": "editor",
           "markdownDescription": "Where a Gripterm terminal is opened."
+        },
+        "gripterm.journal.includeContent": {
+          "type": "boolean",
+          "default": false,
+          "scope": "window",
+          "markdownDescription": "Write the texts of prompts, assistant answers and tool arguments into the event journal on disk. Off by default: with it off, only structural fields — the event name, the session, the tool name — are kept, and the names of the fields that were left out. Takes effect when the window reloads."
+        },
+        "gripterm.journal.retentionDays": {
+          "type": "number",
+          "minimum": 0,
+          "default": 14,
+          "scope": "window",
+          "markdownDescription": "Days of event history kept for each terminal, beside the day being written. Older journal files are deleted. Takes effect when the window reloads."
+        },
+        "gripterm.journal.maxSizeMb": {
+          "type": "number",
+          "minimum": 0,
+          "default": 64,
+          "scope": "window",
+          "markdownDescription": "Size cap for one terminal's event journal, in megabytes. The oldest whole files are deleted first; the day being written is never trimmed. Takes effect when the window reloads."
         }
       }
     }

@@ -1,6 +1,9 @@
 import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
-import { ATTENTION_SIGNALS } from '../../packages/core/src/index';
+import { ATTENTION_SIGNALS, DEFAULT_JOURNAL_POLICY } from '../../packages/core/src/index';
+
+const BYTES_PER_KB = 1024;
+const BYTES_PER_MB = BYTES_PER_KB * BYTES_PER_KB;
 
 /**
  * The manifest is the one file no unit test can reach and every wiring bug
@@ -39,6 +42,34 @@ suite('attention', () => {
 
     assert.deepEqual([...property.items.enum].sort(), [...ATTENTION_SIGNALS].sort());
     assert.deepEqual(property.default, ['waiting_permission', 'launch_failed']);
+  });
+
+  test('promises the same journal limits in the manifest as the code falls back to', () => {
+    // Two lists of the same numbers, and they drift: the manifest supplies the
+    // default a person SEES and the value `getConfiguration` returns, while
+    // `DEFAULT_JOURNAL_POLICY` supplies what the code uses when the setting is
+    // absent. A disagreement here means the settings editor showing one
+    // retention and the disk keeping another.
+    const extension = vscode.extensions.getExtension('gripterm-placeholder.gripterm');
+    assert.ok(extension);
+
+    const manifest = extension.packageJSON as {
+      contributes: { configuration: { properties: Record<string, { default: unknown }> } };
+    };
+    const { properties } = manifest.contributes.configuration;
+
+    assert.equal(
+      properties['gripterm.journal.retentionDays']?.default,
+      DEFAULT_JOURNAL_POLICY.retentionDays
+    );
+    assert.equal(
+      properties['gripterm.journal.maxSizeMb']?.default,
+      DEFAULT_JOURNAL_POLICY.maxSizeBytes / BYTES_PER_MB
+    );
+    // The privacy default is stated twice on purpose: this one is what a person
+    // reads in the settings editor.
+    assert.equal(properties['gripterm.journal.includeContent']?.default, false);
+    assert.equal(DEFAULT_JOURNAL_POLICY.includeContent, false);
   });
 
   test('does not fire a notification just for activating', async () => {

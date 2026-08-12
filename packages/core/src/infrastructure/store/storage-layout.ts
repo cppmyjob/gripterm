@@ -27,13 +27,24 @@ const TERMINALS_DIRECTORY = 'terminals';
 const RECORD_FILE = 'record.json';
 const OBSERVED_FILE = 'observed.json';
 const SETTINGS_FILE = 'settings.json';
+const EVENTS_DIRECTORY = 'events';
+const JOURNAL_SUFFIX = '.ndjson';
+
+/**
+ * Where M1 put the journal: one flat file per terminal, no rotation.
+ *
+ * Kept as a path rather than deleted, because there are such files on disk with
+ * real history in them and the journal is the one thing no later version can go
+ * back for (§10.1а). Nothing writes it any more; the reader takes it as the
+ * oldest day.
+ */
+const LEGACY_JOURNAL_FILE = 'events.ndjson';
 
 /*
- * `events/` and `trash/` are named in the layout of §4.8 and are deliberately
- * absent here. Their shape is not settled -- one journal file per terminal
- * against one per day is M2.4a's question, and M2.15 has not chosen how a
- * discarded record is stamped -- and a getter for a path nothing writes is a
- * promise made before the decision it describes.
+ * `trash/` is named in the layout of §4.8 and is deliberately absent here:
+ * M2.15 has not chosen how a discarded record is stamped, and a getter for a
+ * path nothing writes is a promise made before the decision it describes.
+ * `events/` was in that sentence until M2.4a decided its shape.
  */
 
 /**
@@ -139,6 +150,58 @@ export class StorageLayout {
   public settingsFile(terminalId: TerminalId): string {
     return join(this.terminalDir(terminalId), SETTINGS_FILE);
   }
+
+  public eventsDir(terminalId: TerminalId): string {
+    return join(this.terminalDir(terminalId), EVENTS_DIRECTORY);
+  }
+
+  /**
+   * The journal file a moment belongs to.
+   *
+   * Takes the moment rather than a formatted name on purpose: the name is
+   * derived here and nowhere else, so there is no path in this class that a
+   * caller could hand a string that is not a day.
+   */
+  public journalFile(terminalId: TerminalId, at: Date): string {
+    return join(this.eventsDir(terminalId), `${journalDay(at)}${JOURNAL_SUFFIX}`);
+  }
+
+  /** M1's single journal file. Read, never written -- see `LEGACY_JOURNAL_FILE`. */
+  public legacyJournalFile(terminalId: TerminalId): string {
+    return join(this.terminalDir(terminalId), LEGACY_JOURNAL_FILE);
+  }
+}
+
+/** Whether a name in `events/` is one of ours, and not, say, an editor's backup. */
+export function isJournalFileName(name: string): boolean {
+  return JOURNAL_FILE_NAME.test(name);
+}
+
+const JOURNAL_FILE_NAME = /^\d{4}-\d{2}-\d{2}\.ndjson$/;
+
+const MONTH_OFFSET = 1;
+const DATE_FIELD_WIDTH = 2;
+const YEAR_WIDTH = 4;
+
+/**
+ * The day a journal file is named for, in LOCAL time.
+ *
+ * Local rather than UTC because the name is written for a person, and a person
+ * asking what happened yesterday means their own yesterday: a session at 23:00
+ * in Moscow belongs to that evening, not to the next morning in London. The
+ * price is named rather than discovered -- a machine that changes time zone can
+ * come back to a day it has already written, which is exactly why the writer
+ * establishes the last `seq` from the FILE and not from a counter it kept.
+ *
+ * Zero-padded and fixed-width, which makes lexicographic order chronological
+ * order. Retention compares these strings and never parses a date back out of a
+ * file name.
+ */
+export function journalDay(at: Date): string {
+  const year = String(at.getFullYear()).padStart(YEAR_WIDTH, '0');
+  const month = String(at.getMonth() + MONTH_OFFSET).padStart(DATE_FIELD_WIDTH, '0');
+  const day = String(at.getDate()).padStart(DATE_FIELD_WIDTH, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function requireSafeOwnerId(value: string): string {
