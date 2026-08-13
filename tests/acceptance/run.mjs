@@ -468,12 +468,36 @@ if (!existsSync(CODE)) {
   throw new Error(`no editor at ${CODE}`);
 }
 
+/**
+ * Which criteria this run is for.
+ *
+ * Named on the command line or all of them. It exists because the parts cost
+ * wildly different things -- `rename` and П3 spend nothing, П2 spends a turn and
+ * О1 packages and installs the extension -- and a person re-checking one of them
+ * should not have to buy the others.
+ */
+const only = process.argv.slice(2);
+const wanted = (name) => only.length === 0 || only.includes(name);
+
 prepare();
 console.log(`acceptance store: ${STORE}`);
 
-// П3 first, because it is the cheap one and it needs an empty store.
-host('П3');
-emptyStore();
+// The cheap ones first, each with a store of its own: both leave a record, and
+// П2 counts records to answer О3.
+if (wanted('rename')) {
+  host('rename');
+  emptyStore();
+}
+if (wanted('П3')) {
+  host('П3');
+  emptyStore();
+}
+
+if (!wanted('П2')) {
+  console.log('--- verdict');
+  console.log(`  ran ${JSON.stringify(only)} and nothing else`);
+  process.exit(0);
+}
 
 host('П2');
 

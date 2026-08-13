@@ -12,6 +12,8 @@ export {
   parseAgentListing,
 } from './domain/agents/claude-code/agent-listing';
 
+export { readSessionName } from './domain/agents/claude-code/session-name';
+
 export type { AgentListing, AgentRecord } from './domain/entities/agent-record';
 
 export type { TranscriptIndex } from './domain/entities/transcript-index';
@@ -164,6 +166,7 @@ export {
   type DirectoryReader,
 } from './infrastructure/transcript-index';
 export { agentListingFrom, readAgentListing } from './infrastructure/cli-agents';
+export { readClaudeSessionName } from './infrastructure/claude-session-name';
 export {
   gatherRestoreInputs,
   type RestoreInputSources,
@@ -375,6 +378,7 @@ export {
 } from './domain/agents/claude-code/hook-policies';
 
 export {
+  claudeSessionsDirectory,
   claudeSettingsLocations,
   claudeTranscriptsDirectory,
   claudeUserDirectory,
@@ -419,6 +423,17 @@ export {
   type StrandedTerminal,
   type WatchReport,
 } from './domain/services/observability-watch';
+
+export {
+  DEFAULT_NAME_POLL_MS,
+  SessionNameMirror,
+  type SessionNameMirrorOptions,
+} from './domain/services/session-name-mirror';
+
+export {
+  TerminalTabNamer,
+  type TerminalTabNamerOptions,
+} from './domain/services/terminal-tab-namer';
 
 export { shellKindFor } from './domain/services/shell-selection';
 

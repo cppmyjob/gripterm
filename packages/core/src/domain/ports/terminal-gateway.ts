@@ -57,6 +57,17 @@ export interface TerminalHandle {
   processId: () => Promise<number | null>;
   sendText: (text: string, execute: boolean) => void;
   show: (preserveFocus: boolean) => void;
+  /**
+   * Puts a new name on the terminal's own tab.
+   *
+   * Nothing is promised about WHEN it lands: on the editor this is built for,
+   * renaming reaches only the terminal that is currently active, so an adapter
+   * may have to wait for the person to look at it (M2.17). It cannot fail
+   * loudly either -- much of the time nobody pressed anything, so there is
+   * nobody to tell -- so it returns nothing, and an editor that refuses costs a
+   * tab still wearing the name it had.
+   */
+  rename: (name: string) => void;
   dispose: () => void;
   onDidClose: (listener: (exit: TerminalExit) => void) => Disposable;
 }

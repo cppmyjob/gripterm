@@ -117,6 +117,8 @@ export class FakeTerminalHandle implements TerminalHandle {
   public readonly sent: { readonly text: string, readonly execute: boolean }[] = [];
   /** The `preserveFocus` argument of each `show()`, in order. */
   public readonly shownWith: boolean[] = [];
+  /** Every name the tab was asked to take, in order. */
+  public readonly renamedTo: string[] = [];
   public disposed = false;
   /** What the editor will say the terminal's process is, or `null` for a platform that does not know. */
   public pid: number | null = null;
@@ -157,6 +159,10 @@ export class FakeTerminalHandle implements TerminalHandle {
 
   public show(preserveFocus: boolean): void {
     this.shownWith.push(preserveFocus);
+  }
+
+  public rename(name: string): void {
+    this.renamedTo.push(name);
   }
 
   public dispose(): void {

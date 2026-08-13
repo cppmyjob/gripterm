@@ -22,6 +22,7 @@ import {
   RepositoryWatcher,
   RequestAuthenticator,
   RestoreOrchestrator,
+  SessionNameMirror,
   SessionRegistry,
   ShellLaunchStrategy,
   StorageCleaner,
@@ -33,6 +34,8 @@ import {
   TerminalLifecycleService,
   TerminalMetadataService,
   TerminalStateMachine,
+  TerminalTabNamer,
+  claudeSessionsDirectory,
   claudeSettingsLocations,
   claudeTranscriptsDirectory,
   describeCliVersion,
@@ -46,6 +49,7 @@ import {
   sendSignalZero,
   probeVersionOutput,
   readAgentListing,
+  readClaudeSessionName,
   readClaudeSettings,
   readTranscriptIndex,
   reviewHookPolicies,
@@ -429,6 +433,43 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   );
 
   const metadata = new TerminalMetadataService({ registry, clock, logger });
+
+  // The editor's tab, kept on the same name as the row -- from one place, so
+  // that neither of the two things that rename a terminal has to remember to do
+  // it (M2.17).
+  context.subscriptions.push(new TerminalTabNamer({ registry, gateway, logger }));
+
+  /*
+   * `/rename`, typed inside a terminal, arriving on the row.
+   *
+   * The CLI offers no hook for it: it writes the new name into its own session
+   * file, named after the pid of the process holding the conversation -- which
+   * is the pid the editor told us about when it started that terminal. So this
+   * needs nothing of the CLI's cooperation and works even for a terminal whose
+   * hooks never arrived.
+   *
+   * Started in every window, including one with no `claude` on the PATH: the
+   * cost of a pass with nothing to read is a loop over an empty list, and a
+   * window that decided at activation not to watch would go on not watching
+   * after the person installed the CLI.
+   */
+  const names = new SessionNameMirror({
+    registry,
+    scheduler: new SystemScheduler(),
+    logger,
+    read: async (pid, conversation) =>
+      await readClaudeSessionName(
+        claudeSessionsDirectory({
+          platform: process.platform,
+          home: homedir(),
+          configDir: process.env.CLAUDE_CONFIG_DIR,
+        }),
+        pid,
+        conversation
+      ),
+  });
+  context.subscriptions.push(names);
+  names.start();
 
   // Built whether or not it is about to be used: the integration suite drives a
   // restore of its own record through it, in the one place where a real

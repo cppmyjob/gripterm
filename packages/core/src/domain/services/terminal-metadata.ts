@@ -112,12 +112,16 @@ export class TerminalMetadataService {
   constructor(private readonly _options: TerminalMetadataOptions) {}
 
   /**
-   * The name in the list, and only there.
+   * The name in the list -- and, since M2.17, on the editor's tab as well.
    *
-   * It does NOT rename the editor's terminal tab: the platform offers no way to
-   * rename a terminal after it has been created, and the name it was given at
-   * launch is the name it keeps until it closes. Said out loud because the two
-   * names then disagree on screen, which looks like a bug and is a limit.
+   * The tab is not renamed HERE. Everything that renames a terminal amends the
+   * record, so `TerminalTabNamer` carries it to the editor from one place; the
+   * alternative was every future writer of a name remembering to do it too.
+   *
+   * This used to say that the platform offers no way to rename a terminal after
+   * it is created. That was read off the API surface, where `Terminal.name` is
+   * read-only, and never measured against the editor's own commands -- where
+   * `workbench.action.terminal.renameWithArg` has been doing it all along.
    */
   public rename(terminalId: TerminalId, displayName: string): void {
     if (this._refuseBlank(terminalId, displayName, 'a rename')) {

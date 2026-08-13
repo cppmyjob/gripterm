@@ -30,6 +30,7 @@ const PROJECT_DIRECTORY = '.claude';
 const SETTINGS_FILE = 'settings.json';
 const LOCAL_SETTINGS_FILE = 'settings.local.json';
 const TRANSCRIPTS_DIRECTORY = 'projects';
+const SESSIONS_DIRECTORY = 'sessions';
 
 /** Enough to find the user level, which is what everything of the CLI's hangs off. */
 export interface ClaudeUserFacts {
@@ -116,6 +117,20 @@ export function claudeUserDirectory(facts: ClaudeUserFacts): string {
  */
 export function claudeTranscriptsDirectory(facts: ClaudeUserFacts): string {
   return pathFor(facts.platform).join(claudeUserDirectory(facts), TRANSCRIPTS_DIRECTORY);
+}
+
+/**
+ * Where the CLI says what it is running right now: one file per live process,
+ * named after its pid.
+ *
+ * A22 refused this directory as a source of SESSIONS -- it is written late, it
+ * survives a killed process, and its field set moves between builds. What it is
+ * used for (M2.17) is the one field nothing else carries: the name a person gave
+ * a conversation with `/rename`, which `claude agents --json` reports without
+ * saying whether the CLI or a person chose it.
+ */
+export function claudeSessionsDirectory(facts: ClaudeUserFacts): string {
+  return pathFor(facts.platform).join(claudeUserDirectory(facts), SESSIONS_DIRECTORY);
 }
 
 function pathFor(platform: string): PlatformPath {

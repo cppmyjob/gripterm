@@ -20,6 +20,18 @@ const PLACES: Readonly<Record<LaunchLocation, vscode.TerminalLocation>> = {
 };
 
 /**
+ * The only way an extension can rename a terminal it created.
+ *
+ * A command rather than an API, and one that names no target: it renames the
+ * ACTIVE terminal. Read out of the 1.132 bundle -- `{id:
+ * "workbench.action.terminal.renameWithArg", args: [{name: "args", schema:
+ * {required: ["name"]}}], run: (instance, ..., args) => instance.rename(name)}`
+ * -- and measured in a real host by the integration suite, because a command id
+ * is not a contract and the next build may drop it.
+ */
+const RENAME_ACTIVE_TERMINAL = 'workbench.action.terminal.renameWithArg';
+
+/**
  * The `TerminalGateway` port on `vscode.window`.
  *
  * Three properties of the platform shape this file, and all three are measured
@@ -49,12 +61,26 @@ const PLACES: Readonly<Record<LaunchLocation, vscode.TerminalLocation>> = {
 export class VsCodeTerminalGateway implements TerminalGateway, Disposable {
   private readonly _handles = new Map<string, VsCodeTerminalHandle>();
   private readonly _closeSubscription: vscode.Disposable;
+  private readonly _activeSubscription: vscode.Disposable;
   private readonly _location: LaunchLocation;
 
   constructor(location: LaunchLocation) {
     this._location = location;
     this._closeSubscription = vscode.window.onDidCloseTerminal((terminal) => {
       this._onClosed(terminal);
+    });
+    // The other half of `rename`: a name that could not be applied when it
+    // arrived is applied the moment the person turns to that terminal.
+    this._activeSubscription = vscode.window.onDidChangeActiveTerminal((terminal) => {
+      if (terminal === undefined) {
+        return;
+      }
+      for (const handle of this._handles.values()) {
+        if (handle.owns(terminal)) {
+          handle.applyPendingName();
+          return;
+        }
+      }
     });
   }
 
@@ -90,6 +116,7 @@ export class VsCodeTerminalGateway implements TerminalGateway, Disposable {
 
   public dispose(): void {
     this._closeSubscription.dispose();
+    this._activeSubscription.dispose();
     // The terminals themselves are NOT disposed. Deactivation is not a reason
     // to kill a conversation, and the editor closing takes them anyway --
     // that is what `isTransient` is for.
@@ -116,6 +143,8 @@ class VsCodeTerminalHandle implements TerminalHandle {
 
   private readonly _terminal: vscode.Terminal;
   private readonly _listeners = new Set<(exit: TerminalExit) => void>();
+  /** A name this terminal is to take as soon as it is the one being looked at. */
+  private _pendingName: string | null = null;
 
   constructor(terminalId: TerminalId, terminal: vscode.Terminal) {
     this.terminalId = terminalId;
@@ -141,6 +170,41 @@ class VsCodeTerminalHandle implements TerminalHandle {
     this._terminal.show(preserveFocus);
   }
 
+  /**
+   * A new name on the tab.
+   *
+   * There is no API for it: `Terminal.name` is read-only and the editor exposes
+   * renaming only as the command below, which -- read out of the 1.132 bundle
+   * and confirmed in a real host -- takes `{name}` and applies it to the
+   * ACTIVE terminal, whichever that is. So a rename of a terminal nobody is
+   * looking at cannot be done at all without first making it active, and making
+   * it active would move the panel under the person's hands for a cosmetic
+   * change they did not ask for.
+   *
+   * It is therefore held and applied when the person turns to that terminal.
+   * That is not a compromise about latency: the case this exists for is
+   * `/rename` typed INSIDE a terminal (M2.17), and a terminal being typed into
+   * is the active one, so the ordinary path renames immediately.
+   */
+  public rename(name: string): void {
+    if (vscode.window.activeTerminal !== this._terminal) {
+      this._pendingName = name;
+      return;
+    }
+    this._pendingName = null;
+    this._applyName(name);
+  }
+
+  /** The held name, once this terminal is the one in front of the person. */
+  public applyPendingName(): void {
+    const name = this._pendingName;
+    if (name === null) {
+      return;
+    }
+    this._pendingName = null;
+    this._applyName(name);
+  }
+
   public dispose(): void {
     this._terminal.dispose();
   }
@@ -163,5 +227,20 @@ class VsCodeTerminalHandle implements TerminalHandle {
       listener(exit);
     }
     this._listeners.clear();
+  }
+
+  /**
+   * The editor's own rename, asked for and not awaited.
+   *
+   * A rejection is swallowed on purpose: this runs from a registry change with
+   * no caller behind it, the command is a command and not an API, and the whole
+   * cost of it failing is a tab still wearing its old name beside a row that has
+   * the new one. Throwing out of here would take down whatever change was being
+   * announced.
+   */
+  private _applyName(name: string): void {
+    void vscode.commands.executeCommand(RENAME_ACTIVE_TERMINAL, { name }).then(undefined, () => {
+      // Nothing to do and nobody to tell. See above.
+    });
   }
 }

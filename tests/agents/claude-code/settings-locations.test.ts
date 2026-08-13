@@ -1,4 +1,5 @@
 import {
+  claudeSessionsDirectory,
   claudeSettingsLocations,
   claudeTranscriptsDirectory,
   claudeUserDirectory,
@@ -121,6 +122,17 @@ describe('where Claude Code keeps the conversations', () => {
         configDir: '/tmp/probe-config',
       })
     ).toBe('/tmp/probe-config/projects');
+  });
+
+  it('hangs the running sessions off the user level too', () => {
+    // One file per live process, named after its pid, and the only place the
+    // CLI writes the name a person gave with `/rename` (measured 2026-08-13).
+    expect(
+      claudeSessionsDirectory({ platform: 'win32', home: 'C:\\Users\\person', configDir: undefined })
+    ).toBe('C:\\Users\\person\\.claude\\sessions');
+    expect(
+      claudeSessionsDirectory({ platform: 'linux', home: '/home/person', configDir: '/tmp/probe-config' })
+    ).toBe('/tmp/probe-config/sessions');
   });
 
   it('answers the user level on its own, because more than one thing hangs off it', () => {
