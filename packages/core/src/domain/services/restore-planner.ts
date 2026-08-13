@@ -223,6 +223,29 @@ export function explainRefusal(reason: RestoreRefusal): string {
 }
 
 /**
+ * Why NOBODY could restore this record: the refusal with the question "which
+ * window is asking" taken out of it (M2.15).
+ *
+ * The cleanup needs this and not the refusal above, because the refusal above
+ * is about THIS window. A record refused here for the folder is a record
+ * another window resumes, notes and task included, the moment it opens that
+ * project -- and a cleanup that read the local answer would carry it off.
+ *
+ * It is this function and not a second predicate, and that is the same rule
+ * M2.14 followed: two answers to "may this record be brought back" drift where
+ * nobody looks, and the drift is measured in `claude --resume` processes on one
+ * transcript. What it takes out is exactly what the `demanded` flag takes out
+ * -- the folder and a silent owner -- so a change to that flag is a change
+ * here, and the cleanup's own suite is what would say so.
+ */
+export function refusalAnywhere(
+  entry: TerminalEntry,
+  inputs: RestoreInputs
+): RestoreRefusal | null {
+  return refusalFor(entry, inputs, listedSessions(inputs.agents), true);
+}
+
+/**
  * The conversations the CLI says it is running, or `null` when it could not be
  * asked.
  *

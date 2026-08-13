@@ -146,8 +146,8 @@ export class FileTerminalRepository implements TerminalRepository {
    * is not a rollback -- it is a question asked before the point of no return,
    * not a way back from it. `trash/<stamp>/<terminalId>/` holds the two files
    * under their own names, so undoing a deletion is moving a directory back and
-   * needs neither this build nor any tool. M2.15 inherits the shape and adds the
-   * sweep that keeps it from growing forever.
+   * needs neither this build nor any tool. M2.15 inherited the shape and added
+   * the daily sweep that keeps it from growing forever.
    *
    * **The journal, the settings file and the directory stay where they are.**
    * The journal is the one artefact no later version can go back for (§10.1а),
@@ -167,8 +167,10 @@ export class FileTerminalRepository implements TerminalRepository {
    * One consequence, named rather than discovered: a record that cannot be READ
    * cannot be removed here either, because `_require` cannot find it. Such a
    * record is invisible in the list as well, so nothing is stuck in front of
-   * anybody -- it waits for M2.15, which works on directories and does not need
-   * to understand their contents.
+   * anybody. It is `StorageCleaner.strays` that reaches it (M2.15): that pass
+   * works on directories and asks only whether a record could be read at all --
+   * which is also what collects the directory THIS method leaves behind, with
+   * the journal and the settings still in it.
    */
   public async remove(id: TerminalId): Promise<void> {
     await this._require(id);

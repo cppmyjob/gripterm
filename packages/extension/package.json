@@ -88,6 +88,11 @@
         "command": "gripterm.adoptTerminal",
         "title": "Gripterm: Adopt Terminal",
         "icon": "$(sign-in)"
+      },
+      {
+        "command": "gripterm.cleanUpStorage",
+        "title": "Gripterm: Clean Up Storage",
+        "icon": "$(clear-all)"
       }
     ],
     "menus": {
@@ -96,6 +101,11 @@
           "command": "gripterm.newTerminal",
           "when": "view == gripterm.terminals",
           "group": "navigation"
+        },
+        {
+          "command": "gripterm.cleanUpStorage",
+          "when": "view == gripterm.terminals",
+          "group": "9_store@1"
         }
       ],
       "view/item/context": [

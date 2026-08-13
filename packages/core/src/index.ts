@@ -27,8 +27,17 @@ export {
 } from './domain/services/reconciler';
 
 export {
+  explainCleanup,
+  planCleanup,
+  type CleanupItem,
+  type CleanupPlan,
+  type CleanupReason,
+} from './domain/services/cleanup-planner';
+
+export {
   explainRefusal,
   planRestore,
+  refusalAnywhere,
   type RestoreInputs,
   type RestorePlan,
   type RestoreRefusal,
@@ -198,9 +207,19 @@ export {
   StorageLayout,
   isJournalFileName,
   isJournalPath,
+  isTrashBatchName,
   journalDay,
   trashStamp,
 } from './infrastructure/store/storage-layout';
+export {
+  DEFAULT_TRASH_SWEEP_INTERVAL_MS,
+  SETTLED_MS,
+  StorageCleaner,
+  type CollectOutcome,
+  type StorageCleanerOptions,
+  type SweepFailure,
+  type SweepOutcome,
+} from './infrastructure/store/storage-cleaner';
 export {
   moveAtomic,
   writeAtomic,

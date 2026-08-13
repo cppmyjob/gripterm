@@ -109,9 +109,11 @@ const DEVICE_NAMES: ReadonlySet<string> = new Set([
  * business, and a test needs a directory of its own.
  *
  * A terminal's paths take a `TerminalId`, which is a validated UUID by
- * construction, so nothing about them can escape the base. An owner id is any
- * non-blank string its host offered, so `ownerFile` is the one member here that
- * can refuse.
+ * construction, so nothing about them can escape the base. The members that can
+ * REFUSE are the three formed from a string somebody else chose: `ownerFile`
+ * from an id its host offered, and the two that take a name off the medium --
+ * `discardedOwnerFile` and `discardedStrayDir`, whose whole job is to address
+ * things nothing could be decoded from.
  */
 export class StorageLayout {
   constructor(private readonly _baseDir: string) {}
@@ -235,6 +237,32 @@ export class StorageLayout {
       requireSafeFileName(fileName)
     );
   }
+
+  /**
+   * Everything one run of the cleanup takes away, under one stamp (M2.15).
+   *
+   * One batch per run rather than one per record, and that is the rollback
+   * rather than tidiness: a person undoing a cleanup has one directory to look
+   * in and one decision to reverse, instead of a hunt through the trash for the
+   * pieces of a single click.
+   */
+  public trashBatchDir(at: Date): string {
+    return join(this.trashDir, trashStamp(at));
+  }
+
+  /**
+   * Where a whole terminal directory goes when the cleanup sweeps it.
+   *
+   * Takes the NAME it was found under rather than a `TerminalId`, and that is
+   * forced by what is being swept: the directories worth sweeping include the
+   * ones no record could be read from, and a directory whose name is not an id
+   * is exactly the kind the repository can never list. So this is the second
+   * member here formed from an untrusted string, and like the first one it
+   * checks -- `..` would move the store rather than a leftover.
+   */
+  public discardedStrayDir(at: Date, name: string): string {
+    return join(this.trashBatchDir(at), requireSafeFileName(name));
+  }
 }
 
 /**
@@ -260,6 +288,21 @@ export function isJournalFileName(name: string): boolean {
 }
 
 const JOURNAL_FILE_NAME = /^\d{4}-\d{2}-\d{2}\.ndjson$/;
+
+/**
+ * Whether a name in `trash/` is a batch this build made (M2.15).
+ *
+ * The sweep removes whole directories by a rule -- old enough, or holding
+ * nothing -- and a rule like that is only defensible over names we minted
+ * ourselves. Anything else in there is a person's own: a copy they made before
+ * trying something, which is precisely the use a directory called `trash` with
+ * their records in it invites.
+ */
+export function isTrashBatchName(name: string): boolean {
+  return TRASH_BATCH_NAME.test(name);
+}
+
+const TRASH_BATCH_NAME = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/;
 
 /**
  * Whether a path the directory watcher reported is journal traffic.

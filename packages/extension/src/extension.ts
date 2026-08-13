@@ -24,6 +24,7 @@ import {
   RestoreOrchestrator,
   SessionRegistry,
   ShellLaunchStrategy,
+  StorageCleaner,
   StorageLayout,
   StorageMigrator,
   SystemClock,
@@ -68,6 +69,7 @@ import type {
   WatchReport,
 } from '@gripterm/core';
 import { registerAdoptTerminal } from './commands/adopt-terminal';
+import { registerCleanUpStorage } from './commands/clean-up-storage';
 import { registerCloseTerminal } from './commands/close-terminal';
 import { registerDeleteTerminal } from './commands/delete-terminal';
 import { registerShowRecord } from './commands/show-record';
@@ -287,6 +289,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   // together with the port below, and the two are born and die together (§4.7).
   const token = newActivationToken();
   const journal = readJournalPolicy(logger);
+  /*
+   * The store's own cleanup, and the daily pass over the trash (M2.15).
+   *
+   * Only where there is a shared base, for the same reason as the sweep: a
+   * window reading nothing has no store to tidy, and one that could not open
+   * the base is the last thing that should be moving directories inside it.
+   *
+   * It takes the JOURNAL's retention, deliberately -- one answer to "how long
+   * does this build keep things", so that a person who set it once is not
+   * surprised by a second number they never saw.
+   */
+  const cleaner =
+    shared === null
+      ? null
+      : new StorageCleaner({
+        layout: storage,
+        clock,
+        scheduler: new SystemScheduler(),
+        logger,
+        retentionDays: journal.retentionDays,
+      });
+  if (cleaner !== null) {
+    context.subscriptions.push(cleaner);
+  }
   const address = await listen({ token, storage, registry, logger, journal });
   const cli = await findCli(logger);
   const forwarder = await findForwarder(context, logger);
@@ -464,6 +490,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
       logger,
     })
   );
+  context.subscriptions.push(
+    registerCleanUpStorage({
+      // Both or neither: the cleanup moves files by a predicate, and the
+      // predicate is exactly the world `gather` reads. A cleanup with a store
+      // and no world would be a rule with nothing to apply.
+      base:
+        cleaner === null || gather === null
+          ? null
+          : { cleaner, gather, retentionDays: journal.retentionDays },
+      logger,
+    })
+  );
   context.subscriptions.push(...registerMetadataCommands(metadata, registry, logger));
   context.subscriptions.push(
     vscode.commands.registerCommand('gripterm.showLogs', () => {
@@ -503,6 +541,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   if (reconciler !== null) {
     await reconciler.sweep();
     reconciler.start();
+  }
+
+  /*
+   * The pass over the trash: one now, then daily.
+   *
+   * The one now is the one that matters -- most windows do not live a day, so
+   * without it the retention would be a rule nothing ever applies. It is not
+   * awaited: nothing downstream depends on it, and a person opening an editor
+   * should not wait on a directory listing to see their terminals.
+   *
+   * Two windows starting at once may sweep the same batch. Whichever loses
+   * meets a directory that is already gone, says so and carries on -- there is
+   * nothing to be right about in a batch neither of them wanted.
+   */
+  if (cleaner !== null) {
+    void cleaner.collect().catch((cause: unknown) => {
+      logger.warn('the trash could not be swept at activation, so it may hold more than it should', {
+        reason: String(cause),
+      });
+    });
+    cleaner.start();
   }
 
   // `appName` is logged beside the kind we made of it, unconditionally. An

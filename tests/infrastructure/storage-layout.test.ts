@@ -7,6 +7,7 @@ import {
   ValidationError,
   isJournalFileName,
   isJournalPath,
+  isTrashBatchName,
   journalDay,
   trashStamp,
 } from '../../packages/core/src/index';
@@ -240,6 +241,37 @@ describe('where a discarded record goes', () => {
   it('refuses a presence file name that is a path, however it is spelled', () => {
     for (const name of ['..', '../version', 'nested/thing.json', 'nested\\thing.json', '']) {
       expect(() => layout.discardedOwnerFile(at, name)).toThrow(ValidationError);
+    }
+  });
+
+  /*
+   * M2.15 works on whole directories rather than on the two cards, so it needs
+   * the batch itself and a home for a directory that is nothing but a name: a
+   * leftover holding no readable record cannot be addressed by an id, because
+   * an id is what it failed to have.
+   */
+  it('names the batch one run of the cleanup puts everything in', () => {
+    expect(layout.trashBatchDir(at)).toBe(join(layout.trashDir, '2026-08-12_14-33-07'));
+  });
+
+  it('puts a swept directory in the batch under the name it was found by', () => {
+    expect(layout.discardedStrayDir(at, TERMINAL.value)).toBe(
+      join(layout.trashBatchDir(at), TERMINAL.value)
+    );
+  });
+
+  it('refuses a swept name that is a path, however it is spelled', () => {
+    for (const name of ['..', '.', '../terminals', 'nested/thing', 'nested\\thing', '']) {
+      expect(() => layout.discardedStrayDir(at, name)).toThrow(ValidationError);
+    }
+  });
+
+  it('tells its own batches from everything else in the trash', () => {
+    // The sweep removes whole batches by a rule, which is only defensible over
+    // names this build made itself: a person's own folder in there is theirs.
+    expect(isTrashBatchName(trashStamp(at))).toBe(true);
+    for (const name of ['2026-08-12', 'my-backup', '2026-08-12_14-33-07.bak', 'owners', '']) {
+      expect(isTrashBatchName(name)).toBe(false);
     }
   });
 });

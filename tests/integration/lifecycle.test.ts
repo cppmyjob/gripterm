@@ -33,6 +33,15 @@ async function api(): Promise<GriptermApi> {
   return await extension.activate();
 }
 
+function titleItems(): readonly MenuItem[] {
+  const extension = vscode.extensions.getExtension('gripterm-placeholder.gripterm');
+  assert.ok(extension);
+  const manifest = extension.packageJSON as {
+    contributes: { menus: Record<string, MenuItem[]> };
+  };
+  return manifest.contributes.menus['view/title'] ?? [];
+}
+
 function menuItems(): readonly MenuItem[] {
   const extension = vscode.extensions.getExtension('gripterm-placeholder.gripterm');
   assert.ok(extension);
@@ -114,6 +123,30 @@ suite('the lifecycle commands', () => {
      * a live foreign row, where it means a second `claude --resume`.
      */
     assert.deepEqual(rowsFor('gripterm.adoptTerminal'), [CONTEXT_ADOPTABLE, CONTEXT_ADOPTABLE]);
+  });
+
+  /*
+   * M2.15. The cleanup is about the STORE, so it is offered from the title of
+   * the list and from nowhere else. On a row it would read as "clean up this
+   * terminal", which is what `gripterm.deleteTerminal` already is -- and the
+   * two mean different things: one throws away a record a person is looking at,
+   * the other takes away what no window can act on any more.
+   */
+  test('offer the cleanup from the title of the list and not from a row', async () => {
+    await api();
+    const commands = await vscode.commands.getCommands(true);
+
+    assert.ok(commands.includes('gripterm.cleanUpStorage'), 'cleanUpStorage is not registered');
+    assert.deepEqual(
+      titleItems()
+        .filter((item) => item.command === 'gripterm.cleanUpStorage')
+        .map((item) => item.when),
+      ['view == gripterm.terminals']
+    );
+    assert.deepEqual(
+      menuItems().filter((item) => item.command === 'gripterm.cleanUpStorage'),
+      []
+    );
   });
 
   test('are all registered, including the six M2.7 added', async () => {
