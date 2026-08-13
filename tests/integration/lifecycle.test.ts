@@ -154,6 +154,15 @@ suite('the lifecycle commands', () => {
     // M2.13, and the same rule: starting over is offered where the terminal is
     // over. On a live row it would be an offer to make a second one (О3).
     assert.deepEqual(rowsFor('gripterm.startOver'), [CONTEXT_OVER]);
+    /*
+     * M2.23, and the pair is the point: on a finished row of ours, `Start Over`
+     * walks away from the conversation and `Resume Terminal` continues it.
+     * Until the second existed the first was the only offer, so "bring my
+     * terminal back" was answered by "here is a new one". Twice, because the row
+     * carries it as a button as well -- a person who has just exited Claude Code
+     * should not have to open a menu to find the way back.
+     */
+    assert.deepEqual(rowsFor('gripterm.resumeTerminal'), [CONTEXT_OVER, CONTEXT_OVER]);
     assert.deepEqual(rowsFor('gripterm.closeTerminal'), [CONTEXT_LIVE]);
     /*
      * M2.14. Adoption is offered on the ONE kind of row that is somebody

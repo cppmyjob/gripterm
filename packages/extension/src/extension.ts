@@ -79,6 +79,7 @@ import { registerCleanUpStorage } from './commands/clean-up-storage';
 import { registerCloseTerminal } from './commands/close-terminal';
 import { registerDeleteTerminal } from './commands/delete-terminal';
 import { registerShowRecord } from './commands/show-record';
+import { registerResumeTerminal } from './commands/resume-terminal';
 import { registerStartOver } from './commands/start-over';
 import { registerFocusTerminal } from './commands/focus-terminal';
 import { registerMetadataCommands } from './commands/edit-metadata';
@@ -547,6 +548,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     })
   );
   context.subscriptions.push(registerStartOver(lifecycle, registry, logger));
+  context.subscriptions.push(registerResumeTerminal({ lifecycle, registry, gather, logger }));
   context.subscriptions.push(registerShowRecord(view, tree, logger));
   context.subscriptions.push(
     registerAdoptTerminal({

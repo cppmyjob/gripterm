@@ -80,6 +80,11 @@
         "icon": "$(list-selection)"
       },
       {
+        "command": "gripterm.resumeTerminal",
+        "title": "Gripterm: Resume Terminal",
+        "icon": "$(debug-start)"
+      },
+      {
         "command": "gripterm.startOver",
         "title": "Gripterm: Start Over",
         "icon": "$(debug-restart)"
@@ -168,6 +173,16 @@
           "command": "gripterm.closeTerminal",
           "when": "view == gripterm.terminals && viewItem == gripterm.terminal.live",
           "group": "2_act@1"
+        },
+        {
+          "command": "gripterm.resumeTerminal",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.over",
+          "group": "inline"
+        },
+        {
+          "command": "gripterm.resumeTerminal",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.over",
+          "group": "2_act@0"
         },
         {
           "command": "gripterm.showLogs",

@@ -283,6 +283,25 @@ function refusalFor(
   if (!demanded && !belongsHere(entry.owner.workspaceFolder, inputs.windowFolders)) {
     return 'foreign-folder';
   }
+  return conversationRefusal(entry, inputs, listed);
+}
+
+/**
+ * What is true about the CONVERSATION, with every question about ownership taken
+ * out: is a process still on it, does the CLI name it, was anything ever said in
+ * it.
+ *
+ * Its own function because two callers need exactly this half and needing it is
+ * not the same as being allowed to write it again (M2.23). The rules here are
+ * the ones that keep a second `claude --resume` off a live transcript, which is
+ * the failure the whole design is built against -- so there is one copy, and the
+ * order of it is `planRestore`'s own.
+ */
+function conversationRefusal(
+  entry: TerminalEntry,
+  inputs: RestoreInputs,
+  listed: ReadonlySet<string> | null
+): RestoreRefusal | null {
   if (mayBeRunning(entry, inputs)) {
     return 'session-running';
   }
@@ -299,6 +318,47 @@ function refusalFor(
     return 'no-transcript';
   }
   return null;
+}
+
+/**
+ * Why the window that OWNS a record may not start its conversation again
+ * (M2.23).
+ *
+ * The other question the same world answers, and the one nothing asked until a
+ * person exited Claude Code with Ctrl+C and found the row could do everything
+ * except the one thing they wanted. `planRestore` decides what a window may
+ * bring back UNASKED, over records belonging to windows that are gone; this
+ * decides what a person may ask for about a record their own window is holding.
+ *
+ * **Three refusals do not apply, and none of them is relaxed away.** `owner-live`
+ * is the rule that keeps windows off each other's records -- asked here it
+ * answers about the asker itself. `owner-unknown` is the same rule waiting. And
+ * `foreign-folder` is §6's automatic narrowing, which a person standing in front
+ * of the row has already answered by asking. Everything about the conversation
+ * stays, exactly as `demanded` leaves it (M2.14).
+ *
+ * **`closed` is not answered here either, and that is the one deliberate
+ * difference.** It is not a fact about the world but an intention -- this person's
+ * own, from an hour ago -- and the same person may reverse it. Doing so is the
+ * caller's business, in front of a dialog that says what is being reversed
+ * (`TerminalEntry.reopened`).
+ *
+ * The duplicate check is kept, because it is about the conversation: another
+ * record that could still be resumed and names the same session is the О3 hazard
+ * whoever asks.
+ */
+export function resumeRefusal(entry: TerminalEntry, inputs: RestoreInputs): RestoreRefusal | null {
+  const refusal = conversationRefusal(entry, inputs, listedSessions(inputs.agents));
+  if (refusal !== null) {
+    return refusal;
+  }
+  const contested = inputs.entries.some(
+    (other) =>
+      !other.terminalId.equals(entry.terminalId) &&
+      other.isRestorable() &&
+      other.sessionId.equals(entry.sessionId)
+  );
+  return contested ? 'duplicate-session' : null;
 }
 
 /**

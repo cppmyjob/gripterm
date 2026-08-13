@@ -331,6 +331,47 @@ describe('withClosed', () => {
   });
 });
 
+describe('reopened', () => {
+  /*
+   * M2.23. `closedAt` is the one field in this aggregate that records an
+   * INTENTION rather than something that happened to the world, and an intention
+   * is the kind of thing its author may change their mind about. Until this
+   * existed there was no way back: a terminal closed by mistake left a record
+   * nothing could ever resume, and the only offer on it was to start a NEW
+   * conversation -- which walks away from the one they wanted.
+   */
+  it('undoes a close, so the record can be resumed again', () => {
+    const closed = makeEntry().withClosed(CLOSED_AT);
+
+    const reopened = closed.reopened();
+
+    expect(reopened.closedAt).toBeNull();
+    expect(reopened.isRestorable()).toBe(true);
+  });
+
+  it('keeps everything else about the record', () => {
+    // The name, the task, the notes and the conversation are why a person is
+    // asking for it back at all.
+    const closed = makeEntry().withClosed(CLOSED_AT);
+
+    const reopened = closed.reopened();
+
+    expect(reopened.terminalId.equals(closed.terminalId)).toBe(true);
+    expect(reopened.sessionId.equals(closed.sessionId)).toBe(true);
+    expect(reopened.metadata).toBe(closed.metadata);
+    expect(reopened.observed).toBe(closed.observed);
+    expect(reopened.revision).toBe(closed.revision);
+  });
+
+  it('answers itself when the record was never closed', () => {
+    // Cheap identity for the redraw, and the same shape `withSessionId` and
+    // `withClosed` already use for "nothing to do".
+    const open = makeEntry();
+
+    expect(open.reopened()).toBe(open);
+  });
+});
+
 describe('the aggregate as a whole', () => {
   it('keeps identity and human metadata across a chain of changes', () => {
     const entry = makeEntry();

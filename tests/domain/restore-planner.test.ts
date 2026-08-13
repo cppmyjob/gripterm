@@ -6,6 +6,7 @@ import {
   TerminalId,
   explainRefusal,
   planRestore,
+  resumeRefusal,
 } from '../../packages/core/src/index';
 import { makeEntry } from '../helpers/domain-fixtures';
 import type {
@@ -530,5 +531,97 @@ describe('explaining a refusal to the person who asked', () => {
   it('gives each one a sentence of its own', () => {
     // Two refusals sharing a sentence is a person sent to the wrong place.
     expect(new Set(REFUSALS.map(explainRefusal)).size).toBe(REFUSALS.length);
+  });
+});
+
+/*
+ * M2.23. The same predicate asked by the OWNER of a record rather than by a
+ * window deciding what to adopt.
+ *
+ * The three refusals it drops are the three about ownership -- whose window
+ * this is, whether that window answers, whose project it belongs to -- and
+ * dropping them is not a relaxation: the asker IS that window, standing in that
+ * project, with the row under their cursor. Everything that keeps a second
+ * `claude --resume` off a live conversation stays, and stays in this function
+ * rather than in a copy of it (О3).
+ */
+describe('a record its own window asks to resume', () => {
+  it('is allowed when nothing says its conversation is running', () => {
+    const entry = sketch();
+
+    expect(resumeRefusal(entry, inputsFor([entry]))).toBeNull();
+  });
+
+  it('is allowed although its own window is the live owner', () => {
+    // The refusal that exists to keep windows off each other's records, asked
+    // of the one case where it means the opposite: this window holds it.
+    const entry = sketch({ ownerId: 'this-very-window' });
+    const world = inputsFor([entry], {
+      ownerLiveness: new Map([['this-very-window', 'live' as const]]),
+    });
+
+    expect(planRestore(world).skipped.map((skip) => skip.reason)).toStrictEqual(['owner-live']);
+    expect(resumeRefusal(entry, world)).toBeNull();
+  });
+
+  it('is allowed although the record belongs to another project', () => {
+    // A person looking at the row is standing where they want it opened.
+    const entry = sketch({ folder: 'D:/Projects/elsewhere' });
+
+    expect(resumeRefusal(entry, inputsFor([entry]))).toBeNull();
+  });
+
+  it('refuses while our own evidence leaves its process possibly running', () => {
+    const entry = sketch({ pid: 4242 });
+
+    expect(resumeRefusal(entry, inputsFor([entry]))).toBe<RestoreRefusal>('session-running');
+  });
+
+  it('refuses while the CLI names its conversation among the running ones', () => {
+    const entry = sketch();
+
+    expect(resumeRefusal(entry, inputsFor([entry], { agents: listing(SESSION_A) }))).toBe<RestoreRefusal>(
+      'session-listed'
+    );
+  });
+
+  it('refuses when the CLI could not be asked at all', () => {
+    const entry = sketch();
+    const world = inputsFor([entry], { agents: { kind: 'unavailable', reason: 'no claude' } });
+
+    expect(resumeRefusal(entry, world)).toBe<RestoreRefusal>('agents-unavailable');
+  });
+
+  it('refuses when nothing was ever said in the conversation', () => {
+    const entry = sketch({ sessionId: SESSION_B });
+    const world = inputsFor([entry], { transcripts: transcriptsFor(SESSION_A) });
+
+    expect(resumeRefusal(entry, world)).toBe<RestoreRefusal>('no-transcript');
+  });
+
+  it('refuses when another record still claims the same conversation', () => {
+    // Resuming both is the О3 violation itself, and which of the two is the
+    // real one is a judgement for a person rather than for a predicate.
+    const mine = sketch();
+    const twin = sketch({ terminalId: TERMINAL_B });
+
+    expect(resumeRefusal(mine, inputsFor([mine, twin]))).toBe<RestoreRefusal>('duplicate-session');
+  });
+
+  it('is not stopped by a twin that nobody can resume any more', () => {
+    const mine = sketch();
+    const closed = sketch({ terminalId: TERMINAL_B, closedAt: new Date(NOW - MINUTE_MS) });
+
+    expect(resumeRefusal(mine, inputsFor([mine, closed]))).toBeNull();
+  });
+
+  it('says nothing about a record the person closed, because that is theirs to undo', () => {
+    // `closed` is the one refusal that is about an INTENTION rather than about
+    // the world, and an intention the same person may reverse -- in front of a
+    // dialog that says what they are reversing. So it is not answered here:
+    // this function is about whether the conversation may be started at all.
+    const entry = sketch({ closedAt: new Date(NOW - MINUTE_MS) });
+
+    expect(resumeRefusal(entry, inputsFor([entry]))).toBeNull();
   });
 });

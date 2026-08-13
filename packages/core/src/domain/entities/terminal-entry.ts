@@ -241,6 +241,26 @@ export class TerminalEntry {
     return this._withState({ owner: next, revision: this._state.revision + 1 });
   }
 
+  /**
+   * Takes the close back, because the person who made it asked for this
+   * conversation again (M2.23).
+   *
+   * The only mutator in this class that undoes another one, and it is allowed
+   * for the reason `closedAt` exists at all: that field is an INTENTION -- "do
+   * not bring this back" -- and not a fact about the world, which is why nothing
+   * a process does ever sets it (see `closedAt`). An intention is the kind of
+   * thing its author may reverse, and until this existed they could not: a
+   * terminal closed by mistake left a record no window would ever resume, whose
+   * only offer was a NEW conversation.
+   *
+   * It changes nothing else, `revision` included. This is not a transfer and not
+   * a write another window has to lose a compare-and-swap over -- the record is
+   * already ours, and what moves is one field of it.
+   */
+  public reopened(): TerminalEntry {
+    return this._state.closedAtMs === null ? this : this._withState({ closedAtMs: null });
+  }
+
   /** Idempotent: the first close wins, so a second one cannot move the timestamp. */
   public withClosed(at: Date): TerminalEntry {
     if (this._state.closedAtMs !== null) {

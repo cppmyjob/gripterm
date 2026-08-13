@@ -42,6 +42,7 @@ export {
 export {
   explainRefusal,
   planRestore,
+  resumeRefusal,
   refusalAnywhere,
   type RestoreInputs,
   type RestorePlan,
