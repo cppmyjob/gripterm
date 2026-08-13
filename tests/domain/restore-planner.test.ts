@@ -4,6 +4,7 @@ import {
   OwnerRef,
   SessionId,
   TerminalId,
+  explainRefusal,
   planRestore,
 } from '../../packages/core/src/index';
 import { makeEntry } from '../helpers/domain-fixtures';
@@ -11,6 +12,7 @@ import type {
   AgentListing,
   RestoreInputs,
   RestorePlan,
+  RestoreRefusal,
   TerminalEntry,
   TranscriptIndex,
 } from '../../packages/core/src/index';
@@ -120,7 +122,7 @@ describe('deciding what this window may bring back by itself', () => {
     const plan = planRestore(inputsFor([entry]));
 
     expect(plan.skipped).toStrictEqual([]);
-    expect(plan.steps).toStrictEqual([{ entry, expectedRevision: 7 }]);
+    expect(plan.steps).toStrictEqual([{ entry, expectedRevision: 7, force: false }]);
   });
 
   it('carries the revision the decision was made on, for the adoption to compare', () => {
@@ -358,8 +360,9 @@ describe('two records naming one conversation', () => {
     expect(refusals(plan)).toStrictEqual(['duplicate-session', 'duplicate-session']);
   });
 
-  it('still restores the one when the other was refused anyway', () => {
-    // A closed record is running nothing, so it contests nothing.
+  it('still restores the one when the other was closed on purpose', () => {
+    // A closed record will never be resumed by anybody, so it can never become
+    // the second process on that conversation and it contests nothing.
     const closed = sketch({ terminalId: TERMINAL_B, sessionId: SESSION_A, closedAt: SINCE_BOOT });
     const live = sketch({ terminalId: TERMINAL_A, sessionId: SESSION_A });
 
@@ -367,5 +370,165 @@ describe('two records naming one conversation', () => {
 
     expect(plan.steps.map((step) => step.entry.terminalId.value)).toStrictEqual([TERMINAL_A]);
     expect(refusals(plan)).toStrictEqual(['closed']);
+  });
+
+  it('counts a twin this window may not restore today, because tomorrow it may', () => {
+    // The twin belongs to another project, so this window refuses it -- but its
+    // own window will offer to bring it back, and the two would then be two
+    // `claude --resume` on one transcript. Counting only today's candidates
+    // made the rule mean "two restorable right now" rather than what it says.
+    const elsewhere = sketch({
+      terminalId: TERMINAL_B,
+      sessionId: SESSION_A,
+      folder: 'D:/Projects/other',
+    });
+    const here = sketch({ terminalId: TERMINAL_A, sessionId: SESSION_A });
+
+    const plan = planRestore(inputsFor([elsewhere, here]));
+
+    expect(plan.steps).toStrictEqual([]);
+    expect(refusals(plan)).toStrictEqual(['foreign-folder', 'duplicate-session']);
+  });
+});
+
+/*
+ * The manual path (M2.14), and the reason it goes through the same predicate.
+ *
+ * A person looking at a row of another window's project can ask this window to
+ * take it. That lifts exactly two rules -- the folder, because they are looking
+ * at it and asking for it here, and a stale heartbeat, because `force` is the
+ * person saying they have looked. It lifts nothing about the CONVERSATION: they
+ * cannot see from a row whether a `claude` is running it, and that is the
+ * mistake whose cost is an interleaved transcript.
+ */
+describe('a record a person asked this window to take', () => {
+  const demand = (id: string): Partial<RestoreInputs> => ({ demanded: TerminalId.fromString(id) });
+
+  it('takes another project\'s record when a person asks for it by name', () => {
+    const entry = sketch({ folder: 'D:/Projects/other' });
+
+    const plan = planRestore(inputsFor([entry], demand(TERMINAL_A)));
+
+    expect(plan.steps.map((step) => step.entry.terminalId.value)).toStrictEqual([TERMINAL_A]);
+  });
+
+  it('takes a silent window\'s record, and says the adoption must force it', () => {
+    // `AdoptOptions.force` is the only way past an owner the store calls
+    // `unknown`, and nothing but a person's demand may set it.
+    const plan = planRestore(
+      inputsFor([sketch()], {
+        ownerLiveness: new Map([[GONE_OWNER, 'unknown']]),
+        ...demand(TERMINAL_A),
+      })
+    );
+
+    expect(plan.steps.map((step) => step.force)).toStrictEqual([true]);
+  });
+
+  it('never forces an adoption nobody asked for', () => {
+    expect(planRestore(inputsFor([sketch()])).steps.map((step) => step.force)).toStrictEqual([
+      false,
+    ]);
+  });
+
+  it('still refuses a record whose window is plainly running', () => {
+    // The one refusal a demand may never lift: that window is there, it owns
+    // the record, and it is the writer of it (§4.8).
+    const plan = planRestore(
+      inputsFor([sketch()], {
+        ownerLiveness: new Map([[GONE_OWNER, 'live']]),
+        ...demand(TERMINAL_A),
+      })
+    );
+
+    expect(plan.steps).toStrictEqual([]);
+    expect(refusals(plan)).toStrictEqual(['owner-live']);
+  });
+
+  it('speaks only about the record that was asked for', () => {
+    // Otherwise one click would start every terminal the plan happened to
+    // permit -- and the person asked for one row.
+    const asked = sketch({ terminalId: TERMINAL_A, sessionId: SESSION_A });
+    const other = sketch({ terminalId: TERMINAL_B, sessionId: SESSION_B });
+
+    const plan = planRestore(inputsFor([asked, other], demand(TERMINAL_A)));
+
+    expect(plan.steps.map((step) => step.entry.terminalId.value)).toStrictEqual([TERMINAL_A]);
+    expect(plan.skipped).toStrictEqual([]);
+  });
+
+  it('answers about the record that was asked for even when it is refused', () => {
+    const asked = sketch({ terminalId: TERMINAL_A, closedAt: SINCE_BOOT });
+    const other = sketch({ terminalId: TERMINAL_B, sessionId: SESSION_B });
+
+    const plan = planRestore(inputsFor([asked, other], demand(TERMINAL_A)));
+
+    expect(plan.steps).toStrictEqual([]);
+    expect(plan.skipped.map((skip) => skip.entry.terminalId.value)).toStrictEqual([TERMINAL_A]);
+  });
+
+  it('says nothing at all about a record that is no longer in the base', () => {
+    const plan = planRestore(inputsFor([sketch({ terminalId: TERMINAL_B })], demand(TERMINAL_A)));
+
+    expect(plan).toStrictEqual({ steps: [], skipped: [] });
+  });
+
+  it('still refuses a conversation the CLI says it is running', () => {
+    const plan = planRestore(
+      inputsFor([sketch({ folder: 'D:/Projects/other' })], {
+        agents: listing(SESSION_A),
+        ...demand(TERMINAL_A),
+      })
+    );
+
+    expect(refusals(plan)).toStrictEqual(['session-listed']);
+  });
+
+  it('still refuses a conversation nothing was ever said in', () => {
+    const plan = planRestore(
+      inputsFor([sketch()], { transcripts: transcriptsFor(SESSION_B), ...demand(TERMINAL_A) })
+    );
+
+    expect(refusals(plan)).toStrictEqual(['no-transcript']);
+  });
+
+  it('still refuses when another record names the same conversation', () => {
+    const twin = sketch({ terminalId: TERMINAL_B, sessionId: SESSION_A });
+    const asked = sketch({ terminalId: TERMINAL_A, sessionId: SESSION_A });
+
+    const plan = planRestore(inputsFor([twin, asked], demand(TERMINAL_A)));
+
+    expect(refusals(plan)).toStrictEqual(['duplicate-session']);
+  });
+});
+
+describe('explaining a refusal to the person who asked', () => {
+  /*
+   * A total record, so a refusal added to the union arrives here with a
+   * sentence rather than on screen as an empty toast. The sentences are the
+   * whole of what a person gets when the answer is no -- the reason lives per
+   * record precisely so that "why is my terminal not back" has an answer.
+   */
+  const EVERY_REFUSAL: Readonly<Record<RestoreRefusal, true>> = {
+    'closed': true,
+    'owner-live': true,
+    'owner-unknown': true,
+    'foreign-folder': true,
+    'session-running': true,
+    'session-listed': true,
+    'agents-unavailable': true,
+    'transcripts-unavailable': true,
+    'no-transcript': true,
+    'duplicate-session': true,
+  };
+  const REFUSALS = Object.keys(EVERY_REFUSAL) as RestoreRefusal[];
+
+  it.each(REFUSALS)('gives %s a sentence', (reason) => {
+    expect(explainRefusal(reason).length).toBeGreaterThan(0);
+  });
+
+  it('gives each one a sentence of its own', () => {
+    // Two refusals sharing a sentence is a person sent to the wrong place.
+    expect(new Set(REFUSALS.map(explainRefusal)).size).toBe(REFUSALS.length);
   });
 });

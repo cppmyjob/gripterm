@@ -166,7 +166,7 @@ suite('bringing conversations back', () => {
       assert.equal(entry.revision, 3);
 
       const report = await restore.run({
-        steps: [{ entry, expectedRevision: entry.revision }],
+        steps: [{ entry, expectedRevision: entry.revision, force: false }],
         skipped: [],
       });
 

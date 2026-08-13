@@ -52,7 +52,7 @@ export const CONTEXT_LIVE = 'gripterm.terminal.live';
 export const CONTEXT_OVER = 'gripterm.terminal.over';
 
 /**
- * A record another window owns, whose window is still there.
+ * A record another window owns, and this window may only read.
  *
  * Nothing is offered on it, and that is the point: the terminal is alive and
  * working, but it lives in a window this one cannot reach -- `focus` would raise
@@ -60,11 +60,27 @@ export const CONTEXT_OVER = 'gripterm.terminal.over';
  * write (§4.8). A button that does nothing teaches a person that the whole list
  * is decorative.
  *
- * A foreign record whose owner is GONE does not get this value: it gets
- * `CONTEXT_OVER` by way of `detached`, which is the state that means "there is
- * something to be done here" -- restoring it (M2.10).
+ * A record whose terminal was closed on purpose keeps this value even when its
+ * window has gone: there is nothing to bring back, so adoption would move
+ * ownership and start nothing. Clearing those away is M2.15's.
  */
 export const CONTEXT_FOREIGN = 'gripterm.terminal.foreign';
+
+/**
+ * A record another window owns, whose window is gone or has stopped answering.
+ *
+ * The one row where this window may act on somebody else's record, and it may
+ * do exactly one thing: take it, which is `gripterm.adoptTerminal` (M2.14).
+ * Adoption is never automatic across projects -- §6 keeps the restore predicate
+ * to this window's own folders, and this value is the manual branch that keeps
+ * everything else from freezing for ever.
+ *
+ * One value for both `detached` and `unreachable`, deliberately. The difference
+ * between them decides how hard the command asks, and asking is done with the
+ * liveness read at the moment of the click -- a `contextValue` computed when the
+ * row was drawn would be a stale answer to that question.
+ */
+export const CONTEXT_ADOPTABLE = 'gripterm.terminal.adoptable';
 
 interface StateAppearance {
   readonly iconId: string;
@@ -118,6 +134,12 @@ const APPEARANCE: Readonly<Record<TerminalState, StateAppearance>> = {
   ended: { iconId: 'circle-slash', colorId: 'disabledForeground', words: 'ended', live: false },
   resume_failed: { iconId: 'error', colorId: 'charts.red', words: 'restore failed', live: false },
   detached: { iconId: 'plug', colorId: 'disabledForeground', words: 'detached', live: false },
+  unreachable: {
+    iconId: 'eye-closed',
+    colorId: 'disabledForeground',
+    words: 'window not answering',
+    live: false,
+  },
 };
 
 /** Long enough to recognise the answer, short enough not to become the row. */
@@ -154,37 +176,87 @@ export function presentTerminal(
   return {
     state,
     label: entry.metadata.displayName,
-    description: description(entry, appearance),
+    description: description(entry, appearance, !ours && liveness === 'live'),
     tooltipLines: tooltipLines(entry, appearance, ours),
     iconId: appearance.iconId,
     colorId: appearance.colorId,
     labelColorId: entry.metadata.color,
-    contextValue: contextValueFor(entry, appearance, ours),
+    contextValue: contextValueFor(entry, appearance, ours, liveness),
   };
 }
 
+/**
+ * What a menu may offer on this row, which is the whole of "read-only mode".
+ *
+ * Ownership is asked FIRST, because it is the rule and the rest is detail: a
+ * record this window does not own is one it may not write (§4.8), so the only
+ * question left about it is whether there is anything to take -- and a record
+ * whose terminal a person closed has nothing to take.
+ */
 function contextValueFor(
   entry: TerminalEntry,
   appearance: StateAppearance,
-  ours: boolean
+  ours: boolean,
+  liveness: OwnerLiveness
 ): string {
+  if (!ours) {
+    if (!entry.isRestorable() || liveness === 'live') {
+      return CONTEXT_FOREIGN;
+    }
+    return CONTEXT_ADOPTABLE;
+  }
   if (!appearance.live || !entry.isRestorable()) {
     return CONTEXT_OVER;
   }
-  return ours ? CONTEXT_LIVE : CONTEXT_FOREIGN;
+  return CONTEXT_LIVE;
 }
 
+/**
+ * The stored state, with the owner's liveness laid over it.
+ *
+ * The two overlays are kept apart here rather than merged into one "not live",
+ * because the difference is exactly what the next click costs: `detached` is a
+ * window that has gone, and taking its record is ordinary; `unreachable` is a
+ * window that is there and silent -- asleep, or stalled -- and taking its record
+ * is a second `claude --resume` on a conversation that already has one unless
+ * the person has looked. Drawing them alike would ask for that risk without
+ * mentioning it.
+ */
 function displayedState(entry: TerminalEntry, liveness: OwnerLiveness): TerminalState {
-  // `unknown` is treated as `dead` for DRAWING only, and the two stay apart
-  // everywhere it matters: adoption refuses `unknown` without an explicit
-  // force, because a stale heartbeat is a living window often enough that
-  // guessing costs a second `claude --resume` on one conversation.
-  return liveness === 'live' ? entry.observed.state : 'detached';
+  switch (liveness) {
+    case 'live':
+      return entry.observed.state;
+    case 'dead':
+      return 'detached';
+    default:
+      return 'unreachable';
+  }
 }
 
-function description(entry: TerminalEntry, appearance: StateAppearance): string {
+/**
+ * The dim half of the row: what it is doing, and whose it is.
+ *
+ * The last part is only added while the owning window is LIVE, and that is the
+ * case it exists for: two editors open on one folder put both terminals under
+ * one heading, where the only other sign that one of them is not ours is the
+ * absence of buttons -- which the platform shows on hover. Once the owner stops
+ * answering the state itself says it (`detached`, `unreachable` are never rows
+ * of ours), and a second sign would only make the line longer.
+ */
+function description(
+  entry: TerminalEntry,
+  appearance: StateAppearance,
+  elsewhere: boolean
+): string {
   const { currentTool } = entry.observed;
-  return currentTool === null ? appearance.words : `${appearance.words} · ${currentTool}`;
+  const parts = [appearance.words];
+  if (currentTool !== null) {
+    parts.push(currentTool);
+  }
+  if (elsewhere) {
+    parts.push('other window');
+  }
+  return parts.join(' · ');
 }
 
 function tooltipLines(

@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import { SHOW_RECORD_COMMAND, terminalIdFrom } from '@gripterm/core';
 import { TERMINALS_VIEW_ID } from '../ui/terminal-tree';
 import { say } from '../ui/say';
-import type { Logger, SessionRegistry, TerminalEntry } from '@gripterm/core';
+import type { TerminalTreeDataProvider, TerminalTreeNode } from '../ui/terminal-tree';
+import type { Logger } from '@gripterm/core';
 
 /**
  * `gripterm.showRecord` -- puts the person in front of the row a notification is
@@ -14,35 +15,40 @@ import type { Logger, SessionRegistry, TerminalEntry } from '@gripterm/core';
  * code; what is worth reaching is the RECORD -- the name, the task, the notes,
  * and the offer to start the conversation over, which lives on that row's menu.
  *
+ * The node comes from the tree rather than from the registry, because the list
+ * is grouped (M2.14) and `reveal` walks a node up through `getParent`. A record
+ * the tree does not hold is one it cannot select -- which includes a record
+ * deleted between the toast and the press.
+ *
  * Not offered in the palette or on a row: it takes a terminal id, and pressing
  * it on a row would mean "show me the row I am pointing at".
  */
 export function registerShowRecord(
-  view: vscode.TreeView<TerminalEntry>,
-  registry: SessionRegistry,
+  view: vscode.TreeView<TerminalTreeNode>,
+  tree: TerminalTreeDataProvider,
   logger: Logger
 ): vscode.Disposable {
   return vscode.commands.registerCommand(SHOW_RECORD_COMMAND, async (target: unknown) => {
     const terminalId = terminalIdFrom(target);
-    const entry = terminalId === null ? undefined : registry.get(terminalId);
-    if (entry === undefined) {
-      // Deleted between the toast and the press, or another window's. Opening
-      // the list is still the right answer: it is where the person was going.
+    const node = terminalId === null ? null : tree.nodeFor(terminalId);
+    if (node?.kind !== 'terminal') {
+      // Deleted between the toast and the press. Opening the list is still the
+      // right answer: it is where the person was going.
       await vscode.commands.executeCommand(`${TERMINALS_VIEW_ID}.focus`);
       return;
     }
 
     try {
-      await view.reveal(entry, { select: true, focus: true });
+      await view.reveal(node, { select: true, focus: true });
     } catch (cause: unknown) {
       // `reveal` is the platform's, and it throws when it cannot find the
       // element in the tree it drew. The list itself is still worth opening.
       logger.warn('a record could not be selected in the list', {
-        terminalId: entry.terminalId.value,
+        terminalId: node.entry.terminalId.value,
         cause: String(cause),
       });
       await vscode.commands.executeCommand(`${TERMINALS_VIEW_ID}.focus`);
-      say('warning', `Gripterm: "${entry.metadata.displayName}" is in the list below.`, logger);
+      say('warning', `Gripterm: "${node.entry.metadata.displayName}" is in the list below.`, logger);
     }
   });
 }

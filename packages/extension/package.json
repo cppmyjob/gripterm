@@ -83,6 +83,11 @@
         "command": "gripterm.startOver",
         "title": "Gripterm: Start Over",
         "icon": "$(debug-restart)"
+      },
+      {
+        "command": "gripterm.adoptTerminal",
+        "title": "Gripterm: Adopt Terminal",
+        "icon": "$(sign-in)"
       }
     ],
     "menus": {
@@ -168,6 +173,16 @@
           "command": "gripterm.deleteTerminal",
           "when": "view == gripterm.terminals && viewItem == gripterm.terminal.over",
           "group": "2_act@3"
+        },
+        {
+          "command": "gripterm.adoptTerminal",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.adoptable",
+          "group": "inline"
+        },
+        {
+          "command": "gripterm.adoptTerminal",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.adoptable",
+          "group": "2_act@1"
         }
       ],
       "commandPalette": [

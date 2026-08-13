@@ -10,6 +10,7 @@ import {
   TerminalId,
   TerminalLifecycleService,
   TerminalStateMachine,
+  type AdoptOptions,
   type AgentCommand,
   type AgentCommandFactory,
   type Disposable,
@@ -65,7 +66,11 @@ const SECOND_PORT = ListeningAddress.loopback(62_002);
  * when the adoption is refused.
  */
 class AbandonedBase implements TerminalRepository {
-  public readonly adoptions: { readonly terminalId: string, readonly expected: number }[] = [];
+  public readonly adoptions: {
+    readonly terminalId: string;
+    readonly expected: number;
+    readonly forced: boolean;
+  }[] = [];
   /** Ids whose adoption fails -- what another window getting there first looks like. */
   public readonly contested = new Set<string>();
 
@@ -80,8 +85,12 @@ class AbandonedBase implements TerminalRepository {
     this._entries.set(entry.terminalId.value, entry);
   }
 
-  public async adopt(id: TerminalId, expected: number): Promise<TerminalEntry> {
-    this.adoptions.push({ terminalId: id.value, expected });
+  public async adopt(
+    id: TerminalId,
+    expected: number,
+    options: AdoptOptions = {}
+  ): Promise<TerminalEntry> {
+    this.adoptions.push({ terminalId: id.value, expected, forced: options.force === true });
     if (this.contested.has(id.value)) {
       throw new ConflictError('the entry moved while it was being adopted');
     }
@@ -202,7 +211,7 @@ function abandoned(stand_: Stand, overrides: Parameters<typeof makeEntry>[0] = {
 
 function planFor(...entries: readonly TerminalEntry[]): RestorePlan {
   return {
-    steps: entries.map((entry) => ({ entry, expectedRevision: entry.revision })),
+    steps: entries.map((entry) => ({ entry, expectedRevision: entry.revision, force: false })),
     skipped: [],
   };
 }
@@ -236,11 +245,28 @@ describe('carrying out a restore plan', () => {
     const entry = abandoned(here);
 
     await here.orchestrator.run({
-      steps: [{ entry, expectedRevision: 4 }],
+      steps: [{ entry, expectedRevision: 4, force: false }],
       skipped: [],
     });
 
-    expect(here.base.adoptions).toStrictEqual([{ terminalId: entry.terminalId.value, expected: 4 }]);
+    expect(here.base.adoptions).toStrictEqual([
+      { terminalId: entry.terminalId.value, expected: 4, forced: false },
+    ]);
+  });
+
+  it('forces the adoption only for a step a person asked for', async () => {
+    // `force` is what gets past an owner the store calls `unknown` -- a window
+    // that is there and silent. Nothing but a person's demand may set it, so
+    // this is the one place the flag can be seen to travel (M2.14).
+    const here = stand();
+    const entry = abandoned(here);
+
+    await here.orchestrator.run({
+      steps: [{ entry, expectedRevision: entry.revision, force: true }],
+      skipped: [],
+    });
+
+    expect(here.base.adoptions.map((one) => one.forced)).toStrictEqual([true]);
   });
 
   it('asks the agent for a restore, never for a launch', async () => {

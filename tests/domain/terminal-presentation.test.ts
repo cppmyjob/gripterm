@@ -1,4 +1,5 @@
 import {
+  CONTEXT_ADOPTABLE,
   CONTEXT_FOREIGN,
   CONTEXT_LIVE,
   CONTEXT_OVER,
@@ -140,16 +141,36 @@ describe('presentTerminal marks what a menu may offer', () => {
 
   /*
    * The owner is gone, so this is no longer "somebody else is using it" but
-   * "there is something to do here" -- M2.10 restores exactly these.
+   * "there is something to do here" -- and the one thing to do with another
+   * window's record is to take it (M2.14).
    */
-  it('calls a foreign record whose window has gone over, not foreign', () => {
+  it('offers adoption on a foreign record whose window has gone', () => {
     expect(
       presentTerminal(inState('working'), { ours: false, liveness: 'dead' }).contextValue
-    ).toBe(CONTEXT_OVER);
+    ).toBe(CONTEXT_ADOPTABLE);
+  });
+
+  it('offers adoption on a foreign record whose window has stopped answering', () => {
+    // The same button, and the command asks a harder question before it acts:
+    // a stale heartbeat is a live window often enough that taking one costs a
+    // second `claude --resume` on a conversation that already has one.
+    expect(
+      presentTerminal(inState('working'), { ours: false, liveness: 'unknown' }).contextValue
+    ).toBe(CONTEXT_ADOPTABLE);
+  });
+
+  it('offers nothing on a foreign record whose terminal was closed on purpose', () => {
+    // Adopting it would take ownership of a record with nothing to start. The
+    // storage command clears these up (M2.15); a row is all this window offers.
+    const closed = makeEntry({ closedAt: new Date(CREATED_AT.getTime() + 1000) });
+
+    expect(presentTerminal(closed, { ours: false, liveness: 'dead' }).contextValue).toBe(
+      CONTEXT_FOREIGN
+    );
   });
 });
 
-describe('presentTerminal lays detached over the stored state', () => {
+describe('presentTerminal lays the owner\'s liveness over the stored state', () => {
   it('shows a dead owner as detached without touching the record', () => {
     const entry = inState('working');
 
@@ -159,18 +180,73 @@ describe('presentTerminal lays detached over the stored state', () => {
     expect(entry.observed.state).toBe('working');
   });
 
-  it('shows a stale heartbeat as detached too', () => {
-    // For DRAWING the two are the same answer. They stay apart where it costs
-    // something: adoption refuses `unknown` without an explicit force.
-    expect(presentTerminal(inState('working'), { liveness: 'unknown' }).state).toBe<TerminalState>('detached');
+  it('shows a stale heartbeat as unreachable rather than as detached', () => {
+    // Not the same answer, and the difference is the one `force` stands on:
+    // `detached` is a window that has gone, `unreachable` is a window that is
+    // there and silent. Drawing them alike would ask a person to take a risk
+    // the row never mentioned.
+    expect(presentTerminal(inState('working'), { liveness: 'unknown' }).state).toBe<TerminalState>(
+      'unreachable'
+    );
+  });
+
+  it('gives the two overlays different faces and different words', () => {
+    const gone = presentTerminal(inState('working'), { liveness: 'dead' });
+    const silent = presentTerminal(inState('working'), { liveness: 'unknown' });
+
+    expect(silent.iconId).not.toBe(gone.iconId);
+    expect(silent.description).not.toBe(gone.description);
+  });
+
+  it('does not spend an icon of a real state on an overlay', () => {
+    // A shared glyph is a state a person cannot see, and the overlays are the
+    // two rows where the next click can start a process.
+    const overlays = [
+      presentTerminal(inState('working'), { liveness: 'dead' }).iconId,
+      presentTerminal(inState('working'), { liveness: 'unknown' }).iconId,
+    ];
+    const states = EVERY_STATE.map((state) => presentTerminal(inState(state)).iconId);
+
+    expect(new Set([...overlays, ...states]).size).toBe(overlays.length + states.length);
   });
 
   it('says nothing about detachment when the owner is live', () => {
     expect(presentTerminal(inState('working'), { liveness: 'live' }).state).toBe<TerminalState>('working');
   });
 
-  it('offers no actions on a detached terminal', () => {
+  it('offers no actions on a detached terminal of our own', () => {
     expect(presentTerminal(inState('idle'), { liveness: 'dead' }).contextValue).toBe(CONTEXT_OVER);
+  });
+});
+
+describe('presentTerminal marks the rows this window may only read', () => {
+  /*
+   * Two windows open on ONE folder is the case that needs this: both terminals
+   * land in the same group, and the only other sign that one of them is not
+   * ours is the absence of buttons -- which are only visible on hover anyway.
+   */
+  it('says on the row itself that another window has this one', () => {
+    expect(presentTerminal(inState('working'), { ours: false }).description).toBe(
+      'working · other window'
+    );
+  });
+
+  it('keeps the running tool as well, because that is what the row is for', () => {
+    expect(
+      presentTerminal(inState('working', { currentTool: 'Bash' }), { ours: false }).description
+    ).toBe('working · Bash · other window');
+  });
+
+  it('says nothing of the sort on a row of our own', () => {
+    expect(presentTerminal(inState('working')).description).toBe('working');
+  });
+
+  it('leaves it off once the owning window has stopped answering', () => {
+    // The state already says it: `detached` and `unreachable` are never rows
+    // of ours, so a second sign would only make the line longer.
+    expect(
+      presentTerminal(inState('working'), { ours: false, liveness: 'dead' }).description
+    ).toBe('detached');
   });
 });
 

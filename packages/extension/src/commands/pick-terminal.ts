@@ -1,7 +1,14 @@
 import * as vscode from 'vscode';
-import { CONTEXT_LIVE, CONTEXT_OVER, presentTerminal } from '@gripterm/core';
+import { CONTEXT_ADOPTABLE, CONTEXT_LIVE, CONTEXT_OVER, presentTerminal } from '@gripterm/core';
 import { say } from '../ui/say';
-import type { Logger, SessionRegistry, TerminalId } from '@gripterm/core';
+import type {
+  Logger,
+  OwnerLiveness,
+  SessionRegistry,
+  TerminalEntry,
+  TerminalId,
+  TerminalPresentation,
+} from '@gripterm/core';
 
 /**
  * Rows a person may edit: every record this window holds, running or finished.
@@ -27,6 +34,15 @@ export const EDITABLE_ROWS: readonly string[] = [CONTEXT_LIVE, CONTEXT_OVER];
  */
 export const FINISHED_ROWS: readonly string[] = [CONTEXT_OVER];
 
+/**
+ * Rows another window owns and this one may take: its window is gone, or there
+ * and silent (M2.14).
+ *
+ * The only rows of somebody else's this window offers anything on, and the only
+ * thing it offers is adoption.
+ */
+export const ADOPTABLE_ROWS: readonly string[] = [CONTEXT_ADOPTABLE];
+
 interface TerminalPick extends vscode.QuickPickItem {
   readonly terminalId: TerminalId;
 }
@@ -37,6 +53,17 @@ export interface TerminalPickRequest {
   readonly rows: readonly string[];
   /** What to say when there is nothing to offer. */
   readonly whenEmpty: string;
+  /**
+   * Offer the records this window does NOT hold, instead of its own.
+   *
+   * Exactly one command has business with them -- adoption (M2.14) -- and it
+   * needs their owner's liveness to judge them at all: a foreign row is
+   * `CONTEXT_FOREIGN` while its window answers and `CONTEXT_ADOPTABLE` once it
+   * stops, and the difference is the whole of what may be offered. Passing the
+   * question in rather than asking the reconciler here keeps this file free of
+   * the sweep, which a window without a shared base does not have.
+   */
+  readonly foreignLiveness?: (entry: TerminalEntry) => OwnerLiveness;
 }
 
 /**
@@ -53,15 +80,17 @@ export interface TerminalPickRequest {
  * with. Written six times it would eventually be written five ways -- the close
  * picker was, once, and it offered another window's terminals in a dialog that
  * then blocked on a choice this window could not act on.
+ *
+ * Adoption is the one command whose candidates are the other set, and it says so
+ * (`foreignLiveness`) rather than growing a picker of its own -- one function
+ * still decides what a chosen row means.
  */
 export async function pickTerminal(
   registry: SessionRegistry,
   logger: Logger,
   request: TerminalPickRequest
 ): Promise<TerminalId | null> {
-  const picks: TerminalPick[] = registry
-    .own()
-    .map((entry) => ({ entry, shown: presentTerminal(entry) }))
+  const picks: TerminalPick[] = candidates(registry, request)
     .filter(({ shown }) => request.rows.includes(shown.contextValue))
     .map(({ entry, shown }) => ({
       label: shown.label,
@@ -79,4 +108,22 @@ export async function pickTerminal(
   // `undefined` is the person pressing Escape, and that is an answer: do
   // nothing, say nothing.
   return chosen?.terminalId ?? null;
+}
+
+/** The records a request is about, each judged the way its row would be drawn. */
+function candidates(
+  registry: SessionRegistry,
+  request: TerminalPickRequest
+): readonly { readonly entry: TerminalEntry, readonly shown: TerminalPresentation }[] {
+  const { foreignLiveness } = request;
+  if (foreignLiveness === undefined) {
+    return registry.own().map((entry) => ({ entry, shown: presentTerminal(entry) }));
+  }
+  return registry
+    .list()
+    .filter((entry) => !registry.knows(entry.terminalId))
+    .map((entry) => ({
+      entry,
+      shown: presentTerminal(entry, { ours: false, liveness: foreignLiveness(entry) }),
+    }));
 }

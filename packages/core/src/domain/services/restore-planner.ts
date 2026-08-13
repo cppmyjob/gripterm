@@ -1,7 +1,9 @@
+import { belongsHere } from './folder-path';
 import { precedesBoot } from './boot-window';
 import type { AgentListing } from '../entities/agent-record';
 import type { OwnerLiveness } from '../ports/owner-presence';
 import type { TerminalEntry } from '../entities/terminal-entry';
+import type { TerminalId } from '../entities/terminal-id';
 import type { TranscriptIndex } from '../entities/transcript-index';
 
 /**
@@ -36,6 +38,14 @@ export type RestoreRefusal =
 
 export interface RestoreStep {
   readonly entry: TerminalEntry;
+  /**
+   * Whether the adoption may displace an owner the store calls `unknown`.
+   *
+   * True only for a step a person asked for by name (M2.14): `unknown` is a
+   * window that is there and silent, and `AdoptOptions.force` is the person
+   * saying they have looked. Nothing automatic ever sets it.
+   */
+  readonly force: boolean;
   /**
    * The revision the decision was made on, and the one the adoption must be
    * compared against.
@@ -74,6 +84,18 @@ export interface RestoreInputs {
   readonly nowMs: number;
   /** `os.uptime()`, for the boot rule -- see `precedesBoot`. */
   readonly uptimeSeconds: number;
+  /**
+   * One record a person has asked THIS window to take (M2.14), or nothing.
+   *
+   * A demand does two things and no more. It narrows the plan to that record --
+   * one click must not start every terminal the predicate happens to permit --
+   * and it lifts exactly two refusals: the folder, because the person is looking
+   * at the row and asking for it here, and `owner-unknown`, because that is what
+   * `force` means. It lifts NOTHING about the conversation: whether a `claude`
+   * is running it is not something a person can see from a row, and that is the
+   * mistake whose cost is an interleaved transcript.
+   */
+  readonly demanded?: TerminalId | null;
 }
 
 /**
@@ -129,21 +151,33 @@ export interface RestoreInputs {
  */
 export function planRestore(inputs: RestoreInputs): RestorePlan {
   const listed = listedSessions(inputs.agents);
-  const judged = inputs.entries.map((entry) => ({
-    entry,
-    reason: refusalFor(entry, inputs, listed),
-  }));
+  const demanded = inputs.demanded ?? null;
 
+  // Counted over every record that could still be resumed BY ANYBODY, not over
+  // the ones this window may start today. A twin refused here for a reason its
+  // own window does not have -- another project, a live owner -- is a twin that
+  // will be offered a restore later, and the two would then be two
+  // `claude --resume` on one transcript. Only `closed` is left out, because a
+  // record a person closed will never be resumed by anybody.
   const claims = new Map<string, number>();
-  for (const { entry, reason } of judged) {
-    if (reason === null) {
+  for (const entry of inputs.entries) {
+    if (entry.isRestorable()) {
       claims.set(entry.sessionId.value, (claims.get(entry.sessionId.value) ?? 0) + 1);
     }
   }
 
+  // A demanded plan speaks about ONE record: one click must not start every
+  // terminal the predicate happens to permit. The rest of the base is read all
+  // the same, by the count above -- which is the part a demand may not escape.
+  const considered =
+    demanded === null
+      ? inputs.entries
+      : inputs.entries.filter((entry) => entry.terminalId.equals(demanded));
+
   const steps: RestoreStep[] = [];
   const skipped: RestoreSkip[] = [];
-  for (const { entry, reason } of judged) {
+  for (const entry of considered) {
+    const reason = refusalFor(entry, inputs, listed, demanded !== null);
     const contested = (claims.get(entry.sessionId.value) ?? 0) > 1;
     if (reason !== null) {
       skipped.push({ entry, reason });
@@ -154,10 +188,38 @@ export function planRestore(inputs: RestoreInputs): RestorePlan {
       // real, which belongs to a person and not to a predicate.
       skipped.push({ entry, reason: 'duplicate-session' });
     } else {
-      steps.push({ entry, expectedRevision: entry.revision });
+      steps.push({ entry, expectedRevision: entry.revision, force: demanded !== null });
     }
   }
   return { steps, skipped };
+}
+
+/**
+ * A refusal, in a sentence written for the person who asked.
+ *
+ * A total record, so a refusal added to the union arrives here with words rather
+ * than reaching a person as an empty toast. Sentences and not codes, because
+ * this is the answer to "why is my terminal not back" -- the reason is kept per
+ * record precisely so that the question has one.
+ */
+const REFUSAL_WORDS: Readonly<Record<RestoreRefusal, string>> = {
+  'closed': 'its terminal was closed on purpose, so there is nothing to bring back',
+  'owner-live': 'the window that opened it is still running, and its terminals are its own',
+  'owner-unknown': 'the window that opened it has not been heard from, so it may still be there',
+  'foreign-folder': 'it belongs to a project this window does not have open',
+  'session-running': 'its Claude Code process has not been established to have stopped',
+  'session-listed': 'Claude Code names its conversation among the ones it is running',
+  'agents-unavailable':
+    'Claude Code could not be asked what it is running, and nothing starts on a guess',
+  'transcripts-unavailable':
+    'the Claude Code conversations could not be listed, so nothing is known to be resumable',
+  'no-transcript': 'nothing was ever said in its conversation, so there is nothing to resume',
+  'duplicate-session':
+    'another record names the same conversation, and resuming both would mix them into one transcript',
+};
+
+export function explainRefusal(reason: RestoreRefusal): string {
+  return REFUSAL_WORDS[reason];
 }
 
 /**
@@ -179,16 +241,23 @@ function listedSessions(agents: AgentListing): ReadonlySet<string> | null {
 function refusalFor(
   entry: TerminalEntry,
   inputs: RestoreInputs,
-  listed: ReadonlySet<string> | null
+  listed: ReadonlySet<string> | null,
+  demanded: boolean
 ): RestoreRefusal | null {
   if (!entry.isRestorable()) {
     return 'closed';
   }
   const liveness = inputs.ownerLiveness.get(entry.owner.ownerId.value) ?? 'unknown';
-  if (liveness !== 'dead') {
-    return liveness === 'live' ? 'owner-live' : 'owner-unknown';
+  if (liveness === 'live') {
+    // The one refusal a demand may never lift: that window is there, it owns
+    // the record and it is the writer of it (§4.8) -- and it may be resuming
+    // that very conversation while this is being read.
+    return 'owner-live';
   }
-  if (!belongsHere(entry.owner.workspaceFolder, inputs.windowFolders)) {
+  if (liveness !== 'dead' && !demanded) {
+    return 'owner-unknown';
+  }
+  if (!demanded && !belongsHere(entry.owner.workspaceFolder, inputs.windowFolders)) {
     return 'foreign-folder';
   }
   if (mayBeRunning(entry, inputs)) {
@@ -207,55 +276,6 @@ function refusalFor(
     return 'no-transcript';
   }
   return null;
-}
-
-/**
- * Whether this window is the one that may restore that record.
- *
- * `workspaceFolder === null` belongs to a window with NO folders open. Anything
- * else would make such a record restorable by nobody -- `null` is in no set of
- * folders -- and it opens no theft either, because `null` matches no real folder
- * (§6).
- *
- * Membership is exact, not containment: a window with `D:\Projects` open does
- * not automatically own the terminals of `D:\Projects\thing`. Widening that is
- * the direction defect G1 came from.
- */
-function belongsHere(folder: string | null, windowFolders: readonly string[]): boolean {
-  if (folder === null) {
-    return windowFolders.length === 0;
-  }
-  return windowFolders.some((open) => sameFolder(open, folder));
-}
-
-/** A drive letter or a UNC prefix -- the paths whose file systems ignore case. */
-const WINDOWS_SHAPED = /^(?:[a-z]:|\\\\)/i;
-const SEPARATORS = /[\\/]+/g;
-const TRAILING_SEPARATOR = /\/+$/;
-
-/**
- * The same folder, spelled by two different windows.
- *
- * Both spellings come from the same editor API on the same machine, so they
- * normally agree -- but a record outlives the window that wrote it, and a folder
- * opened as `d:\projects\x` from a shell and as `D:\Projects\X` from the
- * explorer is one folder to Windows. Refusing the second spelling would silently
- * withhold the whole feature from a person who did nothing wrong.
- *
- * Case is folded ONLY for Windows-shaped paths, decided by the string rather
- * than by a flag from the host. On a case-sensitive file system `/home/a` and
- * `/home/A` are two directories, and folding them would let one project's window
- * restore another's -- the G1 direction again. The cost is that a macOS user,
- * whose file system ignores case as well, gets a refusal where Windows gets a
- * restore; that is one click, and it is named in §8.2 rather than guessed at.
- */
-function sameFolder(left: string, right: string): boolean {
-  return normalizeFolder(left) === normalizeFolder(right);
-}
-
-function normalizeFolder(folder: string): string {
-  const unified = folder.replace(SEPARATORS, '/').replace(TRAILING_SEPARATOR, '');
-  return WINDOWS_SHAPED.test(folder) ? unified.toLowerCase() : unified;
 }
 
 /**

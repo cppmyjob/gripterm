@@ -62,11 +62,12 @@ import type {
   Logger,
   OwnerIdentity,
   OwnerPresence,
+  RestoreInputs,
   StoragePreparation,
-  TerminalEntry,
   TerminalRepository,
   WatchReport,
 } from '@gripterm/core';
+import { registerAdoptTerminal } from './commands/adopt-terminal';
 import { registerCloseTerminal } from './commands/close-terminal';
 import { registerDeleteTerminal } from './commands/delete-terminal';
 import { registerShowRecord } from './commands/show-record';
@@ -90,6 +91,7 @@ import { StatusBarPresenter } from './ui/status-bar-presenter';
 import { VsCodeAttentionPresenter } from './ui/vscode-attention-presenter';
 import { TerminalDecorationProvider } from './ui/terminal-decorations';
 import { TERMINALS_VIEW_ID, TerminalTreeDataProvider } from './ui/terminal-tree';
+import type { TerminalTreeNode } from './ui/terminal-tree';
 
 /** The agent this build knows how to start, by the name it goes by on a PATH. */
 const CLAUDE_CLI = 'claude';
@@ -195,7 +197,13 @@ export interface GriptermApi {
    * `resume_failed` toast presses a button that selects a row, and a real editor
    * is the only place that can be shown to happen (M2.13).
    */
-  readonly view: vscode.TreeView<TerminalEntry>;
+  readonly view: vscode.TreeView<TerminalTreeNode>;
+  /**
+   * The data provider, for the one question only a real host answers about the
+   * grouping (M2.14): what the ROOT of the contributed view actually contains.
+   * How rows group is decided in `groupTerminals` and covered there.
+   */
+  readonly tree: TerminalTreeDataProvider;
   readonly readiness: Readiness;
   /** `null` when this window is not reading the shared store. */
   readonly repository: TerminalRepository | null;
@@ -345,7 +353,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     );
   }
 
-  const tree = new TerminalTreeDataProvider(registry, reconciler);
+  const tree = new TerminalTreeDataProvider({
+    registry,
+    reconciler,
+    // The folders of THIS window, which is what puts its own project at the top
+    // of a list that shows every project on the machine (П4).
+    windowFolders: identity.workspaceFolders,
+  });
   context.subscriptions.push(tree);
   // Held, not just disposed of: `gripterm.showRecord` reveals a row through it,
   // and a data provider alone cannot select anything (M2.13).
@@ -396,12 +410,60 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     context.subscriptions.push(orchestrator);
   }
 
+  /*
+   * The world a restore predicate needs, gathered one way for both paths.
+   *
+   * Activation uses it to decide what this window brings back by itself, and
+   * `gripterm.adoptTerminal` uses it to answer a person who asked for one record
+   * by name. Two gatherers would disagree somewhere nobody looks, and what they
+   * would disagree about is whether a `claude` is already running that
+   * conversation.
+   */
+  const gather: (() => Promise<RestoreInputs>) | null =
+    shared === null
+      ? null
+      : async () =>
+        await gatherRestoreInputs({
+          repository: shared.repository,
+          presence: shared.presence,
+          windowFolders: identity.workspaceFolders,
+          readTranscripts: async () =>
+            await readTranscriptIndex(
+              claudeTranscriptsDirectory({
+                platform: process.platform,
+                home: homedir(),
+                configDir: process.env.CLAUDE_CONFIG_DIR,
+              })
+            ),
+          readAgents: async () =>
+            readiness.kind === 'refused'
+              ? { kind: 'unavailable', reason: readiness.reason }
+              : await readAgentListing(readiness.cliPath, AGENT_LISTING_TIMEOUT_MS),
+          // Both from one instant, because the boot rule subtracts one from the
+          // other (`precedesBoot`).
+          nowMs: Date.now(),
+          uptimeSeconds: uptime(),
+          logger,
+        });
+
   context.subscriptions.push(registerNewTerminal(lifecycle, registry, logger));
   context.subscriptions.push(registerFocusTerminal(gateway, logger));
   context.subscriptions.push(registerCloseTerminal(lifecycle, registry, logger));
   context.subscriptions.push(registerDeleteTerminal(lifecycle, registry, logger));
   context.subscriptions.push(registerStartOver(lifecycle, registry, logger));
-  context.subscriptions.push(registerShowRecord(view, registry, logger));
+  context.subscriptions.push(registerShowRecord(view, tree, logger));
+  context.subscriptions.push(
+    registerAdoptTerminal({
+      registry,
+      // All three or none: they are what a shared base is made of, and a window
+      // without one holds no record of anybody else's to take.
+      base:
+        reconciler === null || orchestrator === null || gather === null
+          ? null
+          : { reconciler, orchestrator, gather },
+      logger,
+    })
+  );
   context.subscriptions.push(...registerMetadataCommands(metadata, registry, logger));
   context.subscriptions.push(
     vscode.commands.registerCommand('gripterm.showLogs', () => {
@@ -431,7 +493,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     shared,
     orchestrator,
     readiness,
-    identity,
+    gather,
     logger,
   });
 
@@ -480,6 +542,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     lifecycle,
     identity,
     view,
+    tree,
     readiness: {
       cliPath: cli.path,
       cliVersion: cli.version,
@@ -526,14 +589,14 @@ async function bringTerminalsBack(parts: {
   readonly shared: SharedBase | null;
   readonly orchestrator: RestoreOrchestrator | null;
   readonly readiness: ReturnType<typeof launchReadiness>;
-  readonly identity: OwnerIdentity;
+  readonly gather: (() => Promise<RestoreInputs>) | null;
   readonly logger: Logger;
 }): Promise<RestoreSummary> {
-  const { readiness, shared, orchestrator, logger } = parts;
+  const { readiness, shared, orchestrator, gather, logger } = parts;
   if (parts.context.extensionMode === vscode.ExtensionMode.Test) {
     return refuse('this is a test host, and a test run must not resume anybody\'s conversations', logger);
   }
-  if (shared === null || orchestrator === null) {
+  if (shared === null || orchestrator === null || gather === null) {
     return refuse('this window is not reading the shared store', logger);
   }
   if (readiness.kind === 'refused') {
@@ -541,27 +604,7 @@ async function bringTerminalsBack(parts: {
   }
 
   try {
-    const plan = planRestore(
-      await gatherRestoreInputs({
-        repository: shared.repository,
-        presence: shared.presence,
-        windowFolders: parts.identity.workspaceFolders,
-        readTranscripts: async () =>
-          await readTranscriptIndex(
-            claudeTranscriptsDirectory({
-              platform: process.platform,
-              home: homedir(),
-              configDir: process.env.CLAUDE_CONFIG_DIR,
-            })
-          ),
-        readAgents: async () => await readAgentListing(readiness.cliPath, AGENT_LISTING_TIMEOUT_MS),
-        // Both from one instant, because the boot rule subtracts one from the
-        // other (`precedesBoot`).
-        nowMs: Date.now(),
-        uptimeSeconds: uptime(),
-        logger,
-      })
-    );
+    const plan = planRestore(await gather());
     const report = await orchestrator.run(plan);
     return {
       kind: 'ran',

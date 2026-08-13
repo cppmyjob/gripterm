@@ -27,6 +27,7 @@ export {
 } from './domain/services/reconciler';
 
 export {
+  explainRefusal,
   planRestore,
   type RestoreInputs,
   type RestorePlan,
@@ -463,6 +464,7 @@ export {
 } from './domain/services/terminal-summary';
 
 export {
+  CONTEXT_ADOPTABLE,
   CONTEXT_FOREIGN,
   CONTEXT_LIVE,
   CONTEXT_OVER,
@@ -470,6 +472,11 @@ export {
   type PresentationContext,
   type TerminalPresentation,
 } from './domain/services/terminal-presentation';
+
+export {
+  groupTerminals,
+  type TerminalGroup,
+} from './domain/services/terminal-grouping';
 
 export {
   SessionRegistry,

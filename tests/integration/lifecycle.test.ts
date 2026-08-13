@@ -4,7 +4,7 @@ import { isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
 import { readFileSync, statSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
-import { CONTEXT_LIVE, CONTEXT_OVER } from '../../packages/core/src/index';
+import { CONTEXT_ADOPTABLE, CONTEXT_LIVE, CONTEXT_OVER } from '../../packages/core/src/index';
 import type { GriptermApi } from '../../packages/extension/src/extension';
 
 const TERMINAL_UUID = '550e8400-e29b-41d4-a716-446655440000';
@@ -63,7 +63,10 @@ suite('the lifecycle commands', () => {
       named.every((value) => value !== undefined),
       'a row menu is shown for every row, whatever its state'
     );
-    assert.deepEqual([...new Set(named)].sort(), [CONTEXT_LIVE, CONTEXT_OVER].sort());
+    assert.deepEqual(
+      [...new Set(named)].sort(),
+      [CONTEXT_LIVE, CONTEXT_OVER, CONTEXT_ADOPTABLE].sort()
+    );
   });
 
   /*
@@ -102,6 +105,15 @@ suite('the lifecycle commands', () => {
     // over. On a live row it would be an offer to make a second one (О3).
     assert.deepEqual(rowsFor('gripterm.startOver'), [CONTEXT_OVER]);
     assert.deepEqual(rowsFor('gripterm.closeTerminal'), [CONTEXT_LIVE]);
+    /*
+     * M2.14. Adoption is offered on the ONE kind of row that is somebody
+     * else's and has something to be done with it -- a window that is gone or
+     * has stopped answering. Twice, because a button on the row and an entry in
+     * its menu are two contributions of the same command; what matters is that
+     * neither of them names a row of ours, where taking over means nothing, or
+     * a live foreign row, where it means a second `claude --resume`.
+     */
+    assert.deepEqual(rowsFor('gripterm.adoptTerminal'), [CONTEXT_ADOPTABLE, CONTEXT_ADOPTABLE]);
   });
 
   test('are all registered, including the six M2.7 added', async () => {

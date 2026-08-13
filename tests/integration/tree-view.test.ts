@@ -14,6 +14,7 @@ import {
   type OwnerIdentity,
 } from '../../packages/core/src/index';
 import type { GriptermApi } from '../../packages/extension/src/extension';
+import type { TerminalTreeNode } from '../../packages/extension/src/ui/terminal-tree';
 
 const ROW_TERMINAL = '5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b';
 const ROW_SESSION = '9c0d1e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f';
@@ -64,6 +65,11 @@ function failedRestore(identity: OwnerIdentity): TerminalEntry {
     }),
     createdAt: now,
   });
+}
+
+/** A node's terminal id, or the key of the heading it turned out to be. */
+function named(node: TerminalTreeNode): string {
+  return node.kind === 'terminal' ? node.entry.terminalId.value : `project:${node.group.key}`;
 }
 
 /**
@@ -138,10 +144,43 @@ suite('the terminals view', () => {
       await vscode.commands.executeCommand('gripterm.showRecord', ROW_TERMINAL);
 
       assert.deepEqual(
-        view.selection.map((row) => row.terminalId.value),
+        view.selection.map(named),
         [ROW_TERMINAL],
         'the record was not selected in the list'
       );
+    } finally {
+      registry.forget(entry.terminalId);
+      await cleanUp(readiness.storageDir);
+    }
+  });
+
+  /*
+   * The grouping, as the contributed view actually hands it back (M2.14).
+   *
+   * WHICH heading a record belongs under is decided in `groupTerminals` and
+   * covered there against every spelling of a path. What only a host answers is
+   * the shape of the tree it drew: that the root is headings and the rows are
+   * beneath them. A provider that returned rows at the root would look right in
+   * every unit test and wrong in the sidebar.
+   */
+  test('draws headings at the root and the rows underneath them', async () => {
+    const { registry, tree, identity, readiness } = await api();
+    const entry = failedRestore(identity);
+    registry.register(entry);
+
+    try {
+      const roots = tree.getChildren();
+
+      assert.ok(roots.length > 0, 'the list has no headings at all');
+      assert.deepEqual(
+        [...new Set(roots.map((node) => node.kind))],
+        ['project'],
+        'a terminal is drawn at the root of the list rather than under a project'
+      );
+      const holding = roots.filter((root) =>
+        tree.getChildren(root).some((child) => named(child) === ROW_TERMINAL)
+      );
+      assert.equal(holding.length, 1, 'the record is not under exactly one heading');
     } finally {
       registry.forget(entry.terminalId);
       await cleanUp(readiness.storageDir);

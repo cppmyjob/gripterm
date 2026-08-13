@@ -192,7 +192,13 @@ export class RestoreOrchestrator implements Disposable {
 
     let adopted: TerminalEntry;
     try {
-      adopted = await this._options.repository.adopt(entry.terminalId, step.expectedRevision);
+      adopted = await this._options.repository.adopt(entry.terminalId, step.expectedRevision, {
+        // Only ever true for a step a person asked for by name (M2.14). The
+        // store refuses a LIVE owner whatever this says, so what the flag buys
+        // is exactly one case: a window that is there and silent, which a
+        // person has looked at and found gone.
+        force: step.force,
+      });
     } catch (cause: unknown) {
       // Ordinary, not a fault: between the plan and this line another window may
       // have adopted the same record, or a person may have deleted it. Both are
