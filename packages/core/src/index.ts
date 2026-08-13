@@ -31,6 +31,7 @@ export {
 export {
   explainCleanup,
   planCleanup,
+  planUnaskedCleanup,
   type CleanupItem,
   type CleanupPlan,
   type CleanupReason,
@@ -94,6 +95,7 @@ export {
 } from './domain/ports/attention-presenter';
 export {
   type TerminalExit,
+  type TerminalExitReason,
   type TerminalGateway,
   type TerminalHandle,
   type TerminalSpec,

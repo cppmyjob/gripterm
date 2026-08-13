@@ -8,10 +8,12 @@ export const CLOSE_TERMINAL_COMMAND = 'gripterm.closeTerminal';
 /**
  * `gripterm.closeTerminal` -- the person is finished with this conversation.
  *
- * It is the only producer of `closedAt` in the system, which is what separates
- * "this terminal is over" from "this terminal is not running at the moment":
- * ours are transient and die at every editor shutdown, so only a deliberate
- * close can mean the record should not come back (§4.2).
+ * It produces `closedAt`, which is what separates "this terminal is over" from
+ * "this terminal is not running at the moment": ours are transient and die at
+ * every editor shutdown, so only a deliberate close can mean the record should
+ * not come back (§4.2). The same act done in the editor -- the cross on the
+ * terminal's own tab -- produces it too, on the path through `_onClosed` that
+ * A29 opened; this command is the one a person reaches from the list.
  *
  * Reachable two ways, and both are real: a menu on a tree row hands over the
  * row's element, and the palette hands over nothing -- which is why there is a

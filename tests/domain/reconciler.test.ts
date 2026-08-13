@@ -375,12 +375,83 @@ describe('the liveness of the windows on this machine', () => {
     expect(reconciler.livenessOf(OwnerId.fromString(US))).toBe('live');
   });
 
-  it('calls a window it has never surveyed `unknown`, never `live`', async () => {
-    const { reconciler, presence } = build();
-    presence.show(decodable(GONE, 'dead'));
-    await reconciler.sweep();
+  it('calls a window it has not surveyed yet `unknown`, never `live`', async () => {
+    // Before the first pass nothing has been established about anybody, and
+    // `live` here would be a row claiming a terminal is running in a window
+    // that closed an hour ago.
+    const { reconciler } = build();
 
     expect(reconciler.livenessOf(OwnerId.fromString(ASLEEP))).toBe('unknown');
+  });
+
+  it('is live to itself from the first moment, before anything has been swept', async () => {
+    // Its own terminals are on screen. A map that started out empty would draw
+    // every one of them `detached` until the first sweep landed.
+    const { reconciler } = build();
+
+    expect(reconciler.livenessOf(OwnerId.fromString(US))).toBe('live');
+  });
+
+  /*
+   * The defect the owner met on 2026-08-13, and the shape of it is two answers
+   * to one question.
+   *
+   * `owners/` on their machine was EMPTY -- every window had said goodbye
+   * properly, and `retire()` removes the file -- while a closed record still
+   * named one of those windows. `FileOwnerPresence.livenessOf` reads that
+   * absence as `dead`, and says so out loud: it is the one place absence is
+   * evidence, because nothing else removes a presence file. This map cannot
+   * read it at all: it is built by ENUMERATING the directory, so a window with
+   * no file simply never appears, and the default answered `unknown`.
+   *
+   * The consequence was not cosmetic. The restore predicate asks the store and
+   * got `dead`; the list asks this map and got `unknown`, which is drawn
+   * "window not answering" and given `CONTEXT_FOREIGN` -- a row with no menu at
+   * all. So the record could not be closed, deleted or taken over from the
+   * list, which is exactly what the owner reported.
+   *
+   * The default therefore splits in two: nothing surveyed yet is still
+   * `unknown`, and a window missing from a directory this reconciler HAS read
+   * is gone.
+   */
+  it('reads a window that left no presence file as gone, the way the store already does', async () => {
+    const { reconciler, presence } = build();
+    presence.show();
+
+    await reconciler.sweep();
+
+    expect(reconciler.livenessOf(OwnerId.fromString(GONE))).toBe('dead');
+  });
+
+  it('draws that record detached, rather than as a window that is not answering', async () => {
+    const { reconciler, presence } = build();
+    const abandoned = makeEntry({ owner: makeOwnerRef(GONE) });
+    presence.show();
+    await reconciler.sweep();
+
+    const shown = presentTerminal(abandoned, {
+      ours: false,
+      liveness: reconciler.livenessOf(abandoned.owner.ownerId),
+    });
+
+    expect(shown.state).toBe('detached');
+    // The half that decides whether a person can act: `unreachable` and
+    // `detached` are both adoptable, but a CLOSED record of a silent window is
+    // `CONTEXT_FOREIGN`, which has no menu entries in the manifest at all.
+    expect(shown.contextValue).toBe('gripterm.terminal.adoptable');
+  });
+
+  it('establishes nothing about anybody when the directory could not be read at all', async () => {
+    // A sweep that read nothing has not seen a window disappear -- it has not
+    // seen anything. The whole pass changes nothing (§4.8), and that has to
+    // include the default, or an unreadable store would authorise adopting
+    // every terminal on the machine.
+    const { reconciler, presence } = build();
+    presence.failure = new Error('the directory went away');
+
+    await reconciler.sweep();
+
+    expect(reconciler.livenessOf(OwnerId.fromString(GONE))).toBe('unknown');
   });
 
   it('asks for a redraw when the map moves, and only then', async () => {
@@ -408,6 +479,9 @@ describe('the liveness of the windows on this machine', () => {
   });
 
   it('notices a window that disappeared from the directory altogether', async () => {
+    // It said goodbye between the two passes, which is what `retire()` looks
+    // like from here. Until M2.20 this answered `unknown` -- see the note above
+    // the `dead` tests for why that was the store contradicting itself.
     const { reconciler, presence } = build();
     presence.show(decodable(GONE, 'live'));
     await reconciler.sweep();
@@ -415,7 +489,7 @@ describe('the liveness of the windows on this machine', () => {
     presence.show();
     await reconciler.sweep();
 
-    expect(reconciler.livenessOf(OwnerId.fromString(GONE))).toBe('unknown');
+    expect(reconciler.livenessOf(OwnerId.fromString(GONE))).toBe('dead');
   });
 
   it('leaves the previous map standing when the directory cannot be read', async () => {

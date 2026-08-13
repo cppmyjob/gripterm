@@ -526,7 +526,7 @@ describe('a restore that fails at once', () => {
     const entry = abandoned(here);
     await here.orchestrator.run(planFor(entry));
 
-    here.gateway.handleFor(entry.terminalId).close(1);
+    here.gateway.handleFor(entry.terminalId).close(1, 'process');
 
     expect(stateOf(here, entry)).toBe('resume_failed');
   });
@@ -540,7 +540,7 @@ describe('a restore that fails at once', () => {
     const entry = abandoned(here);
     await here.orchestrator.run(planFor(entry));
 
-    here.gateway.handleFor(entry.terminalId).close(1);
+    here.gateway.handleFor(entry.terminalId).close(1, 'process');
 
     expect(shownWith(here, entry)).toStrictEqual([]);
     const said = here.logger.infos.map((one) => one.message);
@@ -553,7 +553,7 @@ describe('a restore that fails at once', () => {
     const entry = abandoned(here);
     await here.orchestrator.run(planFor(entry));
 
-    here.gateway.handleFor(entry.terminalId).close(1);
+    here.gateway.handleFor(entry.terminalId).close(1, 'process');
 
     expect(here.scheduler.live).toStrictEqual([]);
     expect(stateOf(here, entry)).toBe('resume_failed');
@@ -564,7 +564,7 @@ describe('a restore that fails at once', () => {
     const entry = abandoned(here);
     await here.orchestrator.run(planFor(entry));
 
-    here.gateway.handleFor(entry.terminalId).close(undefined);
+    here.gateway.handleFor(entry.terminalId).close(undefined, 'user');
 
     expect(stateOf(here, entry)).toBe('ended');
     expect(shownWith(here, entry)).toStrictEqual([]);

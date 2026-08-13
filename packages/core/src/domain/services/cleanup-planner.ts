@@ -89,6 +89,58 @@ export function planCleanup(inputs: RestoreInputs): CleanupPlan {
   return { sweep, kept };
 }
 
+/**
+ * Which reasons a window may act on WITHOUT asking anybody.
+ *
+ * A total record, so a third reason cannot be added without somebody deciding
+ * this about it -- and the default it would otherwise fall into is the one that
+ * moves a person's files while they are not looking.
+ *
+ * The boundary is the argument and not the count. `closed` is something the
+ * person did to that terminal, with their own hand, on purpose: they have
+ * already said it. `never-spoken` is the opposite kind of record -- a terminal
+ * they may have named, written a task on, meant to come back to, and never got
+ * to say anything in -- and a build that swept those on its own would be
+ * deleting an intention rather than honouring one.
+ */
+const UNASKED: Readonly<Record<CleanupReason, boolean>> = {
+  'closed': true,
+  'never-spoken': false,
+};
+
+/**
+ * What activation may take out of the store on its own (M2.20).
+ *
+ * The owner's rule, in their words: a terminal closed on purpose is one we
+ * should forget. Until this existed, closing a terminal left a row that
+ * outlived its window and could not be acted on from any other -- the record
+ * belongs to a window that is gone, so no menu offers anything on it -- and the
+ * only way out was the manual cleanup, which a person has to know about.
+ *
+ * **A SUBSET OF `planCleanup`, and never a second predicate.** Every guard that
+ * one has is a guard this one has: a window that is merely silent keeps its
+ * records, a project this window does not have open is not this window's
+ * business, a record any window could still resume stays where it is. What is
+ * filtered afterwards is only WHICH settled reason may be acted on unasked.
+ * Written the other way round -- a rule of its own that checked `closedAt` --
+ * it would drift from the one the confirmation dialog reads, and the drift
+ * would be somebody's notes moved out from under a window that wanted them.
+ *
+ * **It is still reversible, which is what makes doing it unasked legitimate**
+ * (§I.3): the caller moves each record whole into `trash/<stamp>/`, keeping its
+ * name, its history and its journal, and the trash is kept for the journal's
+ * retention. Undoing is moving a folder back.
+ *
+ * `kept` counts everything left behind, including the records this plan
+ * deliberately did not touch. A count that only knew about the ones no cleanup
+ * wants would tell a person the store is tidier than it is.
+ */
+export function planUnaskedCleanup(inputs: RestoreInputs): CleanupPlan {
+  const plan = planCleanup(inputs);
+  const sweep = plan.sweep.filter((item) => UNASKED[item.reason]);
+  return { sweep, kept: plan.kept + plan.sweep.length - sweep.length };
+}
+
 function reasonFor(entry: TerminalEntry, inputs: RestoreInputs): CleanupReason | null {
   if ((inputs.ownerLiveness.get(entry.owner.ownerId.value) ?? 'unknown') !== 'dead') {
     return null;

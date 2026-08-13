@@ -7,6 +7,7 @@ import {
   explainCleanup,
   planCleanup,
   planRestore,
+  planUnaskedCleanup,
 } from '../../packages/core/src/index';
 import { makeEntry } from '../helpers/domain-fixtures';
 import type {
@@ -297,5 +298,95 @@ describe('deciding what may be taken out of the store', () => {
     for (const reason of reasons) {
       expect(explainCleanup(reason).length).toBeGreaterThan(0);
     }
+  });
+});
+
+/*
+ * What a window may take out of the store WITHOUT asking, which is the owner's
+ * decision of 2026-08-13: "if a terminal was closed on purpose, we should forget
+ * it".
+ *
+ * It is a subset of the same plan and not a second predicate, for the reason
+ * M2.14 and M2.15 both give: two answers to "may this record be taken" drift
+ * where nobody looks, and the drift is measured in files moved away from a
+ * window that wanted them.
+ */
+describe('deciding what may be taken out of the store without asking', () => {
+  it('forgets a record whose terminal a person closed, once its window is gone', () => {
+    const entry = sketch({ closedAt: new Date(NOW - MINUTE_MS) });
+
+    expect(planUnaskedCleanup(inputsFor([entry]))).toStrictEqual({
+      sweep: [{ entry, reason: 'closed' }],
+      kept: 0,
+    });
+  });
+
+  it('leaves a record nothing was ever said in for a person to decide about', () => {
+    // The other half of the manual cleanup, and the boundary between them is
+    // the argument rather than the count. "Its terminal was closed" is
+    // something the person did to that terminal; "nothing was ever said in it"
+    // is a terminal they may have named, meant to come back to, and never got
+    // to -- and taking that away unasked is taking away a decision.
+    const entry = sketch({ sessionId: SESSION_B, terminalId: TERMINAL_B });
+    const world = inputsFor([entry], { transcripts: transcriptsFor(SESSION_A) });
+
+    expect(planCleanup(world).sweep).toStrictEqual([{ entry, reason: 'never-spoken' }]);
+    expect(planUnaskedCleanup(world)).toStrictEqual({ sweep: [], kept: 1 });
+  });
+
+  it('counts what it left behind, whichever reason left it there', () => {
+    const closed = sketch({ closedAt: new Date(NOW - MINUTE_MS) });
+    const silent = sketch({ terminalId: TERMINAL_B, sessionId: SESSION_B });
+    const running = sketch({
+      terminalId: '44444444-4444-4444-8444-444444444444',
+      sessionId: 'eeeeeeee-4444-4444-8444-eeeeeeeeeeee',
+      ownerId: LIVE_OWNER,
+    });
+    const world = inputsFor([closed, silent, running], {
+      transcripts: transcriptsFor(SESSION_A),
+    });
+
+    const plan = planUnaskedCleanup(world);
+
+    expect(swept(plan)).toStrictEqual([`${TERMINAL_A}:closed`]);
+    // Two: the one another window still owns, and the one a person has to be
+    // asked about. A count that only knew the first would tell a person the
+    // store is tidier than it is.
+    expect(plan.kept).toBe(2);
+  });
+
+  it('leaves a closed record alone while the window that owns it is still there', () => {
+    // Inherited from `planCleanup` rather than restated, and the test is here
+    // because that inheritance is the whole safety of doing this unasked: a
+    // record closed a second ago in THIS window is a row the person can still
+    // read the journal of, start over from, or delete by hand. It is forgotten
+    // when the window goes, and not before.
+    const entry = sketch({ ownerId: LIVE_OWNER, closedAt: new Date(NOW - MINUTE_MS) });
+
+    expect(planUnaskedCleanup(inputsFor([entry]))).toStrictEqual({ sweep: [], kept: 1 });
+  });
+
+  it('never forgets a record any window could still bring back', () => {
+    // The same invariant the manual plan is held to, restated against the
+    // automatic one because this is the plan nobody confirms.
+    const world = inputsFor([
+      sketch({ closedAt: new Date(NOW - MINUTE_MS) }),
+      sketch({ terminalId: TERMINAL_B, sessionId: SESSION_B }),
+      sketch({
+        terminalId: '33333333-3333-4333-8333-333333333333',
+        sessionId: 'dddddddd-3333-4333-8333-dddddddddddd',
+        folder: OTHER_FOLDER,
+      }),
+    ]);
+
+    const restored = new Set(planRestore(world).steps.map((step) => step.entry.terminalId.value));
+    const forgotten = planUnaskedCleanup(world).sweep.map((item) => item.entry.terminalId.value);
+
+    expect(restored.size).toBeGreaterThan(0);
+    expect(forgotten.filter((id) => restored.has(id))).toStrictEqual([]);
+  });
+
+  it('plans nothing out of nothing', () => {
+    expect(planUnaskedCleanup(inputsFor([]))).toStrictEqual({ sweep: [], kept: 0 });
   });
 });

@@ -125,6 +125,12 @@ export class Reconciler implements Disposable {
   private _liveness: ReadonlyMap<string, OwnerLiveness>;
   /** Conversations already mentioned, so that a log line is news rather than noise. */
   private _mentioned: ReadonlySet<string> = new Set();
+  /**
+   * Whether `owners/` has been READ, which is what makes an absence mean
+   * anything (see `livenessOf`). Distinct from `_sweptAtMs`, which is stamped
+   * before the reading and stays stamped when it fails.
+   */
+  private _surveyed = false;
   /** When the last pass began. `null` until one has. */
   private _sweptAtMs: number | null = null;
   private _timer: Disposable | null = null;
@@ -212,14 +218,36 @@ export class Reconciler implements Disposable {
   }
 
   /**
-   * One window's liveness, and `unknown` for one nothing has established.
+   * One window's liveness, with the two ways of not being in the map told
+   * apart.
    *
-   * The default is the rule rather than a fallback: a window nobody surveyed is
-   * not a window known to be there, and `live` here would be a row claiming a
-   * terminal is running in a window that closed an hour ago.
+   * The default is the rule rather than a fallback, and until M2.20 it was one
+   * rule where there are two. A window this reconciler has never surveyed is
+   * `unknown` -- nothing has been established, and `live` here would be a row
+   * claiming a terminal is running in a window that closed an hour ago. A window
+   * missing from a directory it HAS read is `dead`, because that directory is
+   * the answer: `owners/<id>.json` is removed by `retire()` and by the collector
+   * below, and by nothing else.
+   *
+   * **The second half is not a new rule, it is the store's own.**
+   * `FileOwnerPresence.livenessOf` has always read an absent file as `dead`, and
+   * the restore predicate has always been built on that. This map is built by
+   * ENUMERATING files, so a window with no file never appears in it at all --
+   * and the single default answered the opposite of what the store would say.
+   * The owner met the difference on 2026-08-13 with an empty `owners/`: their
+   * closed record was `closed` to every predicate and "window not answering" on
+   * every row, which is `CONTEXT_FOREIGN` -- a row with no menu entries at all.
+   *
+   * A sweep that could not read the directory establishes nothing and does not
+   * arm the second half, which is the same rule the rest of the pass follows: an
+   * input that could not be read has not said anything is missing.
    */
   public livenessOf(ownerId: OwnerId): OwnerLiveness {
-    return this._liveness.get(ownerId.value) ?? 'unknown';
+    const known = this._liveness.get(ownerId.value);
+    if (known !== undefined) {
+      return known;
+    }
+    return this._surveyed ? 'dead' : 'unknown';
   }
 
   public subscribe(listener: ReconcileListener): Disposable {
@@ -301,6 +329,9 @@ export class Reconciler implements Disposable {
 
     const previous = this._liveness;
     this._liveness = next;
+    // Here and nowhere else: this method runs only on a pass that read the
+    // directory, so the flag cannot be set by one that failed.
+    this._surveyed = true;
     return !sameMap(previous, next);
   }
 

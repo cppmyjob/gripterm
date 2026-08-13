@@ -108,10 +108,10 @@ describe('FakeTerminalHandle', () => {
       seen.push(exit.code);
     });
 
-    handle.close(1);
-    handle.close(undefined);
+    handle.close(1, 'process');
+    handle.close(undefined, 'user');
     subscription.dispose();
-    handle.close(127);
+    handle.close(127, 'process');
 
     expect(seen).toStrictEqual([1, undefined]);
   });

@@ -295,15 +295,17 @@ export class TerminalLifecycleService implements Disposable {
   }
 
   /**
-   * The person is finished with this terminal -- and the ONLY producer of
-   * `closedAt` (§4.2).
+   * The person is finished with this terminal -- one of the two producers of
+   * `closedAt`, and the one they reached through OUR list (§4.2).
    *
-   * Nothing else may set it, and the reason is now measured rather than argued:
-   * our terminals are `isTransient`, so every editor shutdown closes them all,
-   * and the platform reports that exactly as it reports a deliberate close.
-   * Tying `closedAt` to the close event would therefore declare every terminal
-   * rubbish at the first restart, leaving `isRestorable()` with nothing to say
-   * and the cleanup of M2.15 with nothing to protect.
+   * The other is the same act performed in the editor instead: the cross on the
+   * terminal's tab, which arrives at `_onClosed` wearing `reason: 'user'`. Until
+   * M2.20 this was the only one, and the argument for that was sound about the
+   * wrong field -- our terminals are `isTransient`, so every editor shutdown
+   * closes them all, and the exit CODE is `undefined` for that exactly as it is
+   * for a deliberate close (A15). Tying `closedAt` to the code would still
+   * declare every terminal rubbish at the first restart. `reason` is the field
+   * that separates them, and it was there all along (A29).
    */
   public close(terminalId: TerminalId): void {
     const entry = this._options.registry.get(terminalId);
@@ -450,6 +452,58 @@ export class TerminalLifecycleService implements Disposable {
     this._options.registry.amend(current.withObserved(current.observed.withPid(pid)));
   }
 
+  /**
+   * The person closed the terminal in the editor itself, so the record is closed
+   * for good -- the second producer of `closedAt`, and the last (§4.2).
+   *
+   * **THE RULE IS THE PAIR, and both halves are measured (A29, 2026-08-13, VS
+   * Code 1.133 on win32).** M2.20 began as "read `reason`", because A15 had
+   * established that the CODE cannot tell a deliberate close from a shutdown --
+   * true, and a statement about the wrong field. The measurement then refused
+   * the simple version too:
+   *
+   *   * `shutdown` is what a window reload and a window close BOTH report, in
+   *     the panel and the editor area alike. That is the value that makes the
+   *     rule survivable at all: our terminals are transient, so every reload
+   *     closes all of them, and reading that as intent would empty the base at
+   *     the first restart -- the owner's complaint, inverted and worse;
+   *   * `user` does NOT mean "a person did this". In the editor area -- this
+   *     build's default -- a process exiting on its own is reported as `user`
+   *     too, because what the platform sees is its tab closing. The same process
+   *     in the panel reports `process`;
+   *   * the CODE is what separates those two, and it separates them the same way
+   *     in both areas: a process that exited has one, and a terminal somebody
+   *     closed has none, because nothing inside it exited (A15).
+   *
+   * So: `user` AND nothing exited. Neither half alone is the rule, and each of
+   * them alone is a different conversation thrown away.
+   *
+   * Every other answer leaves the record alone, and the asymmetry is deliberate:
+   * a record wrongly kept is a row somebody closes a second time, a record
+   * wrongly closed is a conversation no restore will ever offer again.
+   *
+   * **Before the death event**, for the reason `close` gives: a listener told the
+   * terminal has ended must already see a closed record, or one act reaches the
+   * store as two writes.
+   *
+   * A record this window no longer holds is left alone rather than warned about.
+   * The close is real, and there is nothing to write it on -- `ingest` says so a
+   * line later, once, which is enough.
+   */
+  private _noteDeliberateClose(terminalId: TerminalId, exit: TerminalExit): void {
+    if (exit.reason !== 'user' || exit.code !== undefined) {
+      return;
+    }
+    const entry = this._options.registry.get(terminalId);
+    if (entry === undefined) {
+      return;
+    }
+    this._options.registry.amend(entry.withClosed(this._options.clock.now()));
+    this._options.logger.info('a terminal was closed by the person, so its record will not come back', {
+      terminalId: terminalId.value,
+    });
+  }
+
   private _watch(handle: TerminalHandle, intent: LaunchIntent): void {
     const subscription = handle.onDidClose((exit) => {
       this._onClosed(handle.terminalId, intent, exit);
@@ -470,6 +524,7 @@ export class TerminalLifecycleService implements Disposable {
       this._watched.delete(terminalId.value);
     }
 
+    this._noteDeliberateClose(terminalId, exit);
     const event = deathEvent(this._options.registry.stateOf(terminalId), intent, exit);
     this._options.logger.info('a terminal closed', {
       terminalId: terminalId.value,

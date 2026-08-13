@@ -3,6 +3,7 @@ import type {
   Disposable,
   LaunchLocation,
   TerminalExit,
+  TerminalExitReason,
   TerminalGateway,
   TerminalHandle,
   TerminalId,
@@ -32,6 +33,45 @@ const PLACES: Readonly<Record<LaunchLocation, vscode.TerminalLocation>> = {
 const RENAME_ACTIVE_TERMINAL = 'workbench.action.terminal.renameWithArg';
 
 /**
+ * The editor's word for who ended a terminal, in ours.
+ *
+ * A total record over the platform's enum, so a sixth member arriving in a later
+ * API fails the build here rather than being folded into a case with a rule
+ * attached to it. What CANNOT be caught that way is an editor newer than the
+ * typings sending a number this build has never seen -- so the read below still
+ * falls back, and it falls back to `unknown`, which no rule reads as intent.
+ */
+const REASONS: Readonly<Record<vscode.TerminalExitReason, TerminalExitReason>> = {
+  [vscode.TerminalExitReason.Unknown]: 'unknown',
+  [vscode.TerminalExitReason.Shutdown]: 'shutdown',
+  [vscode.TerminalExitReason.Process]: 'process',
+  [vscode.TerminalExitReason.User]: 'user',
+  [vscode.TerminalExitReason.Extension]: 'extension',
+};
+
+/**
+ * What the editor said about a terminal that has just closed.
+ *
+ * A terminal with no `exitStatus` at all is not a case the platform documents on
+ * this event, and it is read as `unknown` rather than guessed at: every rule
+ * downstream treats `unknown` as "nobody established anything", which leaves the
+ * record restorable.
+ */
+function exitOf(terminal: vscode.Terminal): TerminalExit {
+  const status = terminal.exitStatus;
+  if (status === undefined) {
+    return { code: undefined, reason: 'unknown' };
+  }
+  // `hasOwn` and not `??`: the record is total over the enum, so the compiler
+  // believes every read of it succeeds -- which is true of the enum this build
+  // was compiled against and not of the editor it is running in.
+  return {
+    code: status.code,
+    reason: Object.hasOwn(REASONS, status.reason) ? REASONS[status.reason] : 'unknown',
+  };
+}
+
+/**
  * The `TerminalGateway` port on `vscode.window`.
  *
  * Three properties of the platform shape this file, and all three are measured
@@ -44,10 +84,13 @@ const RENAME_ACTIVE_TERMINAL = 'workbench.action.terminal.renameWithArg';
  *   * `onDidCloseTerminal` is a WINDOW-level event, not a per-terminal one, so
  *     the routing to a handle happens here. One subscription for every terminal
  *     we own, and it is disposed with the gateway.
- *   * `exitStatus.code` is `undefined` when the person closed the terminal and a
- *     number when the process exited. That distinction is the only thing
- *     separating a failed launch from a deliberate close (M1.12), so it travels
- *     through the port untouched rather than being flattened into a boolean.
+ *   * `exitStatus` says two things and both are carried. `code` is `undefined`
+ *     when nothing exited inside -- a terminal the person closed and one we
+ *     disposed alike (A15) -- and a number when the process exited, which is
+ *     what separates a failed launch from an ordinary end (§4.3). `reason` says
+ *     WHO ended it, measured 2026-08-13 (A29), and is what separates a person
+ *     closing a terminal from the window taking its transient terminals down at
+ *     shutdown (§4.2).
  *
  * WHERE the terminal lands is decided here and not in the domain, because it is
  * a fact about this editor and about nothing else: the spec says what to run.
@@ -131,7 +174,7 @@ export class VsCodeTerminalGateway implements TerminalGateway, Disposable {
         // whether there is still a terminal to show -- gets the answer that is
         // true after the close rather than the one that was true before it.
         this._handles.delete(id);
-        handle.closed({ code: terminal.exitStatus?.code });
+        handle.closed(exitOf(terminal));
         return;
       }
     }

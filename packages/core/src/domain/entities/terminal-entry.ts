@@ -96,11 +96,14 @@ export class TerminalEntry {
   }
 
   /**
-   * Set ONLY by an explicit human action -- closing or deleting the terminal.
-   * The `claude` process exiting does not set it: our terminals are transient
-   * and therefore die on every editor shutdown, so tying this to process exit
-   * would declare everything rubbish after the first one, and would leave
-   * `isRestorable` with nothing to say.
+   * Set ONLY by an explicit human action: closing the terminal from our list, or
+   * closing it in the editor itself -- which the platform names `user` and
+   * nothing else (A29).
+   *
+   * The `claude` process exiting does not set it, and neither does the window
+   * going away: our terminals are transient and therefore die on every editor
+   * shutdown, so reading either as intent would declare everything rubbish after
+   * the first one, and would leave `isRestorable` with nothing to say.
    */
   public get closedAt(): Date | null {
     const { closedAtMs } = this._state;

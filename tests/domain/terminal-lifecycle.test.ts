@@ -15,6 +15,7 @@ import {
   type LaunchStrategy,
   type RegistryChange,
   type TerminalEntry,
+  type TerminalExitReason,
   type TerminalGateway,
   type TerminalHandle,
   type TerminalSpec,
@@ -290,7 +291,7 @@ describe('TerminalLifecycleService starts a terminal', () => {
   it('carries a restore through the same path', async () => {
     const { lifecycle, commands, gateway } = stand();
     const entry = await lifecycle.launch(request());
-    gateway.handleFor(entry.terminalId).close(undefined);
+    gateway.handleFor(entry.terminalId).close(undefined, 'shutdown');
 
     await lifecycle.start(entry, 'resume');
 
@@ -478,7 +479,7 @@ describe('TerminalLifecycleService reveals a terminal', () => {
     // take the pane with it. Not an error: there is nothing left to show.
     const { lifecycle, logger, gateway } = stand();
     const entry = await lifecycle.start(makeEntry(), 'resume', 'hidden');
-    gateway.handleFor(entry.terminalId).close(1);
+    gateway.handleFor(entry.terminalId).close(1, 'process');
 
     lifecycle.reveal(entry.terminalId);
 
@@ -558,7 +559,7 @@ describe('TerminalLifecycleService closes a terminal', () => {
     // bring such a record to an end state, so this does.
     const { lifecycle, registry, gateway } = stand();
     const entry = await lifecycle.launch(request());
-    gateway.handleFor(entry.terminalId).close(undefined);
+    gateway.handleFor(entry.terminalId).close(undefined, 'shutdown');
     expect(registry.get(entry.terminalId)?.observed.state).toBe('ended');
 
     lifecycle.close(entry.terminalId);
@@ -581,23 +582,28 @@ describe('TerminalLifecycleService closes a terminal', () => {
 });
 
 describe('TerminalLifecycleService reads a terminal that went away', () => {
-  async function closing(exit: number | undefined, intent: LaunchIntent): Promise<{
+  async function closing(
+    exit: number | undefined,
+    intent: LaunchIntent,
+    reason: TerminalExitReason
+  ): Promise<{
     readonly state: string;
     readonly signals: readonly string[];
     readonly restorable: boolean;
     readonly event: unknown;
+    readonly closedAt: Date | null;
   }> {
     const { lifecycle, registry, gateway, logger } = stand();
     const entry = await lifecycle.launch(request());
     if (intent === 'resume') {
       // The first terminal is over, and the record is being restored -- which
       // is the only way `launching` is ever reached under `resume`.
-      gateway.handleFor(entry.terminalId).close(undefined);
+      gateway.handleFor(entry.terminalId).close(undefined, 'shutdown');
       await lifecycle.start(entry, 'resume');
     }
     const seen = signals(registry);
 
-    gateway.handleFor(entry.terminalId).close(exit);
+    gateway.handleFor(entry.terminalId).close(exit, reason);
 
     const after = registry.get(entry.terminalId);
     return {
@@ -605,11 +611,12 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
       signals: seen,
       restorable: after?.isRestorable() ?? false,
       event: closeEvents(logger).at(-1),
+      closedAt: after?.closedAt ?? null,
     };
   }
 
   it('calls a non-zero exit during a launch a failed launch', async () => {
-    expect(await closing(1, 'launch')).toMatchObject({
+    expect(await closing(1, 'launch', 'process')).toMatchObject({
       state: 'ended',
       signals: ['launch_failed'],
       event: 'LaunchExitedNonZero',
@@ -620,7 +627,7 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
     // The same state, the same event shape, a different outcome. The only thing
     // separating them is what this service was asked to do, which is why the
     // producer names the event and the state machine does not (§4.3).
-    expect(await closing(1, 'resume')).toMatchObject({
+    expect(await closing(1, 'resume', 'process')).toMatchObject({
       state: 'resume_failed',
       signals: ['resume_failed'],
       event: 'ResumeExitedNonZero',
@@ -629,7 +636,7 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
 
   it('calls a clean exit an ordinary end', async () => {
     // `/exit` gives code 0. A person leaving is not a failure to report.
-    expect(await closing(0, 'launch')).toMatchObject({
+    expect(await closing(0, 'launch', 'process')).toMatchObject({
       state: 'ended',
       signals: ['ended'],
       event: 'TerminalClosed',
@@ -639,7 +646,7 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
   it('calls a terminal the person closed an ordinary end', async () => {
     // `undefined` is what the platform reports both for a person closing the
     // terminal and for us destroying it (A15). Neither is a failed launch.
-    expect(await closing(undefined, 'launch')).toMatchObject({
+    expect(await closing(undefined, 'launch', 'user')).toMatchObject({
       state: 'ended',
       signals: ['ended'],
       event: 'TerminalClosed',
@@ -650,7 +657,155 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
     // Our terminals are transient, so every editor shutdown kills them all.
     // Tying `closedAt` to a process exit would declare the whole base rubbish
     // at the first restart (§4.2).
-    expect(await closing(1, 'launch')).toMatchObject({ restorable: true });
+    expect(await closing(1, 'launch', 'process')).toMatchObject({ restorable: true });
+  });
+
+  /*
+   * WHO closed it, which is the other half of the answer and was missing until
+   * A29 (2026-08-13).
+   *
+   * The owner's report is the whole of why these exist: a terminal closed with
+   * the cross on its tab came back at the next reload, because `closedAt` was
+   * produced by exactly one path -- our own command -- and the editor's is a
+   * different one. The old rule was not wrong about the danger it was avoiding;
+   * it was reading the wrong field. `exitStatus.code` cannot tell a deliberate
+   * close from a shutdown (A15) and `exitStatus.reason` can, so the rule moves
+   * onto the field that carries the answer.
+   *
+   * ONE value closes a record and three do not, and the asymmetry is the design:
+   * a record wrongly kept costs a person a row they have to close again, and a
+   * record wrongly closed costs them a conversation that never comes back.
+   */
+  it('closes the record for good when the person closed the terminal', async () => {
+    expect(await closing(undefined, 'launch', 'user')).toMatchObject({
+      restorable: false,
+      closedAt: STARTED_AT,
+    });
+  });
+
+  it('leaves the record restorable when the window took its terminals with it', async () => {
+    // The case that makes this rule safe to have at all. Our terminals are
+    // transient, so EVERY editor shutdown closes all of them; reading that as a
+    // person's own act would declare the whole base rubbish at the first reload
+    // -- the very complaint this change answers, inverted and worse.
+    expect(await closing(undefined, 'launch', 'shutdown')).toMatchObject({
+      restorable: true,
+      closedAt: null,
+    });
+  });
+
+  it('leaves the record restorable when the process exited on its own', async () => {
+    // A `claude` that fell over, and a `claude` that a person ended with
+    // `/exit`, are one value to the platform. Reading it as intent would forget
+    // a crashed conversation, so it is read as neither.
+    expect(await closing(0, 'launch', 'process')).toMatchObject({
+      restorable: true,
+      closedAt: null,
+    });
+  });
+
+  /*
+   * The half of A29 that makes `reason` alone the WRONG rule, measured
+   * 2026-08-13 in a real editor.
+   *
+   * A terminal in the EDITOR AREA -- which is this build's default
+   * (`gripterm.launch.location`) -- reports a process exiting on its own as
+   * `user`, because the editor tab closing is what the platform sees. The same
+   * process in the panel reports `process`. So `user` does not mean "a person
+   * did this"; what it means is "this went through the editor's own close path",
+   * and a build that read it as intent would forget every conversation that
+   * ended with `/exit` or fell over.
+   *
+   * What separates them is the code, and it separates them the same way in both
+   * areas: a process that exited has one, and a terminal somebody closed has
+   * none, because nothing inside it exited (A15). So the rule is the PAIR, and
+   * neither half of it is enough alone.
+   */
+  it('leaves a clean exit in the editor area restorable, although the editor calls it a user close', async () => {
+    expect(await closing(0, 'launch', 'user')).toMatchObject({
+      state: 'ended',
+      restorable: true,
+      closedAt: null,
+    });
+  });
+
+  it('still calls a failed launch in the editor area a failed launch, not a person leaving', async () => {
+    expect(await closing(1, 'launch', 'user')).toMatchObject({
+      state: 'ended',
+      signals: ['launch_failed'],
+      event: 'LaunchExitedNonZero',
+      restorable: true,
+      closedAt: null,
+    });
+  });
+
+  it('leaves the record restorable when we destroyed the terminal ourselves', async () => {
+    // `extension` is the path our own close command already stamped before it
+    // disposed anything, so nothing here has to. A record reaching this line
+    // WITHOUT that stamp is a terminal something else of ours destroyed, and
+    // that is not a person deciding anything.
+    expect(await closing(undefined, 'launch', 'extension')).toMatchObject({
+      restorable: true,
+      closedAt: null,
+    });
+  });
+
+  it('leaves the record restorable when the editor gave an answer we have no name for', async () => {
+    // The direction every unmeasured case falls (§I.1). An editor newer than
+    // this build is a thing that happens; a build that read its unknown answer
+    // as consent is a build that throws conversations away on an upgrade.
+    expect(await closing(undefined, 'launch', 'unknown')).toMatchObject({
+      restorable: true,
+      closedAt: null,
+    });
+  });
+
+  it('stamps the close with the moment it happened, not the moment it started', async () => {
+    const { lifecycle, registry, gateway, clock } = stand();
+    const entry = await lifecycle.launch(request());
+    clock.advance(60_000);
+
+    gateway.handleFor(entry.terminalId).close(undefined, 'user');
+
+    expect(registry.get(entry.terminalId)?.closedAt).toStrictEqual(
+      new Date(STARTED_AT.getTime() + 60_000)
+    );
+  });
+
+  it('has the record already closed by the time anybody is told it ended', async () => {
+    // The same order `close` keeps and for the same reason: a listener told the
+    // terminal has ended must see a record that is closed, rather than being
+    // told twice about one act. M2's persistence subscribes here, and the
+    // difference on disk is a `record.json` written without `closedAt`.
+    const { lifecycle, registry, gateway } = stand();
+    const entry = await lifecycle.launch(request());
+    const closedWhenEnded: (Date | null)[] = [];
+    registry.subscribe((change) => {
+      if (change.kind === 'entry' && change.transition !== null) {
+        closedWhenEnded.push(change.entry.closedAt);
+      }
+    });
+
+    gateway.handleFor(entry.terminalId).close(undefined, 'user');
+
+    expect(closedWhenEnded).toStrictEqual([STARTED_AT]);
+  });
+
+  it('says nothing about a record this window no longer holds', async () => {
+    // A close arriving for a record a person deleted a moment ago. `amend`
+    // would refuse it and warn, which is a warning about nothing: the terminal
+    // really did close, and there is no record left to write it on.
+    const { lifecycle, registry, gateway, logger } = stand();
+    const entry = await lifecycle.launch(request());
+    const handle = gateway.handleFor(entry.terminalId);
+    registry.forget(entry.terminalId);
+    const warned = logger.warnings.length;
+
+    handle.close(undefined, 'user');
+
+    expect(logger.warnings.slice(warned).map((line) => line.message)).toStrictEqual([
+      'an event named a terminal this window does not hold',
+    ]);
   });
 
   it('does not call a late failure a failed launch', async () => {
@@ -671,7 +826,7 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
     });
     const seen = signals(registry);
 
-    gateway.handleFor(entry.terminalId).close(1);
+    gateway.handleFor(entry.terminalId).close(1, 'process');
 
     expect(registry.get(entry.terminalId)?.observed.state).toBe('ended');
     expect(seen).toStrictEqual(['ended']);
@@ -685,7 +840,7 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
     const { lifecycle, registry, gateway } = stand();
     const entry = await lifecycle.launch(request());
 
-    gateway.handleFor(entry.terminalId).close(undefined);
+    gateway.handleFor(entry.terminalId).close(undefined, 'shutdown');
 
     expect(registry.get(entry.terminalId)?.observed.state).toBe('ended');
   });
@@ -699,8 +854,8 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
     const handle = gateway.handleFor(entry.terminalId);
     const seen = signals(registry);
 
-    handle.close(undefined);
-    handle.close(undefined);
+    handle.close(undefined, 'shutdown');
+    handle.close(undefined, 'shutdown');
 
     expect(seen).toStrictEqual(['ended']);
     expect(closeEvents(logger)).toStrictEqual(['TerminalClosed']);
@@ -714,7 +869,7 @@ describe('TerminalLifecycleService lets go', () => {
     const seen = signals(registry);
 
     lifecycle.dispose();
-    gateway.handleFor(entry.terminalId).close(1);
+    gateway.handleFor(entry.terminalId).close(1, 'process');
 
     expect(seen).toStrictEqual([]);
   });
@@ -735,7 +890,7 @@ describe('one terminal closing is one terminal closing', () => {
     const first = await lifecycle.launch(request('one'));
     const second = await lifecycle.launch(request('two'));
 
-    gateway.handleFor(first.terminalId).close(1);
+    gateway.handleFor(first.terminalId).close(1, 'process');
 
     expect(registry.get(second.terminalId)?.observed.state).toBe('launching');
     expect(registry.get(first.terminalId)?.observed.state).toBe('ended');
@@ -746,7 +901,7 @@ describe('deleting the record of a terminal', () => {
   it('drops it from the list once its terminal is gone', async () => {
     const { lifecycle, gateway, registry } = stand();
     const entry = await lifecycle.launch(request());
-    gateway.handleFor(entry.terminalId).close(undefined);
+    gateway.handleFor(entry.terminalId).close(undefined, 'user');
 
     expect(lifecycle.discard(entry.terminalId)).toBe('discarded');
 
@@ -780,7 +935,7 @@ describe('deleting the record of a terminal', () => {
     const { lifecycle, gateway, registry } = stand();
     const kept = await lifecycle.launch(request('kept'));
     const going = await lifecycle.launch(request('going'));
-    gateway.handleFor(going.terminalId).close(undefined);
+    gateway.handleFor(going.terminalId).close(undefined, 'user');
 
     lifecycle.discard(going.terminalId);
 
@@ -795,7 +950,7 @@ describe('deleting the record of a terminal', () => {
     // takes (M2.6), and this is the shape of it: an id, and no entry.
     const { lifecycle, gateway, registry } = stand();
     const entry = await lifecycle.launch(request());
-    gateway.handleFor(entry.terminalId).close(undefined);
+    gateway.handleFor(entry.terminalId).close(undefined, 'user');
     const seen: RegistryChange[] = [];
     registry.subscribe((change) => seen.push(change));
 

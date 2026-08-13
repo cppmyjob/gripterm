@@ -312,4 +312,125 @@ suite('VsCodeTerminalGateway', () => {
     // because nothing exited on its own.
     assert.equal(exit.code, undefined);
   });
+
+  /**
+   * A29, opened by the owner on 2026-08-13: a terminal closed with the tab's
+   * cross comes back at the next reload, because nothing on that path sets
+   * `closedAt`.
+   *
+   * A15 is the reason it was written that way, and A15 is true: the exit CODE
+   * cannot tell a deliberate close from the editor killing a transient terminal
+   * at shutdown -- both are `undefined`. What was never checked is that
+   * `exitStatus` carries a second field. `TerminalExitReason` is in the API this
+   * extension is built against (1.94) and separates all four cases by name, so
+   * "the platform cannot tell us" was a claim about a field nobody read.
+   *
+   * Three of the four are measurable from inside a running host and are measured
+   * here. `shutdown` is the fourth and cannot be, because it happens while this
+   * process is being taken down: measured instead on 2026-08-13 with a
+   * throwaway extension in a real window, which created two transient terminals,
+   * asked for a RELOAD, and then asked the window to close. Both times, in the
+   * panel and in the editor area alike, the answer was `Shutdown` with no exit
+   * code. That is the row the rule leans on, and it is why a reload does not
+   * empty the base.
+   *
+   * The reading that changed the rule is the one below about a process exiting:
+   * in the EDITOR AREA the platform reports that as `user` as well, because what
+   * it sees is the tab closing. So `user` is not intent by itself, and the pair
+   * -- `user` with nothing exited -- is what `_noteDeliberateClose` reads.
+   */
+  test('A29: our own dispose is reported as an extension close', async () => {
+    const { gateway } = await api();
+
+    const handle = await gateway.create({
+      terminalId: TERMINAL_ID,
+      name: 'gripterm-a29-extension',
+      cwd: os.tmpdir(),
+      env: {},
+      shellPath: null,
+      shellArgs: [],
+    });
+
+    const closed = closeOf(handle);
+    handle.dispose();
+    const exit = await closed;
+
+    // The half of A29 that decides whether the rule is safe at all: our own
+    // `close` command already sets `closedAt` before it disposes, so this must
+    // NOT be the same answer the person's own close gives -- or the two acts
+    // would be one, and there would be nothing measured about either.
+    assert.equal(exit.reason, 'extension');
+  });
+
+  test('A29: a process exiting in the editor area is reported as a user close, with its code', async () => {
+    const { gateway, readiness } = await api();
+    // The whole point of this assertion is WHERE it runs. In the panel the same
+    // exit is reported as `process`; in the editor area, which is what this
+    // build opens terminals in, the platform sees a tab closing and says `user`.
+    assert.equal(readiness.location, 'editor');
+    const process0 = exiting(0);
+
+    const handle = await gateway.create({
+      terminalId: TERMINAL_ID,
+      name: 'gripterm-a29-process',
+      cwd: os.tmpdir(),
+      env: {},
+      shellPath: process0.path,
+      shellArgs: process0.args,
+    });
+
+    const exit = await closeOf(handle);
+
+    // The reading that refuted the first version of this rule. A `claude` that
+    // fell over, or that a person ended with `/exit`, arrives wearing the same
+    // reason as the cross on the tab -- and is told apart by the code, which a
+    // close nobody exited out of does not have.
+    assert.equal(exit.reason, 'user');
+    assert.equal(exit.code, 0);
+  });
+
+  test('A29: the person closing the terminal tab is reported as a user close', async () => {
+    const { gateway } = await api();
+    const terminals = vscode.workspace.getConfiguration('terminal.integrated');
+    // The dialog the owner described -- "terminate the running process?" -- is
+    // this setting, and a modal in a headless run is a suite that hangs rather
+    // than a suite that fails. Turned off for the measurement and put back
+    // afterwards: what is under test is the REASON the platform reports, and the
+    // confirmation is upstream of it.
+    const confirmOnKill = terminals.get<string>('confirmOnKill');
+    await terminals.update('confirmOnKill', 'never', vscode.ConfigurationTarget.Global);
+
+    try {
+      const handle = await gateway.create({
+        terminalId: TERMINAL_ID,
+        name: 'gripterm-a29-user',
+        cwd: os.tmpdir(),
+        env: {},
+        // Nothing that can exit by itself and win the race to the close event.
+        shellPath: null,
+        shellArgs: [],
+      });
+      handle.show(false);
+      await waitFor('the terminal tab to appear', () =>
+        terminalTabs().some((tab) => tab.label.includes('gripterm-a29-user'))
+      );
+
+      const closed = closeOf(handle);
+      const tab = terminalTabs().find((one) => one.label.includes('gripterm-a29-user'));
+      assert.ok(tab, 'the tab went before it could be closed');
+      // The API spelling of the cross on the tab, which is the act the owner
+      // reported. Not `workbench.action.terminal.kill`: that is the context
+      // menu's "Kill Terminal", a different call site, and a rule measured on
+      // one and applied to the other is a rule measured on neither.
+      await vscode.window.tabGroups.close(tab);
+
+      assert.equal((await closed).reason, 'user');
+    } finally {
+      await terminals.update(
+        'confirmOnKill',
+        confirmOnKill,
+        vscode.ConfigurationTarget.Global
+      );
+    }
+  });
 });

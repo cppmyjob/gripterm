@@ -26,15 +26,49 @@ export interface TerminalSpec {
 }
 
 /**
- * Why the terminal went away.
+ * WHICH PATH the terminal went away by, as the editor understands it.
  *
- * `undefined` is not "we do not know": the editor uses it for a terminal the
- * person closed themselves, and a number for a process that exited. That is the
- * only thing separating a failed launch from a deliberate close, so it is
- * carried through the port rather than flattened into a boolean.
+ * Not "who did it", although the platform's own names read that way -- and the
+ * difference is measured rather than argued (A29, 2026-08-13, VS Code 1.133 on
+ * win32, both terminal locations):
+ *
+ *   act                              location   code        reason
+ *   the cross on the tab             editor     undefined   user
+ *   "Kill Terminal"                  either     undefined   user
+ *   the process exiting on its own   editor     a number    user
+ *   the process exiting on its own   panel      a number    process
+ *   our own dispose                  either     undefined   extension
+ *   the window reloading or closing  either     undefined   shutdown
+ *
+ * Read that third row before using this field for intent. In the editor area --
+ * this build's default -- a `claude` that exits by itself arrives as `user`,
+ * because what the platform saw was its tab closing. So `user` alone is not a
+ * person's decision; `user` with nothing exited is (see `_noteDeliberateClose`).
+ *
+ * `shutdown` is the row the whole design leans on: our terminals are transient,
+ * so a reload closes every one of them, and it is reported as itself rather than
+ * as anybody's act.
+ *
+ * `unknown` is a member rather than a hole, and it is the direction every
+ * unmeasured case falls: an editor that reports something this build has no name
+ * for leaves the record restorable, which costs a person one row they did not
+ * want. Reading it as intent would cost them the conversation.
+ */
+export type TerminalExitReason = 'unknown' | 'shutdown' | 'process' | 'user' | 'extension';
+
+/**
+ * Why the terminal went away, in the two fields the editor has to say it with.
+ *
+ * `code` is `undefined` for a terminal nothing exited inside -- one the person
+ * closed AND one we disposed ourselves, measured alike (A15). So the code alone
+ * cannot say who did it, which is what `reason` is for: measured 2026-08-13
+ * (A29) to separate all three of those cases by name. Both travel through the
+ * port untouched, because the pair is what separates a failed launch (§4.3) from
+ * a deliberate close (§4.2), and either one flattened is one of those rules gone.
  */
 export interface TerminalExit {
   readonly code: number | undefined;
+  readonly reason: TerminalExitReason;
 }
 
 export interface TerminalHandle {

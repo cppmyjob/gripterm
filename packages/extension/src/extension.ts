@@ -47,6 +47,7 @@ import {
   newActivationToken,
   ownerRefFor,
   planRestore,
+  planUnaskedCleanup,
   sendSignalZero,
   probeVersionOutput,
   readAgentListing,
@@ -584,14 +585,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     })
   );
 
-  const restore = await bringTerminalsBack({
-    context,
-    shared,
-    orchestrator,
-    readiness,
-    gather,
-    logger,
-  });
+  // One reading for both of the decisions below -- see `surveyTheMachine`.
+  const world = await surveyTheMachine({ context, gather, logger });
+  const restore = await bringTerminalsBack({ world, orchestrator, readiness, logger });
+  // After the restore and against the SAME reading: the two plans are disjoint
+  // by construction (M2.15), and a record this window has just adopted is one
+  // whose owner is now alive, which no cleanup touches.
+  await forgetClosedTerminals({ world, cleaner, logger });
 
   // After the restore, not before: a sweep that ran first would look at records
   // this window is about to adopt and start, and the first thing it would find
@@ -685,14 +685,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
  * one thing a person notices about M2.
  *
  * It refuses in three situations, and each refusal is a sentence rather than a
- * silence:
+ * silence. Two of them are `surveyTheMachine`'s -- a test host, and a window
+ * with no shared base to read -- and the third is its own:
  *
- *   * **a test host.** A suite that ran would adopt this machine's records and
- *     start `claude --resume` on the person's own conversations, as a side
- *     effect of running tests. `ExtensionMode.Test` is the platform saying so,
- *     and the integration suite drives its own restore explicitly instead;
- *   * **a window that is not reading the shared store.** There is nothing to
- *     read and nobody to adopt from;
  *   * **a launch pipeline that would refuse.** Every start would throw, and each
  *     one would leave a record adopted by this window with no process behind it
  *     (see `RestoreOrchestrator._restore`). Asking first costs nothing; finding
@@ -703,18 +698,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
  * for -- not a window with no list, no log and no explanation.
  */
 async function bringTerminalsBack(parts: {
-  readonly context: vscode.ExtensionContext;
-  readonly shared: SharedBase | null;
+  readonly world: MachineSurvey;
   readonly orchestrator: RestoreOrchestrator | null;
   readonly readiness: ReturnType<typeof launchReadiness>;
-  readonly gather: (() => Promise<RestoreInputs>) | null;
   readonly logger: Logger;
 }): Promise<RestoreSummary> {
-  const { readiness, shared, orchestrator, gather, logger } = parts;
-  if (parts.context.extensionMode === vscode.ExtensionMode.Test) {
-    return refuse('this is a test host, and a test run must not resume anybody\'s conversations', logger);
+  const { world, readiness, orchestrator, logger } = parts;
+  if (world.kind === 'unread') {
+    return refuse(world.reason, logger);
   }
-  if (shared === null || orchestrator === null || gather === null) {
+  if (orchestrator === null) {
     return refuse('this window is not reading the shared store', logger);
   }
   if (readiness.kind === 'refused') {
@@ -722,7 +715,7 @@ async function bringTerminalsBack(parts: {
   }
 
   try {
-    const plan = planRestore(await gather());
+    const plan = planRestore(world.inputs);
     const report = await orchestrator.run(plan);
     return {
       kind: 'ran',
@@ -733,6 +726,118 @@ async function bringTerminalsBack(parts: {
   } catch (cause: unknown) {
     logger.error('this window could not bring its terminals back', { reason: String(cause) });
     return { kind: 'failed', reason: String(cause) };
+  }
+}
+
+/**
+ * One reading of the machine, for both of the decisions activation takes about
+ * other windows' records.
+ *
+ * Read ONCE and shared, which is a rule rather than a saving. `planRestore` and
+ * `planUnaskedCleanup` are two readings of one moment, and the invariant between
+ * them -- no record is in both answers -- is a property of the VALUE they are
+ * given (M2.15). Two gatherings would also be two `claude agents --json`, which
+ * is 0.56-0.70 s apiece (A24), spent at the moment a person is waiting for their
+ * list.
+ *
+ * The two refusals here are the ones that belong to reading the machine at all.
+ * A launch pipeline that would refuse is NOT one of them: that stops terminals
+ * being started, and it has nothing to say about a record whose terminal a
+ * person closed -- a store may be tidied on a machine with no `claude` on it.
+ */
+type MachineSurvey =
+  | { readonly kind: 'read', readonly inputs: RestoreInputs }
+  | { readonly kind: 'unread', readonly reason: string };
+
+async function surveyTheMachine(parts: {
+  readonly context: vscode.ExtensionContext;
+  readonly gather: (() => Promise<RestoreInputs>) | null;
+  readonly logger: Logger;
+}): Promise<MachineSurvey> {
+  if (parts.context.extensionMode === vscode.ExtensionMode.Test) {
+    // A suite that ran would adopt this machine's records and start `claude
+    // --resume` on the person's own conversations -- and, since M2.20, would
+    // also move their closed ones into the trash -- as a side effect of running
+    // tests. The integration suite drives both explicitly instead.
+    return {
+      kind: 'unread',
+      reason: 'this is a test host, and a test run must not touch anybody\'s conversations',
+    };
+  }
+  if (parts.gather === null) {
+    return { kind: 'unread', reason: 'this window is not reading the shared store' };
+  }
+  try {
+    return { kind: 'read', inputs: await parts.gather() };
+  } catch (cause: unknown) {
+    parts.logger.error('this window could not read the machine, so it changed nothing about it', {
+      reason: String(cause),
+    });
+    return { kind: 'unread', reason: String(cause) };
+  }
+}
+
+/**
+ * Forgets the records of terminals a person closed on purpose, once the windows
+ * that held them are gone (M2.20).
+ *
+ * **Why it is automatic, when M2.15's cleanup asks.** A closed record outlives
+ * its window and cannot be acted on from any other one: it belongs to somebody
+ * else, and a record whose terminal is over has nothing to take over -- so its
+ * row is `CONTEXT_FOREIGN`, which has no menu entries at all. The owner met
+ * exactly that on 2026-08-13 and reported it as "it is impossible to close the
+ * terminals I no longer need". A person who has closed a terminal has already
+ * said what they want; asking them a second time, in a dialog they have to find
+ * from a view title, is asking them to repeat themselves in order to be obeyed.
+ *
+ * **What keeps it safe is the predicate, not the caller.** `planUnaskedCleanup`
+ * is `planCleanup` with one reason allowed through, so every guard the confirmed
+ * cleanup has this one has: a window merely silent keeps its records, another
+ * project's records are not this window's business, and anything any window
+ * could still resume stays where it is. And it is not deletion -- each record
+ * moves whole into `trash/<stamp>/`, so the way back is moving a folder (§I.3).
+ *
+ * A failure is reported and survived, like everything else at activation: a
+ * store that could not be tidied is a store with more rows in it, which is what
+ * it had a moment ago anyway.
+ */
+async function forgetClosedTerminals(parts: {
+  readonly world: MachineSurvey;
+  readonly cleaner: StorageCleaner | null;
+  readonly logger: Logger;
+}): Promise<void> {
+  const { world, cleaner, logger } = parts;
+  if (world.kind === 'unread' || cleaner === null) {
+    return;
+  }
+
+  const plan = planUnaskedCleanup(world.inputs);
+  if (plan.sweep.length === 0) {
+    return;
+  }
+
+  try {
+    // Named one by one BEFORE they move, and at `info` rather than lower: this
+    // is the one thing in the build that takes a person's record away without
+    // asking, so the log has to be able to answer "where did that row go".
+    for (const item of plan.sweep) {
+      logger.info('a record is being forgotten, because its terminal was closed and its window is gone', {
+        terminalId: item.entry.terminalId.value,
+        name: item.entry.metadata.displayName,
+        owner: item.entry.owner.ownerId.value,
+      });
+    }
+    const outcome = await cleaner.sweep(plan.sweep.map((item) => item.entry.terminalId.value));
+    logger.info('records of terminals that were closed on purpose were moved to the trash', {
+      moved: outcome.moved.length,
+      failed: outcome.failed.length,
+      batch: outcome.batch,
+      kept: plan.kept,
+    });
+  } catch (cause: unknown) {
+    logger.warn('the records of closed terminals could not be moved to the trash', {
+      reason: String(cause),
+    });
   }
 }
 

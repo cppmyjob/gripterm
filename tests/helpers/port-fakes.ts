@@ -6,6 +6,7 @@ import type {
   Logger,
   Scheduler,
   TerminalExit,
+  TerminalExitReason,
   TerminalGateway,
   TerminalHandle,
   TerminalId,
@@ -104,13 +105,12 @@ export class SequentialIdGenerator implements IdGenerator {
 /**
  * A terminal that records what was done to it.
  *
- * `dispose()` DOES fire the close listeners, with no exit code. That is not a
- * convenience: it is A15, measured on 2026-08-11 in a real VS Code 1.132.0 by
- * the integration suite, after being carried as an open question since M1.5.
- * The platform reports a terminal we destroyed ourselves exactly as it reports
- * one a person closed -- `exitStatus.code` is `undefined` either way -- so the
- * lifecycle service (M1.12) cannot tell the two apart from the event and must
- * know from the intent it acted on.
+ * `dispose()` DOES fire the close listeners, with no exit code and the reason
+ * `extension`. Neither half is a convenience: both are measured in a real VS
+ * Code by the integration suite -- the missing code is A15 (2026-08-11), which
+ * is why the lifecycle service cannot read intent out of the code and has to
+ * know it from what it acted on; the reason is A29 (2026-08-13), which is how
+ * the platform separates our own dispose from the person's own close.
  */
 export class FakeTerminalHandle implements TerminalHandle {
   public readonly terminalId: TerminalId;
@@ -170,7 +170,7 @@ export class FakeTerminalHandle implements TerminalHandle {
       return;
     }
     this.disposed = true;
-    this.close(undefined);
+    this.close(undefined, 'extension');
   }
 
   public onDidClose(listener: (exit: TerminalExit) => void): Disposable {
@@ -182,10 +182,18 @@ export class FakeTerminalHandle implements TerminalHandle {
     };
   }
 
-  /** Drives a close. `undefined` is the person closing it; a number is the process exiting. */
-  public close(code: number | undefined): void {
+  /**
+   * Drives a close: `undefined` is a terminal nothing exited inside, a number is
+   * the process's own exit.
+   *
+   * The reason is required rather than defaulted, and that is the point of it
+   * being here at all. Since A29 the answer to "does this record come back" is
+   * read off this field, so a test that did not state who ended the terminal
+   * would be a test asserting a rule it never chose an input for.
+   */
+  public close(code: number | undefined, reason: TerminalExitReason): void {
     for (const listener of this._closeListeners) {
-      listener({ code });
+      listener({ code, reason });
     }
   }
 }
