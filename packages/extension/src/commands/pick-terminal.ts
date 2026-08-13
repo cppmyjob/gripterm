@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import {
+  CONTEXT_ABANDONED,
   CONTEXT_ADOPTABLE,
   CONTEXT_LIVE,
   CONTEXT_OVER,
@@ -46,10 +47,32 @@ export const FINISHED_ROWS: readonly string[] = [CONTEXT_OVER];
  * Rows another window owns and this one may take: its window is gone, or there
  * and silent (M2.14).
  *
- * The only rows of somebody else's this window offers anything on, and the only
- * thing it offers is adoption.
+ * The only rows of somebody else's this window may START anything from, and the
+ * only thing it offers there is adoption.
  */
 export const ADOPTABLE_ROWS: readonly string[] = [CONTEXT_ADOPTABLE];
+
+/**
+ * Rows a person may throw away: ours once its terminal is over, and anybody's
+ * once nobody is answering for it (M2.22).
+ *
+ * The two foreign values are both here and neither is redundant. `abandoned` is
+ * the row that has nothing else at all -- no window to write it, no conversation
+ * to resume -- and it is the row the owner could not get rid of. `adoptable` is
+ * a row that CAN be taken over, and it is still here because "can be" is not
+ * "will be": adoption is refused for reasons that never change -- nothing was
+ * ever said in that conversation, two records name one -- and a person who does
+ * not want it back should not have to take it over first in order to delete it.
+ *
+ * What is absent is `CONTEXT_FOREIGN`, and that is the single-writer rule
+ * (§4.8): its window is there and answering, so the record is that window's
+ * business and not this one's.
+ */
+export const DISCARDABLE_ROWS: readonly string[] = [
+  CONTEXT_OVER,
+  CONTEXT_ADOPTABLE,
+  CONTEXT_ABANDONED,
+];
 
 interface TerminalPick extends vscode.QuickPickItem {
   readonly terminalId: TerminalId;
@@ -88,16 +111,20 @@ export interface TerminalPickRequest {
   /** What to say when there is nothing to offer. */
   readonly whenEmpty: string;
   /**
-   * Offer the records this window does NOT hold, instead of its own.
+   * How to judge whether the window that owns a record is still there.
    *
-   * Exactly one command has business with them -- adoption (M2.14) -- and it
-   * needs their owner's liveness to judge them at all: a foreign row is
-   * `CONTEXT_FOREIGN` while its window answers and `CONTEXT_ADOPTABLE` once it
-   * stops, and the difference is the whole of what may be offered. Passing the
-   * question in rather than asking the reconciler here keeps this file free of
-   * the sweep, which a window without a shared base does not have.
+   * Absent means "assume every owner is answering", which is the truthful
+   * default for a window with no shared base -- it holds nothing but its own
+   * records -- and which makes every foreign row `CONTEXT_FOREIGN`, so a command
+   * that has no business with other windows' records offers none of them without
+   * having to say so.
+   *
+   * The two commands that DO have such business pass the sweep's answer: taking
+   * a record over (M2.14) and throwing one away (M2.22). Passing the question in
+   * rather than asking the reconciler here keeps this file free of the sweep,
+   * which a window without a shared base does not have.
    */
-  readonly foreignLiveness?: (entry: TerminalEntry) => OwnerLiveness;
+  readonly liveness?: (entry: TerminalEntry) => OwnerLiveness;
 }
 
 /**
@@ -175,20 +202,30 @@ export async function whichTerminal(
   return chosen?.terminalId ?? null;
 }
 
-/** The records a request is about, each judged the way its row would be drawn. */
+/**
+ * The records a request is about, each judged EXACTLY THE WAY ITS ROW WOULD BE
+ * DRAWN -- same function, same two questions, so the picker and the menu cannot
+ * disagree about what a command may act on.
+ *
+ * One list rather than "ours or theirs" (M2.22). The either/or was a second rule
+ * about which records exist, and it made "offer both kinds" unspellable -- which
+ * is what deletion needs, since a person deleting a row does not care whose
+ * window it belonged to. What decides is `request.rows`, and that is the same
+ * value the manifest's `when` clauses are keyed on.
+ */
 function candidates(
   registry: SessionRegistry,
   request: TerminalPickRequest
 ): readonly { readonly entry: TerminalEntry, readonly shown: TerminalPresentation }[] {
-  const { foreignLiveness } = request;
-  if (foreignLiveness === undefined) {
-    return registry.own().map((entry) => ({ entry, shown: presentTerminal(entry) }));
-  }
-  return registry
-    .list()
-    .filter((entry) => !registry.knows(entry.terminalId))
-    .map((entry) => ({
-      entry,
-      shown: presentTerminal(entry, { ours: false, liveness: foreignLiveness(entry) }),
-    }));
+  const { liveness } = request;
+  return registry.list().map((entry) => ({
+    entry,
+    shown: presentTerminal(entry, {
+      ours: registry.knows(entry.terminalId),
+      // A record this window holds is a record whose owner is this window --
+      // adoption rewrites the owner ref, restoring goes through adoption -- so
+      // the answer for our own rows is `live` either way.
+      liveness: liveness?.(entry) ?? 'live',
+    }),
+  }));
 }

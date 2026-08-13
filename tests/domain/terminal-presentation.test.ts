@@ -1,4 +1,5 @@
 import {
+  CONTEXT_ABANDONED,
   CONTEXT_ADOPTABLE,
   CONTEXT_FOREIGN,
   CONTEXT_LIVE,
@@ -125,7 +126,7 @@ describe('presentTerminal marks what a menu may offer', () => {
    * write, so the row offers neither -- and says why in the tooltip, because
    * the only other sign is the absence of two buttons.
    */
-  it('offers nothing on a working terminal that belongs to another window', () => {
+  it('offers nothing on a working terminal whose window is there', () => {
     const shown = presentTerminal(inState('working'), { ours: false });
 
     expect(shown.contextValue).toBe(CONTEXT_FOREIGN);
@@ -159,14 +160,53 @@ describe('presentTerminal marks what a menu may offer', () => {
     ).toBe(CONTEXT_ADOPTABLE);
   });
 
-  it('offers nothing on a foreign record whose terminal was closed on purpose', () => {
-    // Adopting it would take ownership of a record with nothing to start. The
-    // storage command clears these up (M2.15); a row is all this window offers.
+  /*
+   * M2.22, and the claim it replaces was this file's own: "adopting it would
+   * take ownership of a record with nothing to start, and a row is all this
+   * window offers". True about adoption and false about the row -- the owner
+   * met such a row on 2026-08-13 and reported that it cannot be got rid of.
+   *
+   * The record belongs to a window that is not there, so nobody is going to
+   * take it away, and `CONTEXT_FOREIGN` has no menu entries at all: the only
+   * way out was a command in the title of the view that a person has to know
+   * about. Its own value now, so the manifest can offer deletion on it.
+   */
+  it('offers a foreign record away once its window is gone and its terminal is over', () => {
     const closed = makeEntry({ closedAt: new Date(CREATED_AT.getTime() + 1000) });
 
     expect(presentTerminal(closed, { ours: false, liveness: 'dead' }).contextValue).toBe(
-      CONTEXT_FOREIGN
+      CONTEXT_ABANDONED
     );
+  });
+
+  it('offers a foreign record away when its window has merely stopped answering', () => {
+    // The person is the only one who can know which it is, so the value is the
+    // same and the dialog is what differs (`disposalOf` carries the liveness).
+    // A row that offered nothing here would be stuck for as long as that window
+    // hangs -- which is exactly the state nobody else is going to resolve.
+    const closed = makeEntry({ closedAt: new Date(CREATED_AT.getTime() + 1000) });
+
+    expect(presentTerminal(closed, { ours: false, liveness: 'unknown' }).contextValue).toBe(
+      CONTEXT_ABANDONED
+    );
+  });
+
+  it('leaves the row that offers nothing to the one case that needs nothing', () => {
+    // THE INVARIANT: the only reason to offer nothing on a row is that its
+    // window is there and answering for it. Every other row a person can see
+    // has something they can do with it -- take it over, or throw it away.
+    const closed = makeEntry({ closedAt: new Date(CREATED_AT.getTime() + 1000) });
+
+    for (const entry of [inState('working'), closed]) {
+      for (const liveness of ['dead', 'unknown'] as const) {
+        expect(presentTerminal(entry, { ours: false, liveness }).contextValue).not.toBe(
+          CONTEXT_FOREIGN
+        );
+      }
+      expect(presentTerminal(entry, { ours: false, liveness: 'live' }).contextValue).toBe(
+        CONTEXT_FOREIGN
+      );
+    }
   });
 });
 

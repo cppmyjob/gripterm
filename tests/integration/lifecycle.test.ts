@@ -4,7 +4,13 @@ import { isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
 import { readFileSync, statSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
-import { CONTEXT_ADOPTABLE, CONTEXT_LIVE, CONTEXT_OVER } from '../../packages/core/src/index';
+import {
+  CONTEXT_ABANDONED,
+  CONTEXT_ADOPTABLE,
+  CONTEXT_FOREIGN,
+  CONTEXT_LIVE,
+  CONTEXT_OVER,
+} from '../../packages/core/src/index';
 import type { GriptermApi } from '../../packages/extension/src/extension';
 
 const TERMINAL_UUID = '550e8400-e29b-41d4-a716-446655440000';
@@ -74,8 +80,34 @@ suite('the lifecycle commands', () => {
     );
     assert.deepEqual(
       [...new Set(named)].sort(),
-      [CONTEXT_LIVE, CONTEXT_OVER, CONTEXT_ADOPTABLE].sort()
+      [CONTEXT_LIVE, CONTEXT_OVER, CONTEXT_ADOPTABLE, CONTEXT_ABANDONED].sort()
     );
+  });
+
+  /*
+   * M2.22, and the rule this suite exists to hold: EVERY value a row can be
+   * drawn with offers something, except the one value that means "another window
+   * is answering for this". A row that offers nothing else is a row a person
+   * cannot get rid of -- which is what the owner met on 2026-08-13, on a record
+   * left behind by a window that had closed.
+   *
+   * Written as "deletion is offered on all but one" rather than as a list,
+   * because a list is a copy of the manifest and would be updated alongside it
+   * by whoever broke this.
+   */
+  test('leaves no row a person cannot get rid of', async () => {
+    await api();
+    const rows = new Set(
+      menuItems()
+        .filter((item) => item.command === 'gripterm.deleteTerminal')
+        .map((item) => /viewItem == ([\w.]+)/u.exec(item.when)?.[1] ?? '')
+    );
+
+    for (const value of [CONTEXT_OVER, CONTEXT_ADOPTABLE, CONTEXT_ABANDONED]) {
+      assert.ok(rows.has(value), `a ${value} row has no way to be deleted`);
+    }
+    // Its window is there and is the single writer of that record (§4.8).
+    assert.equal(rows.has(CONTEXT_FOREIGN), false);
   });
 
   /*
@@ -92,7 +124,7 @@ suite('the lifecycle commands', () => {
    * mistake in the escaping would have been a menu that silently never appeared
    * and a test that stayed green.
    */
-  test('offer the edits on both kinds of row, and deletion only on a finished one', async () => {
+  test('offer the edits on both kinds of row, and deletion wherever nobody else answers', async () => {
     await api();
     const rowsFor = (command: string): string[] =>
       menuItems()
@@ -109,7 +141,16 @@ suite('the lifecycle commands', () => {
     ]) {
       assert.deepEqual(rowsFor(command), [CONTEXT_LIVE, CONTEXT_OVER].sort(), command);
     }
-    assert.deepEqual(rowsFor('gripterm.deleteTerminal'), [CONTEXT_OVER]);
+    /*
+     * M2.22: deletion is offered on a finished row of ours AND on a row nobody
+     * is answering for. The claim it replaces -- "deletion only on a finished
+     * one" -- was true of this window's own records and silent about everybody
+     * else's, which is where a row could get stuck for ever.
+     */
+    assert.deepEqual(
+      rowsFor('gripterm.deleteTerminal'),
+      [CONTEXT_OVER, CONTEXT_ADOPTABLE, CONTEXT_ABANDONED].sort()
+    );
     // M2.13, and the same rule: starting over is offered where the terminal is
     // over. On a live row it would be an offer to make a second one (О3).
     assert.deepEqual(rowsFor('gripterm.startOver'), [CONTEXT_OVER]);

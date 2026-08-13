@@ -534,7 +534,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   context.subscriptions.push(registerNewTerminal(lifecycle, registry, logger));
   context.subscriptions.push(registerFocusTerminal(gateway, logger));
   context.subscriptions.push(registerCloseTerminal(lifecycle, registry, logger));
-  context.subscriptions.push(registerDeleteTerminal(lifecycle, registry, logger));
+  context.subscriptions.push(
+    registerDeleteTerminal({
+      lifecycle,
+      registry,
+      // Both or neither, and only where there is a shared base: throwing away
+      // another window's record needs the store to move the directory in and the
+      // sweep to say that nobody is answering for it (M2.22). A window without
+      // one holds no record of anybody else's to throw away.
+      base: cleaner === null || reconciler === null ? null : { cleaner, reconciler },
+      logger,
+    })
+  );
   context.subscriptions.push(registerStartOver(lifecycle, registry, logger));
   context.subscriptions.push(registerShowRecord(view, tree, logger));
   context.subscriptions.push(

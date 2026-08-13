@@ -52,7 +52,8 @@ export const CONTEXT_LIVE = 'gripterm.terminal.live';
 export const CONTEXT_OVER = 'gripterm.terminal.over';
 
 /**
- * A record another window owns, and this window may only read.
+ * A record another window owns AND IS ANSWERING FOR, which this window may only
+ * read.
  *
  * Nothing is offered on it, and that is the point: the terminal is alive and
  * working, but it lives in a window this one cannot reach -- `focus` would raise
@@ -60,11 +61,33 @@ export const CONTEXT_OVER = 'gripterm.terminal.over';
  * write (§4.8). A button that does nothing teaches a person that the whole list
  * is decorative.
  *
- * A record whose terminal was closed on purpose keeps this value even when its
- * window has gone: there is nothing to bring back, so adoption would move
- * ownership and start nothing. Clearing those away is M2.15's.
+ * **The owner's liveness is the whole of the condition (M2.22).** Until then a
+ * record whose terminal had been closed kept this value even once its window was
+ * gone -- there was nothing to adopt, so the row offered nothing at all, to
+ * nobody, for ever. That is a row a person cannot get rid of, which is what the
+ * owner reported on 2026-08-13. See `CONTEXT_ABANDONED`.
  */
 export const CONTEXT_FOREIGN = 'gripterm.terminal.foreign';
+
+/**
+ * A record another window owns and NOBODY is answering for: its window is gone,
+ * or there and silent.
+ *
+ * The row nothing else in this build was ever going to resolve. Restoring it is
+ * refused for a reason that does not change -- its terminal was closed, or
+ * nothing was ever said in its conversation, which is what a `Start Over` left
+ * behind by a window that then went away looks like -- so adoption has nothing
+ * to offer and the automatic cleanup deliberately leaves some of them alone
+ * (`UNASKED`). What is left to do with such a record is to throw it away, and
+ * this value is what lets the manifest offer that on the row itself instead of
+ * in a command in the title of the view.
+ *
+ * **It is not "rubbish", it is "unattended".** The record may carry a name, a
+ * task and notes somebody wrote, so nothing acts on this value by itself: it
+ * only makes a menu entry appear, and what that entry does is modal, reversible
+ * and says whose window it belonged to.
+ */
+export const CONTEXT_ABANDONED = 'gripterm.terminal.abandoned';
 
 /**
  * A record another window owns, whose window is gone or has stopped answering.
@@ -189,9 +212,12 @@ export function presentTerminal(
  * What a menu may offer on this row, which is the whole of "read-only mode".
  *
  * Ownership is asked FIRST, because it is the rule and the rest is detail: a
- * record this window does not own is one it may not write (§4.8), so the only
- * question left about it is whether there is anything to take -- and a record
- * whose terminal a person closed has nothing to take.
+ * record this window does not own is one it may not write (§4.8). Then the
+ * OWNER'S LIVENESS, and that order is M2.22's correction: a foreign record whose
+ * window is there belongs to that window whatever state it is in, and a foreign
+ * record whose window is not there belongs to nobody -- so the last question,
+ * whether there is a conversation to bring back, decides between taking it over
+ * and throwing it away rather than between an offer and silence.
  */
 function contextValueFor(
   entry: TerminalEntry,
@@ -200,10 +226,10 @@ function contextValueFor(
   liveness: OwnerLiveness
 ): string {
   if (!ours) {
-    if (!entry.isRestorable() || liveness === 'live') {
+    if (liveness === 'live') {
       return CONTEXT_FOREIGN;
     }
-    return CONTEXT_ADOPTABLE;
+    return entry.isRestorable() ? CONTEXT_ADOPTABLE : CONTEXT_ABANDONED;
   }
   if (!appearance.live || !entry.isRestorable()) {
     return CONTEXT_OVER;

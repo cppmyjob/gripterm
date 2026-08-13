@@ -193,6 +193,16 @@
           "command": "gripterm.adoptTerminal",
           "when": "view == gripterm.terminals && viewItem == gripterm.terminal.adoptable",
           "group": "2_act@1"
+        },
+        {
+          "command": "gripterm.deleteTerminal",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.adoptable",
+          "group": "2_act@2"
+        },
+        {
+          "command": "gripterm.deleteTerminal",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.abandoned",
+          "group": "2_act@1"
         }
       ],
       "commandPalette": [

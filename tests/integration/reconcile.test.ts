@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { uptime } from 'node:os';
+import { CONTEXT_ABANDONED } from '../../packages/core/src/index';
 import type { GriptermApi } from '../../packages/extension/src/extension';
 
 /**
@@ -55,8 +56,15 @@ function presenceJson(): string {
   });
 }
 
-/** A record of that window's, so that the collector has a reason to keep its file. */
-function recordJson(now: number): string {
+/**
+ * A record of that window's, so that the collector has a reason to keep its
+ * file.
+ *
+ * `closedAt` is a parameter because it decides what the row is: a record whose
+ * terminal is still open can be taken over, and one whose terminal a person
+ * closed cannot -- which is the row M2.22 is about.
+ */
+function recordJson(now: number, closedAt: number | null = null): string {
   return JSON.stringify({
     terminalId: ORPHAN_TERMINAL,
     sessionId: ORPHAN_SESSION,
@@ -86,9 +94,31 @@ function recordJson(now: number): string {
       extraEnv: {},
     },
     createdAt: now,
-    closedAt: null,
+    closedAt,
     revision: 1,
   });
+}
+
+/**
+ * Waits for the base projection to catch up with a file this test just wrote.
+ *
+ * The path from a record on disk to a row is `fs.watch` -> debounce ->
+ * `readAll()` -> `replaceForeign` (§4.6), and every part of it is asynchronous
+ * on purpose. Polling is what a test may do about that; a fixed sleep would
+ * either be flaky or be the whole debounce spent on every run.
+ */
+async function awaitRow<T>(read: () => T | undefined, what: string): Promise<T> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const found = read();
+    if (found !== undefined) {
+      return found;
+    }
+    assert.ok(Date.now() < deadline, `${what} never reached this window`);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
+  }
 }
 
 function observedJson(now: number): string {
@@ -114,6 +144,22 @@ async function collectedFile(storageDir: string): Promise<string | null> {
     }
   }
   return null;
+}
+
+/**
+ * Which rows the manifest offers `gripterm.deleteTerminal` on -- read out of the
+ * host rather than written down here, so that this test compares the row the
+ * list DRAWS with the menu the editor would show on it.
+ */
+function deletableRows(): readonly string[] {
+  const extension = vscode.extensions.getExtension('gripterm-placeholder.gripterm');
+  assert.ok(extension);
+  const manifest = extension.packageJSON as {
+    contributes: { menus: Record<string, { command: string, when: string }[]> };
+  };
+  return (manifest.contributes.menus['view/item/context'] ?? [])
+    .filter((item) => item.command === 'gripterm.deleteTerminal')
+    .map((item) => /viewItem == ([\w.]+)/u.exec(item.when)?.[1] ?? '');
 }
 
 async function cleanUp(storageDir: string): Promise<void> {
@@ -175,6 +221,54 @@ suite('reconciling with the machine', () => {
       const discarded = await collectedFile(readiness.storageDir);
       assert.ok(discarded !== null, 'the collected file is nowhere under trash/');
       assert.match(await readFile(discarded, 'utf8'), new RegExp(DEAD_WINDOW, 'u'));
+    } finally {
+      await cleanUp(readiness.storageDir);
+    }
+  });
+
+  /*
+   * M2.22, and the whole chain the owner's complaint runs through: a record on
+   * disk, a window that is gone, the sweep's verdict, the presenter, the row --
+   * and then the manifest, which is where it used to end in nothing.
+   *
+   * It lives here rather than beside the other view tests because a row of a
+   * window that is GONE is what this file already knows how to build, and the
+   * fixture is the expensive half.
+   *
+   * The record is closed on purpose, which is the case that had no way out at
+   * all: it cannot be taken over -- there is nothing to resume -- and its window
+   * will never come back to delete it. The last assertion is the one that
+   * matters: whatever value the list draws such a row with, the manifest must
+   * offer deletion on THAT value. A test naming the value on both sides would
+   * have stayed green through the defect.
+   */
+  test('leaves a person a way out of a record whose window closed for good', async () => {
+    const gripterm = await api();
+    const { reconciler, readiness, registry, tree } = gripterm;
+    assert.ok(reconciler, 'this window is not reading the shared store');
+
+    const owners = join(readiness.storageDir, 'owners');
+    const terminal = join(readiness.storageDir, 'terminals', ORPHAN_TERMINAL);
+    try {
+      const now = Date.now();
+      await mkdir(owners, { recursive: true });
+      await mkdir(terminal, { recursive: true });
+      await writeFile(join(owners, DEAD_WINDOW_FILE), presenceJson(), 'utf8');
+      await writeFile(join(terminal, 'observed.json'), observedJson(now), 'utf8');
+      await writeFile(join(terminal, 'record.json'), recordJson(now, now), 'utf8');
+      await reconciler.sweep();
+
+      const entry = await awaitRow(
+        () => registry.list().find((one) => one.terminalId.value === ORPHAN_TERMINAL),
+        'the record of a window that is gone'
+      );
+      const drawn = String(tree.getTreeItem(entry).contextValue);
+
+      assert.equal(drawn, CONTEXT_ABANDONED, `the row of an abandoned record is drawn ${drawn}`);
+      assert.ok(
+        deletableRows().includes(drawn),
+        `nothing in the row menu of a ${drawn} row removes it`
+      );
     } finally {
       await cleanUp(readiness.storageDir);
     }

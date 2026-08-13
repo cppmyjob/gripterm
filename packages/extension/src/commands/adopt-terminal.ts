@@ -8,6 +8,7 @@ import type {
   Reconciler,
   RestoreInputs,
   RestoreOrchestrator,
+  RestoreRefusal,
   SessionRegistry,
   TerminalEntry,
 } from '@gripterm/core';
@@ -97,7 +98,7 @@ export function registerAdoptTerminal(parts: AdoptTerminalParts): vscode.Disposa
       // another window, and the row says whose window and when it last spoke.
       whenSole: 'ask',
       whenEmpty: 'Gripterm: every terminal of another window belongs to a window that is still answering.',
-      foreignLiveness: (entry) => base.reconciler.livenessOf(entry.owner.ownerId),
+      liveness: (entry) => base.reconciler.livenessOf(entry.owner.ownerId),
     });
     if (terminalId === null) {
       return;
@@ -166,7 +167,11 @@ async function take(
   if (refused !== undefined) {
     // The predicate said no, and it says why. This is the branch that keeps a
     // person from starting a second process on a conversation they cannot see.
-    say('warning', `Gripterm: "${label}" was not taken over — ${explainRefusal(refused.reason)}.`, logger);
+    say(
+      'warning',
+      `Gripterm: "${label}" was not taken over — ${explainRefusal(refused.reason)}.${wayOut(refused.reason)}`,
+      logger
+    );
     return;
   }
   if (plan.steps.length === 0) {
@@ -189,6 +194,24 @@ async function take(
     return;
   }
   say('warning', `Gripterm: "${label}" was taken by another window first.`, logger);
+}
+
+/**
+ * The refusals that will still be refusals tomorrow, told apart from the ones
+ * that are about this moment (M2.22).
+ *
+ * A person who pressed "take over" and was told "nothing was ever said in its
+ * conversation" has been given a fact and no move. That row is what a `Start
+ * Over` left behind by a window which then went away looks like, and it is
+ * precisely the row the owner could not get rid of -- so the sentence names the
+ * one thing left to do with it. The other refusals are deliberately silent
+ * here: a window that is asleep, a conversation the CLI is running, a listing
+ * that failed are all states that change, and telling somebody to throw the
+ * record away would be advice to lose their notes over a bad minute.
+ */
+function wayOut(reason: RestoreRefusal): string {
+  const settled = reason === 'no-transcript' || reason === 'duplicate-session';
+  return settled ? ' You can delete its record from the row\'s menu.' : '';
 }
 
 /**

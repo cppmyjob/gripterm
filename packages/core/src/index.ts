@@ -29,12 +29,14 @@ export {
 } from './domain/services/reconciler';
 
 export {
+  disposalOf,
   explainCleanup,
   planCleanup,
   planUnaskedCleanup,
   type CleanupItem,
   type CleanupPlan,
   type CleanupReason,
+  type RecordDisposal,
 } from './domain/services/cleanup-planner';
 
 export {
@@ -501,6 +503,7 @@ export {
 } from './domain/services/terminal-summary';
 
 export {
+  CONTEXT_ABANDONED,
   CONTEXT_ADOPTABLE,
   CONTEXT_FOREIGN,
   CONTEXT_LIVE,

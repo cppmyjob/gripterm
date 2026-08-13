@@ -4,6 +4,7 @@ import {
   OwnerRef,
   SessionId,
   TerminalId,
+  disposalOf,
   explainCleanup,
   planCleanup,
   planRestore,
@@ -388,5 +389,40 @@ describe('deciding what may be taken out of the store without asking', () => {
 
   it('plans nothing out of nothing', () => {
     expect(planUnaskedCleanup(inputsFor([]))).toStrictEqual({ sweep: [], kept: 0 });
+  });
+});
+
+/*
+ * M2.22. One record, in front of a person, with a menu open on it -- which is a
+ * different question from the plan above and needs its own answer: the plan is
+ * about what a WINDOW may sweep unasked, and this is about what a PERSON may
+ * throw away with their own hand.
+ *
+ * It is here rather than beside the command for the reason §3.5 gives:
+ * `packages/extension` is outside the coverage thresholds, and "whose record is
+ * this window allowed to take away" is a rule, not plumbing.
+ */
+describe('disposalOf says whose record this is to throw away', () => {
+  it('sends a record of this window through the lifecycle service', () => {
+    // Ours: the service is what refuses while a process of ours is still behind
+    // it, and it is the only thing that knows.
+    expect(disposalOf(true, 'live')).toStrictEqual({ kind: 'ours' });
+  });
+
+  it('keeps this window off a record whose own window is answering for it', () => {
+    // §4.8: that window is the single writer of this record, and it may be
+    // resuming, renaming or closing it as this is read.
+    expect(disposalOf(false, 'live')).toStrictEqual({ kind: 'owned-elsewhere' });
+  });
+
+  it('lets a person throw away a record whose window has gone', () => {
+    expect(disposalOf(false, 'dead')).toStrictEqual({ kind: 'abandoned', liveness: 'dead' });
+  });
+
+  it('lets a person throw away a record whose window has stopped answering, and says which it is', () => {
+    // The liveness travels with the answer because the dialog is where the
+    // difference lives: a window that is merely silent may be asleep and come
+    // back, and the person is the only one who can know.
+    expect(disposalOf(false, 'unknown')).toStrictEqual({ kind: 'abandoned', liveness: 'unknown' });
   });
 });

@@ -1,4 +1,5 @@
 import { refusalAnywhere } from './restore-planner';
+import type { OwnerLiveness } from '../ports/owner-presence';
 import type { RestoreInputs } from './restore-planner';
 import type { TerminalEntry } from '../entities/terminal-entry';
 
@@ -139,6 +140,58 @@ export function planUnaskedCleanup(inputs: RestoreInputs): CleanupPlan {
   const plan = planCleanup(inputs);
   const sweep = plan.sweep.filter((item) => UNASKED[item.reason]);
   return { sweep, kept: plan.kept + plan.sweep.length - sweep.length };
+}
+
+/**
+ * How ONE record, with a person's menu open on it, may be thrown away.
+ *
+ * A different question from the plans above and deliberately not built out of
+ * them: those decide what a WINDOW may sweep on its own, over the whole base,
+ * and this decides what a PERSON may do to the row in front of them. The rules
+ * that keep a window from touching a record it cannot judge -- the folder, the
+ * transcript, what the CLI is running -- are all about resuming, and none of
+ * them is a reason to make somebody live with a row for ever.
+ */
+export type RecordDisposal =
+  /**
+   * This window holds it: the lifecycle service discards it, and refuses while a
+   * process of ours is still behind it -- knowledge only that object has.
+   */
+  | { readonly kind: 'ours' }
+  /**
+   * Somebody else's, and nobody is answering for it. Its directory is moved into
+   * the trash whole, journal included, because this window may not write that
+   * record (§4.8) and moving a directory is not writing one.
+   *
+   * The liveness travels along because it is the difference the DIALOG has to
+   * say out loud: a window that is gone is ordinary, and a window that has
+   * merely stopped answering may be asleep and come back.
+   */
+  | { readonly kind: 'abandoned', readonly liveness: Exclude<OwnerLiveness, 'live'> }
+  /** Somebody else's, and that window is running. Not this window's to touch. */
+  | { readonly kind: 'owned-elsewhere' };
+
+/**
+ * Whose record this is to throw away (M2.22).
+ *
+ * The one rule, in one place, and it is short on purpose: ownership decides who
+ * acts, and liveness decides whether "somebody else's" still means anybody. It
+ * lives in the domain because `packages/extension` is outside the coverage
+ * thresholds (§3.5) -- a decision taken there is a decision nothing checks --
+ * and because the row menu and the picker must not be able to answer it
+ * differently.
+ *
+ * Neither of the two answers that DO something is unconditional: `ours` still
+ * meets the lifecycle service's refusal while a terminal is running, and
+ * `abandoned` still meets a modal that names the window it belonged to. What
+ * this function forbids is the fourth answer that used to exist by accident --
+ * silence.
+ */
+export function disposalOf(ours: boolean, liveness: OwnerLiveness): RecordDisposal {
+  if (ours) {
+    return { kind: 'ours' };
+  }
+  return liveness === 'live' ? { kind: 'owned-elsewhere' } : { kind: 'abandoned', liveness };
 }
 
 function reasonFor(entry: TerminalEntry, inputs: RestoreInputs): CleanupReason | null {

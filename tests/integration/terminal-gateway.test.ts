@@ -389,6 +389,64 @@ suite('VsCodeTerminalGateway', () => {
     assert.equal(exit.code, 0);
   });
 
+  /*
+   * The OTHER spelling of the same act, and the one the owner named beside the
+   * cross when they were asked which closes should be final: "только ✕ и Kill
+   * Terminal". The test above says in as many words that it does not cover this
+   * one -- "a rule measured on one call site and applied to the other is a rule
+   * measured on neither" -- and it was right to, which left the second half of
+   * the owner's answer resting on nothing.
+   *
+   * What hangs on it: `_noteDeliberateClose` reads the pair (`user`, nothing
+   * exited). If the platform reported this call site differently, killing a
+   * terminal would leave a record that comes back at the next reload -- a
+   * conversation resumed by a person who had just ended it, which is the same
+   * complaint as M2.20 wearing the other face.
+   */
+  test('A29: Kill Terminal from the context menu is reported the same way as the cross', async () => {
+    const { gateway } = await api();
+    const terminals = vscode.workspace.getConfiguration('terminal.integrated');
+    const confirmOnKill = terminals.get<string>('confirmOnKill');
+    await terminals.update('confirmOnKill', 'never', vscode.ConfigurationTarget.Global);
+
+    try {
+      const handle = await gateway.create({
+        terminalId: TERMINAL_ID,
+        name: 'gripterm-a29-kill',
+        cwd: os.tmpdir(),
+        env: {},
+        // Nothing that can exit by itself and win the race to the close event.
+        shellPath: null,
+        shellArgs: [],
+      });
+      // `workbench.action.terminal.kill` acts on the ACTIVE terminal, so the
+      // focus is the argument here -- and it is checked rather than assumed, or
+      // this test would quietly measure whatever else was open.
+      handle.show(false);
+      await waitFor(
+        'the terminal to become the active one',
+        () => vscode.window.activeTerminal?.name === 'gripterm-a29-kill'
+      );
+
+      const closed = closeOf(handle);
+      // `killEditor` and NOT `kill`, and that is itself a measurement rather
+      // than a preference: `workbench.action.terminal.kill` left this terminal
+      // running for the whole twenty-second wait (2026-08-13). It acts on the
+      // panel's active instance, and this build opens terminals in the editor
+      // area (`gripterm.launch.location`, default `editor`), where the command
+      // behind the menu entry is this one.
+      await vscode.commands.executeCommand('workbench.action.terminal.killEditor');
+      const exit = await closed;
+
+      assert.equal(exit.reason, 'user');
+      // Nothing exited: the process was taken away, it did not end. This is the
+      // half that separates the act from a `claude` that stopped on its own.
+      assert.equal(exit.code, undefined);
+    } finally {
+      await terminals.update('confirmOnKill', confirmOnKill, vscode.ConfigurationTarget.Global);
+    }
+  });
+
   test('A29: the person closing the terminal tab is reported as a user close', async () => {
     const { gateway } = await api();
     const terminals = vscode.workspace.getConfiguration('terminal.integrated');
