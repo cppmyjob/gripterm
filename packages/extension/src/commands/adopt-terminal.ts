@@ -92,8 +92,12 @@ export function registerAdoptTerminal(parts: AdoptTerminalParts): vscode.Disposa
     const terminalId =
       named ??
       (await pickTerminal(registry, logger, {
+        title: 'Take Over Terminal',
         placeHolder: 'Take over which terminal?',
         rows: ADOPTABLE_ROWS,
+        // Asked even when there is one (M2.18): this takes a record from
+        // another window, and the row says whose window and when it last spoke.
+        whenSole: 'ask',
         whenEmpty: 'Gripterm: every terminal of another window belongs to a window that is still answering.',
         foreignLiveness: (entry) => base.reconciler.livenessOf(entry.owner.ownerId),
       }));

@@ -458,7 +458,8 @@ export {
   type WindowFacts,
 } from './domain/services/owner-identity';
 
-export { terminalIdFrom } from './domain/services/terminal-target';
+export { chooseTerminal, terminalIdFrom } from './domain/services/terminal-target';
+export type { SoleTerminal, TerminalChoice } from './domain/services/terminal-target';
 
 export {
   TerminalLifecycleService,

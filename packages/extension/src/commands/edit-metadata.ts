@@ -52,12 +52,12 @@ export function registerMetadataCommands(
   registry: SessionRegistry,
   logger: Logger
 ): readonly vscode.Disposable[] {
-  const resolve = async (target: unknown): Promise<TerminalEntry | null> =>
-    await entryFor(target, registry, logger);
+  const resolve = async (target: unknown, title: string): Promise<TerminalEntry | null> =>
+    await entryFor(target, registry, logger, title);
 
   return [
     vscode.commands.registerCommand(RENAME_TERMINAL_COMMAND, async (target: unknown) => {
-      const entry = await resolve(target);
+      const entry = await resolve(target, 'Rename Terminal');
       if (entry === null) {
         return;
       }
@@ -74,7 +74,7 @@ export function registerMetadataCommands(
     }),
 
     vscode.commands.registerCommand(SET_TASK_COMMAND, async (target: unknown) => {
-      const entry = await resolve(target);
+      const entry = await resolve(target, 'Set Task');
       if (entry === null) {
         return;
       }
@@ -90,7 +90,7 @@ export function registerMetadataCommands(
     }),
 
     vscode.commands.registerCommand(ADD_NOTE_COMMAND, async (target: unknown) => {
-      const entry = await resolve(target);
+      const entry = await resolve(target, 'Add Note');
       if (entry === null) {
         return;
       }
@@ -106,7 +106,7 @@ export function registerMetadataCommands(
     }),
 
     vscode.commands.registerCommand(EDIT_TAGS_COMMAND, async (target: unknown) => {
-      const entry = await resolve(target);
+      const entry = await resolve(target, 'Edit Tags');
       if (entry === null) {
         return;
       }
@@ -122,7 +122,7 @@ export function registerMetadataCommands(
     }),
 
     vscode.commands.registerCommand(SET_COLOR_COMMAND, async (target: unknown) => {
-      const entry = await resolve(target);
+      const entry = await resolve(target, 'Set Colour');
       if (entry === null) {
         return;
       }
@@ -166,6 +166,10 @@ function colorPicks(current: string | null): readonly ColorPick[] {
  * showing what is there now, and a rename box that starts empty is a rename box
  * that loses the name of anybody who opens it to look.
  *
+ * The TITLE is the command's own, and it is passed down rather than written once
+ * here: the picker and the box that follows it are one act, and a box headed
+ * "Rename Terminal" behind a picker headed "Edit Terminal" is two.
+ *
  * A record that went between the picker opening and the choice being made comes
  * back as `null` and is not reported. It is not an error: another window can
  * delete a record, and a dialog about it would interrupt somebody to tell them
@@ -174,15 +178,20 @@ function colorPicks(current: string | null): readonly ColorPick[] {
 async function entryFor(
   target: unknown,
   registry: SessionRegistry,
-  logger: Logger
+  logger: Logger,
+  title: string
 ): Promise<TerminalEntry | null> {
   const named = terminalIdFrom(target);
   const terminalId: TerminalId | null =
     named ??
     (await pickTerminal(registry, logger, {
-      placeHolder: 'Edit which terminal?',
+      title,
+      placeHolder: 'Which terminal?',
       rows: EDITABLE_ROWS,
       whenEmpty: 'Gripterm: there is no terminal of this window to edit.',
+      // The only row there could be is the one being edited, and the box that
+      // opens next shows its current value with its own title above it (M2.18).
+      whenSole: 'take',
     }));
   if (terminalId === null) {
     return null;

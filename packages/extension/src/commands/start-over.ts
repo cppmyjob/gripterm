@@ -39,9 +39,13 @@ export function registerStartOver(
     const terminalId =
       named ??
       (await pickTerminal(registry, logger, {
+        title: 'Start Over',
         placeHolder: 'Start which terminal over?',
         rows: FINISHED_ROWS,
         whenEmpty: 'Gripterm: every terminal of this window is still running.',
+        // Asked even when there is one (M2.18): this archives the record whose
+        // conversation id is the only handle on the old conversation.
+        whenSole: 'ask',
       }));
     if (terminalId === null) {
       return;

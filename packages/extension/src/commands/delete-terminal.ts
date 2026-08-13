@@ -40,9 +40,14 @@ export function registerDeleteTerminal(
     const terminalId =
       named ??
       (await pickTerminal(registry, logger, {
+        title: 'Delete Record',
         placeHolder: 'Delete the record of which terminal?',
         rows: FINISHED_ROWS,
         whenEmpty: 'Gripterm: every terminal of this window is still running.',
+        // Asked even when there is one (M2.18). The modal below names what goes
+        // and what stays, and this is where the person reads WHICH record that
+        // is about.
+        whenSole: 'ask',
       }));
     if (terminalId === null) {
       return;

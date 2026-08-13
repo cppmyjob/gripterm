@@ -1,10 +1,17 @@
 import * as vscode from 'vscode';
-import { CONTEXT_ADOPTABLE, CONTEXT_LIVE, CONTEXT_OVER, presentTerminal } from '@gripterm/core';
+import {
+  CONTEXT_ADOPTABLE,
+  CONTEXT_LIVE,
+  CONTEXT_OVER,
+  chooseTerminal,
+  presentTerminal,
+} from '@gripterm/core';
 import { say } from '../ui/say';
 import type {
   Logger,
   OwnerLiveness,
   SessionRegistry,
+  SoleTerminal,
   TerminalEntry,
   TerminalId,
   TerminalPresentation,
@@ -48,7 +55,22 @@ interface TerminalPick extends vscode.QuickPickItem {
 }
 
 export interface TerminalPickRequest {
+  /**
+   * What the command is, above the box.
+   *
+   * Required rather than optional, and this is the M2.18 defect written into
+   * the type: a quick pick without a title is an empty line with a list under
+   * it, indistinguishable from a box asking for a name -- which is exactly what
+   * a person took it for. A new picker cannot be added without answering this.
+   */
+  readonly title: string;
   readonly placeHolder: string;
+  /**
+   * What to do when this window holds exactly one row this command could act
+   * on. Required for the same reason as `title`: it is a decision about the
+   * command, and a default here would make it silently.
+   */
+  readonly whenSole: SoleTerminal;
   /** Which rows to offer, by the same value the menus are keyed on. */
   readonly rows: readonly string[];
   /** What to say when there is nothing to offer. */
@@ -84,6 +106,13 @@ export interface TerminalPickRequest {
  * Adoption is the one command whose candidates are the other set, and it says so
  * (`foreignLiveness`) rather than growing a picker of its own -- one function
  * still decides what a chosen row means.
+ *
+ * What it does NOT do any more is ask a question with one possible answer
+ * (M2.18): where the window holds a single row and the command allows it
+ * (`whenSole`), that row is taken and the person goes straight to the dialog
+ * they came for. `chooseTerminal` makes that decision, in the domain, because it
+ * is a decision -- and because this package is outside the coverage thresholds
+ * (§3.5), where a rule about which terminal to act on has no business being.
  */
 export async function pickTerminal(
   registry: SessionRegistry,
@@ -99,12 +128,19 @@ export async function pickTerminal(
       terminalId: entry.terminalId,
     }));
 
-  if (picks.length === 0) {
+  const choice = chooseTerminal(picks.map((pick) => pick.terminalId), request.whenSole);
+  if (choice.kind === 'nothing') {
     say('info', request.whenEmpty, logger);
     return null;
   }
+  if (choice.kind === 'take') {
+    return choice.terminalId;
+  }
 
-  const chosen = await vscode.window.showQuickPick(picks, { placeHolder: request.placeHolder });
+  const chosen = await vscode.window.showQuickPick(picks, {
+    title: request.title,
+    placeHolder: request.placeHolder,
+  });
   // `undefined` is the person pressing Escape, and that is an answer: do
   // nothing, say nothing.
   return chosen?.terminalId ?? null;

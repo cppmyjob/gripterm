@@ -29,9 +29,14 @@ export function registerCloseTerminal(
     const terminalId =
       named ??
       (await pickTerminal(registry, logger, {
+        title: 'Close Terminal',
         placeHolder: 'Close which terminal?',
         rows: [CONTEXT_LIVE],
         whenEmpty: 'Gripterm: there is no running terminal to close.',
+        // Asked even when there is one, unlike the edit commands (M2.18): this
+        // ends a conversation and opens no second dialog, so the picker is the
+        // last place a person sees what they are about to close.
+        whenSole: 'ask',
       }));
     if (terminalId === null) {
       return;
