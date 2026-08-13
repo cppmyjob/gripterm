@@ -179,6 +179,46 @@ function extensionLog() {
     : [];
 }
 
+/**
+ * The runner itself: the process of the extension host that is holding the
+ * store open.
+ *
+ * Taken from our own presence file rather than from the process table, and that
+ * is not a shortcut -- there is no other honest way. In VS Code 1.132 the
+ * extension host is a `--type=utility` child among several of them, with nothing
+ * in its command line to tell it from the file watcher or the pty host, while
+ * `owners/<id>.json` carries the pid the extension itself announced (§4.8).
+ */
+function runnerPids() {
+  const dir = join(STORE, 'owners');
+  const files = existsSync(dir) ? readdirSync(dir) : [];
+  return files
+    .map((name) => JSON.parse(readFileSync(join(dir, name), 'utf8')).pid)
+    .filter((pid) => Number.isInteger(pid));
+}
+
+/** Whether the operating system still has this process. The instrument О1 is measured with. */
+function processAlive(pid) {
+  return pid === null
+    ? 'no pid'
+    : powershell(`if (Get-Process -Id ${pid} -ErrorAction SilentlyContinue) { 'alive' } else { 'gone' }`);
+}
+
+/** Packages this build and installs it into the run's own extensions directory. */
+function install() {
+  execFileSync('pnpm', ['run', 'package'], { cwd: REPO, stdio: 'ignore', shell: true });
+  // One quoted command line rather than an argument vector: the launcher is a
+  // `.cmd`, which needs a shell, and a shell needs the spaces in "Microsoft VS
+  // Code" quoted. `--force` because a second run installs the same version
+  // again, and the launcher calls that a failure.
+  const launcher = join(dirname(CODE), 'bin', 'code.cmd');
+  execFileSync(
+    `"${launcher}" --install-extension "${join(EXTENSION, 'gripterm-0.0.1.vsix')}"` +
+      ` --user-data-dir "${USER_DATA}" --extensions-dir "${EXTENSIONS}" --force`,
+    { stdio: 'ignore', shell: true }
+  );
+}
+
 /** A window closed the way a person closes it, not killed: deactivation has to run. */
 function closeEditors() {
   for (const pid of editorProcesses()) {
@@ -329,6 +369,99 @@ async function sitting(number, terminalId, sessionId) {
   return { took, running, leftBehind: leftBehind.length, record: record.record, count: records().length };
 }
 
+
+/**
+ * О1, with the restore in play: the runner is killed and Claude Code carries on.
+ *
+ * M1.15 measured this without a restore, on a terminal a person had started. The
+ * plan asks for it again here for the reason it gives: in M1 there is no restore,
+ * and the restore is what could break it -- a window that comes back could start
+ * a SECOND `claude` on a conversation the first one is still holding.
+ *
+ * The extension host is killed rather than the whole editor, because that is the
+ * shape of the failure: the pty belongs to the editor, so the terminal lives on
+ * while the runner behind it is gone.
+ *
+ * THE EXTENSION IS INSTALLED FOR THIS ONE, and that is not tidiness. Measured
+ * 2026-08-13: in a development host (`--extensionDevelopmentPath`) killing the
+ * extension host takes the terminal's `claude` with it within seven seconds,
+ * while the same kill against the same build INSTALLED leaves it running for as
+ * long as it was watched. О1 is a promise about what a person has installed, so
+ * that is the configuration it is measured in.
+ */
+async function killTheRunner(terminalId, sessionId) {
+  const before = journal(terminalId).length;
+  install();
+  const editor = spawn(
+    CODE,
+    [
+      '--user-data-dir', USER_DATA,
+      '--extensions-dir', EXTENSIONS,
+      '--disable-workspace-trust',
+      '--new-window',
+      PROJECT,
+    ],
+    { stdio: 'ignore', detached: false }
+  );
+  editor.unref();
+
+  await until(
+    'the conversation to come back before the runner is killed',
+    () => {
+      const line = journal(terminalId).slice(before).find((one) => one.body?.hook_event_name === 'SessionStart');
+      return line === undefined ? null : line;
+    },
+    RESTORE_WITHIN_MS
+  );
+  await new Promise((resolve) => setTimeout(resolve, 5000));
+
+  const running = runningHere();
+  const claudePid = running[0]?.pid ?? null;
+  console.log('--- О1: the runner is killed while a restored conversation is running');
+  console.log(`  the build          : installed, not a development host`);
+  console.log(`  running before     : ${JSON.stringify(running.map((one) => `${one.sessionId} pid=${one.pid}`))}`);
+
+  const hosts = runnerPids();
+  if (hosts.length === 0) {
+    throw new Error('no runner to kill: the store has no presence file');
+  }
+  for (const pid of hosts) {
+    powershell(`Stop-Process -Id ${pid} -Force`);
+  }
+  console.log(`  killed             : the runner, pid ${JSON.stringify(hosts)}`);
+  const killedAt = Date.now();
+
+  // Long enough for the editor to restart the host and for a restarted one to
+  // pass the minute after which a window that left no goodbye counts as gone --
+  // which is when a second `claude --resume` would appear if anything were
+  // going to start one.
+  for (let waited = 0; waited < 90_000; waited += 15_000) {
+    await new Promise((resolve) => setTimeout(resolve, 15_000));
+    const now = runningHere();
+    console.log(
+      `  +${Math.round((Date.now() - killedAt) / 1000)}s: claude=${processAlive(claudePid)}` +
+        ` listed=${JSON.stringify(now.map((one) => `${one.sessionId} pid=${one.pid}`))}`
+    );
+  }
+
+  const after = runningHere();
+  const sameOne = processAlive(claudePid) === 'alive'
+    && after.length === 1
+    && after[0].sessionId === sessionId
+    && after[0].pid === claudePid;
+  console.log(`  the same process still holds the same conversation: ${String(sameOne)}`);
+  console.log(`  records in store   : ${records().length}`);
+  for (const line of extensionLog().filter((one) => /bring|restor|adopt/iu.test(one))) {
+    console.log(`  log                : ${line}`);
+  }
+
+  closeEditors();
+  await until('the О1 window to close', () => (editorProcesses().length === 0 ? true : null), CLOSES_WITHIN_MS);
+  const leftBehind = runningHere();
+  console.log(`  running after close: ${leftBehind.length === 0 ? 'none' : JSON.stringify(leftBehind.map((one) => one.sessionId))}`);
+  return { sameOne, count: records().length, leftBehind: leftBehind.length };
+}
+
 // --- the run -----------------------------------------------------------------
 
 if (!existsSync(CODE)) {
@@ -359,6 +492,7 @@ console.log(`  running here       : ${runningHere().length}`);
 
 const second = await sitting(2, terminalId, sessionId);
 const third = await sitting(3, terminalId, sessionId);
+const o1 = await killTheRunner(terminalId, sessionId);
 
 const failures = [];
 for (const [name, sat] of [['second', second], ['third', third]]) {
@@ -382,9 +516,19 @@ for (const [name, sat] of [['second', second], ['third', third]]) {
   }
 }
 
+if (!o1.sameOne) {
+  failures.push('killing the runner did not leave the same process on the same conversation');
+}
+if (o1.count !== 1) {
+  failures.push(`killing the runner left ${o1.count} records`);
+}
+if (o1.leftBehind !== 0) {
+  failures.push(`the О1 window left ${o1.leftBehind} conversations running`);
+}
+
 console.log('--- verdict');
 if (failures.length === 0) {
-  console.log('  П2 and О3 hold on this machine, in this build');
+  console.log('  П2, О3 and О1 hold on this machine, in this build');
 } else {
   for (const failure of failures) {
     console.log(`  FAILED: ${failure}`);
