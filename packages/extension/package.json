@@ -298,14 +298,16 @@
         "gripterm.launch.location": {
           "type": "string",
           "enum": [
+            "group",
             "editor",
             "panel"
           ],
           "enumDescriptions": [
-            "In the editor area, as a tab. The panel and its list of terminals stay out of the way, and the tab carries the terminal's Gripterm name.",
+            "In a group of the editor area that belongs to your agents: a strip below the editors, holding their tabs and nothing else. It appears with the first terminal and goes with the last.",
+            "In the editor area, as a tab among your own editors. The panel and its list of terminals stay out of the way, and the tab carries the terminal's Gripterm name.",
             "In the terminal panel, alongside your ordinary terminals."
           ],
-          "default": "editor",
+          "default": "group",
           "markdownDescription": "Where a Gripterm terminal is opened."
         },
         "gripterm.journal.includeContent": {

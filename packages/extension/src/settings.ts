@@ -34,8 +34,8 @@ const DEFAULT_MAX_SIZE_MB = DEFAULT_JOURNAL_POLICY.maxSizeBytes / BYTES_PER_MB;
 /** `process`, on the strength of A13: the TUI comes up as a pty process with no shell under it. */
 const DEFAULT_LAUNCH_MODE: LaunchMode = 'process';
 
-/** The editor area -- see `LaunchLocation` for why that is the default rather than the panel. */
-const DEFAULT_LAUNCH_LOCATION: LaunchLocation = 'editor';
+/** A group of the editor area that is ours -- see `LaunchLocation` for why that is the default. */
+const DEFAULT_LAUNCH_LOCATION: LaunchLocation = 'group';
 
 /**
  * Which states get a notification, as the person configured them.

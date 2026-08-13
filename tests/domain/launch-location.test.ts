@@ -1,13 +1,14 @@
 import { LAUNCH_LOCATIONS, isLaunchLocation } from '../../packages/core/src/index';
 
 describe('where a terminal is opened', () => {
-  it('offers exactly two places, with the editor first', () => {
+  it('offers exactly three places, with the strip of our own first', () => {
     // The order is the manifest's default: a list whose first member is not the
     // default is a trap for the next person to read either file.
-    expect(LAUNCH_LOCATIONS).toEqual(['editor', 'panel']);
+    expect(LAUNCH_LOCATIONS).toEqual(['group', 'editor', 'panel']);
   });
 
-  it('recognises both', () => {
+  it('recognises all three', () => {
+    expect(isLaunchLocation('group')).toBe(true);
     expect(isLaunchLocation('editor')).toBe(true);
     expect(isLaunchLocation('panel')).toBe(true);
   });

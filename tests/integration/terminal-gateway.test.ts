@@ -254,7 +254,11 @@ suite('VsCodeTerminalGateway', () => {
    */
   test('A21: a terminal opens as an editor tab, not in the panel', async () => {
     const { gateway, readiness } = await api();
-    assert.equal(readiness.location, 'editor', 'the default is no longer the editor area');
+    // `group` and not `editor` since M2.24, and A21 is untouched by that: the
+    // strip IS the editor area, one group of it. What the assertion is here to
+    // catch is the default becoming `panel`, which would move every measurement
+    // in this file to a place where the platform answers differently.
+    assert.notEqual(readiness.location, 'panel', 'the default is no longer the editor area');
     // By NAME rather than by count. Earlier tests in this file open and close
     // terminals of their own, and the editor tears their tabs down on its own
     // schedule -- so a count taken here can fall as easily as it rises, and an
@@ -366,8 +370,10 @@ suite('VsCodeTerminalGateway', () => {
     const { gateway, readiness } = await api();
     // The whole point of this assertion is WHERE it runs. In the panel the same
     // exit is reported as `process`; in the editor area, which is what this
-    // build opens terminals in, the platform sees a tab closing and says `user`.
-    assert.equal(readiness.location, 'editor');
+    // build opens terminals in -- since M2.24 in a group of the editor area
+    // that is ours, which is the same area -- the platform sees a tab closing
+    // and says `user`.
+    assert.notEqual(readiness.location, 'panel');
     const process0 = exiting(0);
 
     const handle = await gateway.create({

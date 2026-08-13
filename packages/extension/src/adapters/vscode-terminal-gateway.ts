@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
+import { VsCodeEditorStrip } from './vscode-editor-strip';
 import type {
   Disposable,
   LaunchLocation,
+  Logger,
   TerminalExit,
   TerminalExitReason,
   TerminalGateway,
@@ -11,11 +13,18 @@ import type {
 } from '@gripterm/core';
 
 /**
- * Our vocabulary against the editor's. Total over `LaunchLocation`, so a third
- * place would fail the build here rather than fall back to a default nobody
- * chose.
+ * The place that is not one of the editor's, because the editor has no name for
+ * it: a group of the editor area that is ours (M2.24). See `VsCodeEditorStrip`.
  */
-const PLACES: Readonly<Record<LaunchLocation, vscode.TerminalLocation>> = {
+const STRIP = 'strip';
+
+/**
+ * Our vocabulary against the editor's. Total over `LaunchLocation`, so a fourth
+ * place would fail the build here rather than fall back to a default nobody
+ * chose -- which is exactly what it did when `group` was added.
+ */
+const PLACES: Readonly<Record<LaunchLocation, vscode.TerminalLocation | typeof STRIP>> = {
+  group: STRIP,
   editor: vscode.TerminalLocation.Editor,
   panel: vscode.TerminalLocation.Panel,
 };
@@ -94,21 +103,27 @@ function exitOf(terminal: vscode.Terminal): TerminalExit {
  *
  * WHERE the terminal lands is decided here and not in the domain, because it is
  * a fact about this editor and about nothing else: the spec says what to run.
- * The default is the editor area (`gripterm.launch.location`), which removes the
- * panel's furniture -- its `TERMINAL / PORTS / PROBLEMS / OUTPUT` bar and its own
- * list of terminals -- and puts our display name on the tab. It is also the
- * carrier the roadmap already names for the workflow view of M5: the canvas is a
- * webview tab BESIDE the terminal, and a terminal that lives in the panel has no
- * beside.
+ * The default is a group of the editor area that is ours alone
+ * (`gripterm.launch.location`, `group` -- M2.24), which keeps everything the
+ * plain editor area gave us -- no `TERMINAL / PORTS / PROBLEMS / OUTPUT` bar, no
+ * shared list of terminals, our display name on the tab -- and adds the one
+ * thing the owner asked for: the agents together, in a place of their own,
+ * below the code. It is also the carrier the roadmap already names for the
+ * workflow view of M5: the canvas is a webview tab BESIDE the terminal, and a
+ * terminal that lives in the panel has no beside.
  */
 export class VsCodeTerminalGateway implements TerminalGateway, Disposable {
   private readonly _handles = new Map<string, VsCodeTerminalHandle>();
   private readonly _closeSubscription: vscode.Disposable;
   private readonly _activeSubscription: vscode.Disposable;
   private readonly _location: LaunchLocation;
+  private readonly _strip: VsCodeEditorStrip;
+  private readonly _logger: Logger;
 
-  constructor(location: LaunchLocation) {
+  constructor(location: LaunchLocation, logger: Logger) {
     this._location = location;
+    this._logger = logger;
+    this._strip = new VsCodeEditorStrip(logger);
     this._closeSubscription = vscode.window.onDidCloseTerminal((terminal) => {
       this._onClosed(terminal);
     });
@@ -133,7 +148,7 @@ export class VsCodeTerminalGateway implements TerminalGateway, Disposable {
       cwd: spec.cwd,
       env: { ...spec.env },
       shellArgs: [...spec.shellArgs],
-      location: PLACES[this._location],
+      location: await this._place(),
       isTransient: true,
       // `null` means "run the person's own shell" (`gripterm.launch.mode:
       // shell`), and the editor spells that by the key being ABSENT. Writing
@@ -164,6 +179,34 @@ export class VsCodeTerminalGateway implements TerminalGateway, Disposable {
     // to kill a conversation, and the editor closing takes them anyway --
     // that is what `isTransient` is for.
     this._handles.clear();
+  }
+
+  /**
+   * Where this terminal opens, decided per launch because the strip is not a
+   * constant: it is made when the first terminal needs it and goes when the
+   * last one does.
+   *
+   * A strip that cannot be made costs the person nothing but the strip. Four
+   * workbench commands stand behind it, none of them API, and the day one of
+   * them is renamed the answer must be a terminal among the editors and a line
+   * in the log -- not a button that does nothing.
+   */
+  private async _place(): Promise<vscode.TerminalLocation | vscode.TerminalEditorLocationOptions> {
+    const place = PLACES[this._location];
+    if (place !== STRIP) {
+      return place;
+    }
+    try {
+      // `preserveFocus`: creating a terminal must not take the person off what
+      // they were doing. Revealing it is `show`'s business, and the lifecycle
+      // decides when that happens.
+      return { viewColumn: await this._strip.column(), preserveFocus: true };
+    } catch (cause: unknown) {
+      this._logger.warn('a group of our own could not be made, opening among the editors', {
+        cause: String(cause),
+      });
+      return vscode.TerminalLocation.Editor;
+    }
   }
 
   private _onClosed(terminal: vscode.Terminal): void {

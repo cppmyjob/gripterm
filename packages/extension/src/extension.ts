@@ -296,7 +296,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   });
 
   const location = readLaunchLocation(logger);
-  const gateway = new VsCodeTerminalGateway(location);
+  const gateway = new VsCodeTerminalGateway(location, logger);
   context.subscriptions.push({ dispose: () => { gateway.dispose(); } });
 
   const storage = new StorageLayout(readStorageDir(logger));

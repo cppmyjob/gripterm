@@ -29,6 +29,12 @@ export {
 } from './domain/services/reconciler';
 
 export {
+  withGroupShare,
+  type EditorLayout,
+  type EditorLayoutNode,
+} from './domain/services/editor-layout';
+
+export {
   disposalOf,
   explainCleanup,
   planCleanup,
