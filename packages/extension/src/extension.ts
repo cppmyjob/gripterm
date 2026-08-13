@@ -35,6 +35,7 @@ import {
   TerminalMetadataService,
   TerminalStateMachine,
   TerminalTabNamer,
+  claudeRenameCommand,
   claudeSessionsDirectory,
   claudeSettingsLocations,
   claudeTranscriptsDirectory,
@@ -467,6 +468,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
         pid,
         conversation
       ),
+    // And the way back (M2.19): the CLI has no channel for a rename but the one
+    // a person has, so this types it. The guards that decide WHEN are in the
+    // mirror -- only while that terminal is idle, and once per name.
+    tell: (terminalId, name) => {
+      gateway.handleFor(terminalId)?.sendText(claudeRenameCommand(name), true);
+    },
   });
   context.subscriptions.push(names);
   names.start();

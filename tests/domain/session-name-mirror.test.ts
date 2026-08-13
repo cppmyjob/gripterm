@@ -45,6 +45,12 @@ interface Stand {
   readonly names: Map<number, string>;
   /** Pids whose file cannot be read at all. */
   readonly broken: Set<number>;
+  /** What the conversation itself was told to call itself, in order. */
+  readonly told: { readonly terminalId: string, readonly name: string }[];
+  /** Runs an action inside the next read, while the pass is in flight. */
+  readonly whileReading: (action: () => void) => void;
+  /** Makes the conversation stop taking what it is told, as a busy prompt box would. */
+  readonly deafen: () => void;
   readonly asked: number[];
   readonly nameOf: (id?: string) => string;
   readonly held: (id?: string) => TerminalEntry;
@@ -65,6 +71,9 @@ function stand(
 
   const names = new Map<number, string>();
   const broken = new Set<number>();
+  const told: { readonly terminalId: string, readonly name: string }[] = [];
+  let meanwhile: (() => void) | null = null;
+  let deaf = false;
   const asked: number[] = [];
   const scheduler = new FakeScheduler();
   const mirror = new SessionNameMirror({
@@ -72,8 +81,23 @@ function stand(
     scheduler,
     logger,
     ...(intervalMs === undefined ? {} : { intervalMs }),
+    tell: (terminalId: TerminalId, name: string): void => {
+      told.push({ terminalId: terminalId.value, name });
+      // The conversation takes the name the moment it is told, which is what a
+      // real `/rename` does -- the next pass then reads it back. Unless it is
+      // deaf: the line can land in a prompt box that was not empty, and then
+      // nothing happens at all.
+      if (!deaf) {
+        names.set(PID, name);
+      }
+    },
     read: async (pid: number): Promise<string | null> => {
       asked.push(pid);
+      if (meanwhile !== null) {
+        const action = meanwhile;
+        meanwhile = null;
+        action();
+      }
       if (broken.has(pid)) {
         throw new Error('the sessions directory is not readable');
       }
@@ -96,6 +120,13 @@ function stand(
     mirror,
     names,
     broken,
+    told,
+    whileReading: (action: () => void): void => {
+      meanwhile = action;
+    },
+    deafen: (): void => {
+      deaf = true;
+    },
     asked,
     held,
     nameOf: (id: string = TERMINAL_UUID): string => held(id).metadata.displayName,
@@ -318,5 +349,173 @@ describe('following a conversation renamed inside Claude Code', () => {
     await world.mirror.pass();
 
     expect(world.nameOf()).toBe('Test 1');
+  });
+});
+
+/**
+ * The other direction, added in M2.19 because the owner asked for it: a row
+ * renamed HERE reaching the conversation itself.
+ *
+ * There is no channel for it but the one a person has -- typing `/rename` into
+ * the terminal -- and that is why every guard below exists. Text typed into a
+ * terminal that is not idle does not disappear: it lands in the prompt box and
+ * the newline SENDS it, which costs a turn and puts a line nobody wrote into
+ * somebody's conversation.
+ */
+describe('telling the conversation what the row is called now', () => {
+  const renameHere = (world: Stand, name: string): void => {
+    const entry = world.held();
+    world.registry.amend(entry.withMetadata(entry.metadata.withDisplayName(name)));
+  };
+
+  it('tells the conversation when the row was renamed here', async () => {
+    const world = stand();
+    world.names.set(PID, 'Test 1');
+    await world.mirror.pass();
+
+    renameHere(world, 'auth work');
+    await world.mirror.pass();
+
+    expect(world.told).toEqual([{ terminalId: TERMINAL_UUID, name: 'auth work' }]);
+  });
+
+  it('says nothing while the two names agree', async () => {
+    const world = stand();
+    world.names.set(PID, 'Test 1');
+
+    await world.mirror.pass();
+    await world.mirror.pass();
+
+    expect(world.told).toEqual([]);
+  });
+
+  it('never types into a terminal that is not idle', async () => {
+    // The whole reason this is a guard and not a preference: the newline would
+    // send whatever is in the prompt box as a message.
+    const world = stand(makeEntry({ observed: observed('working', PID) }));
+    world.names.set(PID, 'Test 1');
+    await world.mirror.pass();
+
+    renameHere(world, 'auth work');
+    await world.mirror.pass();
+
+    expect(world.told).toEqual([]);
+  });
+
+  it('tells it once, however many passes go by', async () => {
+    const world = stand();
+    world.names.set(PID, 'Test 1');
+    await world.mirror.pass();
+
+    renameHere(world, 'auth work');
+    await world.mirror.pass();
+    await world.mirror.pass();
+    await world.mirror.pass();
+
+    expect(world.told).toHaveLength(1);
+  });
+
+  it('does not tell it a name that came from it in the first place', async () => {
+    const world = stand();
+
+    world.names.set(PID, 'Test 1');
+    await world.mirror.pass();
+    await world.mirror.pass();
+
+    expect(world.nameOf()).toBe('Test 1');
+    expect(world.told).toEqual([]);
+  });
+
+  it('says nothing when it cannot tell what the CLI calls the conversation', async () => {
+    // `launch.mode: shell` is the real case: the pid is the shell, there is no
+    // session file under it, and typing into that terminal would be blind.
+    const world = stand();
+
+    renameHere(world, 'auth work');
+    await world.mirror.pass();
+
+    expect(world.told).toEqual([]);
+  });
+
+  it('lets the CLI win when both sides moved between passes', async () => {
+    const world = stand();
+    world.names.set(PID, 'Test 1');
+    await world.mirror.pass();
+
+    renameHere(world, 'ours');
+    world.names.set(PID, 'theirs');
+    await world.mirror.pass();
+
+    expect(world.nameOf()).toBe('theirs');
+    expect(world.told).toEqual([]);
+  });
+
+  it('tells it again after the CLI moved, even a name it was told once before', async () => {
+    // The memory of what was told is about ONE state of the conversation. Once
+    // the CLI has renamed itself, that memory is spent -- and a person putting
+    // the old name back here must reach the conversation again.
+    const world = stand();
+    world.names.set(PID, 'Test 1');
+    await world.mirror.pass();
+
+    renameHere(world, 'ours');
+    await world.mirror.pass();
+
+    world.names.set(PID, 'theirs');
+    await world.mirror.pass();
+
+    renameHere(world, 'ours');
+    await world.mirror.pass();
+
+    expect(world.told).toEqual([
+      { terminalId: TERMINAL_UUID, name: 'ours' },
+      { terminalId: TERMINAL_UUID, name: 'ours' },
+    ]);
+  });
+
+  it('does not type the same rename again when the conversation did not take it', async () => {
+    // We cannot see whether the line arrived: it may have landed in a prompt box
+    // that was not empty. Repeating it every two seconds would turn one mistake
+    // into a stream of them.
+    const world = stand();
+    world.names.set(PID, 'Test 1');
+    await world.mirror.pass();
+    world.deafen();
+
+    renameHere(world, 'ours');
+    await world.mirror.pass();
+    await world.mirror.pass();
+    await world.mirror.pass();
+
+    expect(world.told).toHaveLength(1);
+  });
+
+  it('says in the log that a conversation was told, because nobody typed it', async () => {
+    const world = stand();
+    world.names.set(PID, 'Test 1');
+    await world.mirror.pass();
+
+    renameHere(world, 'auth work');
+    await world.mirror.pass();
+
+    expect(world.logger.infos.some((line) => line.message.includes('was told'))).toBe(true);
+  });
+});
+
+describe('a record that goes while the pass is in flight', () => {
+  it('is left alone in both directions', async () => {
+    // A delete in another command, or another window taking the record over,
+    // can land between the read and the write. Amending a remembered entry here
+    // would put a deleted record back.
+    const world = stand();
+    world.names.set(PID, 'Test 1');
+    world.whileReading(() => {
+      world.registry.forget(TerminalId.fromString(TERMINAL_UUID));
+    });
+
+    await world.mirror.pass();
+
+    expect(world.registry.own()).toHaveLength(0);
+    expect(world.told).toEqual([]);
   });
 });

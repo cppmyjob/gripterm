@@ -1,4 +1,4 @@
-import { SessionId, readSessionName } from '../../../packages/core/src/index';
+import { SessionId, claudeRenameCommand, readSessionName } from '../../../packages/core/src/index';
 import { SESSION_UUID, NEXT_SESSION_UUID } from '../../helpers/domain-fixtures';
 
 const CONVERSATION = SessionId.fromString(SESSION_UUID);
@@ -70,5 +70,28 @@ describe('the name Claude Code has for a conversation', () => {
     expect(readSessionName('[]', CONVERSATION)).toBeNull();
     expect(readSessionName('7', CONVERSATION)).toBeNull();
     expect(readSessionName('null', CONVERSATION)).toBeNull();
+  });
+});
+
+/**
+ * The other direction (M2.19): what has to be TYPED into a conversation to give
+ * it the name its row now has. There is no other channel -- the CLI takes a
+ * name at startup and from `/rename`, and nothing else.
+ */
+describe('the line that renames a conversation from the outside', () => {
+  it('is the command a person would type', () => {
+    expect(claudeRenameCommand('auth work')).toBe('/rename auth work');
+  });
+
+  it('never contains a newline, whatever the name holds', () => {
+    // This line is typed into a terminal and a newline SENDS it. A name with one
+    // in it would send `/rename` with half the name and then submit the rest as
+    // a message -- a turn spent, and a line nobody wrote in the transcript.
+    expect(claudeRenameCommand('two\nlines')).toBe('/rename two lines');
+    expect(claudeRenameCommand('tab\there')).toBe('/rename tab here');
+  });
+
+  it('is trimmed, because the name came from a box a person typed in', () => {
+    expect(claudeRenameCommand('  spaced  ')).toBe('/rename spaced');
   });
 });

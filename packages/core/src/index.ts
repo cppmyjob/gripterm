@@ -12,7 +12,7 @@ export {
   parseAgentListing,
 } from './domain/agents/claude-code/agent-listing';
 
-export { readSessionName } from './domain/agents/claude-code/session-name';
+export { claudeRenameCommand, readSessionName } from './domain/agents/claude-code/session-name';
 
 export type { AgentListing, AgentRecord } from './domain/entities/agent-record';
 

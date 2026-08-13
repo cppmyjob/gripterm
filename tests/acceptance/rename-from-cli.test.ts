@@ -47,7 +47,7 @@ interface StoredRecord {
   readonly metadata: { readonly displayName: string };
 }
 
-suite('rename', () => {
+suite('rename from the CLI', () => {
   test('`/rename` inside the terminal renames the row and the tab', async () => {
     const gripterm = await api();
     const { readiness, registry } = gripterm;

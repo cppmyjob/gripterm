@@ -485,7 +485,13 @@ console.log(`acceptance store: ${STORE}`);
 // The cheap ones first, each with a store of its own: both leave a record, and
 // П2 counts records to answer О3.
 if (wanted('rename')) {
-  host('rename');
+  // Two hosts and not one: each of these opens a terminal, and each asserts on
+  // an empty store first -- which is how they know they are looking at their
+  // own record and not at one left behind.
+  emptyStore();
+  host('rename from the CLI');
+  emptyStore();
+  host('rename to the CLI');
   emptyStore();
 }
 if (wanted('П3')) {

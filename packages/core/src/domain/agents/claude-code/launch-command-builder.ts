@@ -52,6 +52,15 @@ export class LaunchCommandBuilder {
         ? ['--session-id', params.entry.sessionId.value]
         : ['--resume', params.entry.sessionId.value]),
 
+      // --- what the person calls it, on BOTH paths -----------------------------
+      // Measured 2026-08-13 (M2.19): `claude --name X` writes `name: X` into its
+      // own session file with NO `nameSource`, which is precisely what
+      // `readSessionName` reads as "a person chose this". So the CLI's view and
+      // ours agree from the first second rather than drifting until somebody
+      // types `/rename`. On a resume it matters more, not less: a resumed
+      // conversation otherwise comes back with a fresh derived name.
+      ...displayName(params.entry),
+
       ...scalars(launch, params.intent),
 
       // --- last, and deliberately so ------------------------------------------
@@ -115,6 +124,21 @@ const INHERITED_FROM_ANOTHER_RUN: Readonly<Record<string, null>> = Object.freeze
 
 function variadic(flag: string, values: readonly string[]): string[] {
   return values.length === 0 ? [] : [flag, ...values];
+}
+
+/**
+ * `--name`, from the record as it is NOW.
+ *
+ * From the entry rather than from the recipe, and that is the point: a person
+ * renames a row long after the recipe was written, and the next restore has to
+ * carry the name they can see rather than the one they started with.
+ *
+ * Unconditional, with no guard against a blank one: `HumanMetadata` refuses a
+ * blank name and trims what it keeps, so there is no such entry to defend
+ * against. A guard here would be a branch no test could reach.
+ */
+function displayName(entry: TerminalEntry): string[] {
+  return ['--name', entry.metadata.displayName];
 }
 
 function scalars(launch: LaunchRecipe, intent: LaunchIntent): string[] {

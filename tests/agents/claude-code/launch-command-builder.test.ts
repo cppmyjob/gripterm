@@ -300,3 +300,41 @@ describe('LaunchCommandBuilder: the result cannot be edited afterwards', () => {
     expect(() => ((command.env as Record<string, string>).X = 'y')).toThrow(TypeError);
   });
 });
+
+/**
+ * M2.19. The name a person gave the row, carried into the CLI's own view of the
+ * conversation -- measured 2026-08-13: `claude --name X` puts `name: X` into
+ * `~/.claude/sessions/<pid>.json` with NO `nameSource`, which is exactly what
+ * `readSessionName` reads as "a person named this". So the two sides agree from
+ * the first second instead of drifting until somebody types `/rename`.
+ */
+describe('LaunchCommandBuilder: the name the person gave the row', () => {
+  it('is given to the CLI on launch', () => {
+    const entry = makeEntry().withMetadata(makeEntry().metadata.withDisplayName('auth work'));
+
+    expect(valueOf(build('launch', { entry }).args, '--name')).toBe('auth work');
+  });
+
+  it('is given again on a resume, because the CLI forgets it', () => {
+    // Measured 2026-08-13: a resumed conversation comes back with a fresh
+    // derived name. Without this flag the row and the CLI part company at every
+    // restore.
+    const entry = makeEntry().withMetadata(makeEntry().metadata.withDisplayName('auth work'));
+
+    expect(valueOf(build('resume', { entry }).args, '--name')).toBe('auth work');
+  });
+
+  it('is the name the record has NOW, not the one it was created with', () => {
+    const entry = makeEntry().withMetadata(makeEntry().metadata.withDisplayName('renamed since'));
+
+    expect(valueOf(build('resume', { entry }).args, '--name')).toBe('renamed since');
+  });
+
+  it('does not eat the positional prompt', () => {
+    // `--name <name>` takes exactly one token, but so does `--model`, and the
+    // rule this file exists for is that nothing here may swallow what follows.
+    const args = build('launch').args;
+
+    expect(args[args.length - 1]).toBe(SETTINGS_PATH);
+  });
+});

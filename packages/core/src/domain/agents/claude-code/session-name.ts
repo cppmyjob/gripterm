@@ -61,3 +61,22 @@ export function readSessionName(text: string, conversation: SessionId): string |
   const trimmed = name.trim();
   return trimmed.length === 0 ? null : trimmed;
 }
+
+/**
+ * The line to type into a conversation to give it the name its row now has.
+ *
+ * There is no other way round: the CLI takes a name at startup (`--name`) and
+ * from `/rename`, and offers nothing an outsider can call. The state file that
+ * `[jobStateNameSync]` watches -- `<config>/jobs/<short>/state.json` -- is for
+ * background jobs, and a machine running only interactive sessions has no such
+ * directory at all (measured 2026-08-13).
+ *
+ * **Whitespace is collapsed, and that is the whole of the safety here.** This
+ * string is typed into a terminal and the newline after it SENDS it: a name
+ * carrying a line break would rename the conversation to half of itself and
+ * submit the other half as a message -- a turn spent, and a line nobody wrote in
+ * somebody's transcript.
+ */
+export function claudeRenameCommand(name: string): string {
+  return `/rename ${name.replace(/\s+/gu, ' ').trim()}`;
+}

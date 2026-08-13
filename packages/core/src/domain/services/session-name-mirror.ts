@@ -5,6 +5,7 @@ import type { RegistryChange, SessionRegistry } from './session-registry';
 import type { Scheduler } from '../ports/scheduler';
 import type { SessionId } from '../entities/session-id';
 import type { TerminalEntry } from '../entities/terminal-entry';
+import type { TerminalId } from '../entities/terminal-id';
 
 /**
  * How often the CLI is asked what it calls each conversation.
@@ -26,6 +27,16 @@ export interface SessionNameMirrorOptions {
    * CLI derived itself.
    */
   readonly read: (pid: number, conversation: SessionId) => Promise<string | null>;
+  /**
+   * Tells that conversation what it is called now.
+   *
+   * The CLI has no channel for this but the one a person has -- `/rename`, typed
+   * into the terminal -- so an implementation of this types it. That is why it
+   * is called under the guards in `_look` and nowhere else, and why it takes a
+   * NAME rather than a line: which command spells it is Claude Code's business,
+   * and this file is not allowed to know (the linter enforces it).
+   */
+  readonly tell: (terminalId: TerminalId, name: string) => void;
   readonly scheduler: Scheduler;
   readonly logger: Logger;
   /** Defaults to `DEFAULT_NAME_POLL_MS`. */
@@ -63,6 +74,8 @@ export class SessionNameMirror implements Disposable {
   private readonly _options: SessionNameMirrorOptions;
   /** Terminal id -> the last name the CLI was seen to have for it. */
   private readonly _seen = new Map<string, string>();
+  /** Terminal id -> the last name this window told that conversation to take. */
+  private readonly _told = new Map<string, string>();
   private readonly _subscription: Disposable;
   private _timer: Disposable | null = null;
   private _stopped = false;
@@ -76,6 +89,7 @@ export class SessionNameMirror implements Disposable {
       // first rename after that would be skipped as "nothing changed".
       if (change.kind === 'removed') {
         this._seen.delete(change.terminalId.value);
+        this._told.delete(change.terminalId.value);
       }
     });
   }
@@ -106,6 +120,7 @@ export class SessionNameMirror implements Disposable {
     this._timer?.dispose();
     this._timer = null;
     this._seen.clear();
+    this._told.clear();
   }
 
   private _arm(): void {
@@ -162,17 +177,38 @@ export class SessionNameMirror implements Disposable {
       return;
     }
 
-    const id = entry.terminalId.value;
-    if (name === null || name === this._seen.get(id)) {
+    // Nothing readable means nothing to compare against, in either direction.
+    // `launch.mode: shell` lives here permanently -- the pid is the shell's --
+    // and typing a rename into a terminal whose name we cannot read would be
+    // typing blind.
+    if (name === null) {
       return;
     }
-    this._seen.set(id, name);
 
-    // Read again rather than amending the entry this pass began with: an event
+    // Read again rather than acting on the entry this pass began with: an event
     // could have arrived while the file was being read, and writing back a
     // remembered entry would undo it.
+    const id = entry.terminalId.value;
     const current = this._options.registry.get(entry.terminalId);
-    if (current === undefined || current.metadata.displayName === name) {
+    if (current === undefined) {
+      return;
+    }
+
+    if (name !== this._seen.get(id)) {
+      this._follow(current, name);
+      return;
+    }
+    this._tell(current, name);
+  }
+
+  /** The CLI moved: the row takes its name. */
+  private _follow(current: TerminalEntry, name: string): void {
+    const id = current.terminalId.value;
+    this._seen.set(id, name);
+    // Whatever we last told this conversation is spent: the name it has now is
+    // the one that counts, and a later rename here must be told again.
+    this._told.delete(id);
+    if (current.metadata.displayName === name) {
       return;
     }
     this._options.registry.amend(current.withMetadata(current.metadata.withDisplayName(name)));
@@ -180,6 +216,36 @@ export class SessionNameMirror implements Disposable {
       terminalId: id,
       was: current.metadata.displayName,
       now: name,
+    });
+  }
+
+  /**
+   * The CLI has not moved since the last pass, so a row that differs was renamed
+   * HERE -- and the conversation is told, once.
+   *
+   * **Only while it is idle**, and that is a guard rather than a preference: the
+   * only channel is typing, a terminal that is working has a prompt box instead
+   * of a command line, and the newline would SEND whatever is in it. That costs
+   * a turn and puts a line nobody wrote into somebody's conversation. A rename
+   * made while the terminal is busy is simply told later, on the pass after it
+   * goes idle.
+   *
+   * **Once per name**, because we cannot see whether it worked. The name may
+   * have landed in a prompt box that was not empty, and repeating that every two
+   * seconds would turn one mistake into a stream of them.
+   */
+  private _tell(current: TerminalEntry, theirs: string): void {
+    const ours = current.metadata.displayName;
+    const id = current.terminalId.value;
+    if (ours === theirs || this._told.get(id) === ours || current.observed.state !== 'idle') {
+      return;
+    }
+    this._told.set(id, ours);
+    this._options.tell(current.terminalId, ours);
+    this._options.logger.info('a row was renamed here, and the conversation was told', {
+      terminalId: id,
+      was: theirs,
+      now: ours,
     });
   }
 }
