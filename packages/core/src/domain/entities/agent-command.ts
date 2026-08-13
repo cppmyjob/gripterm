@@ -15,6 +15,14 @@ export interface AgentCommand {
   /** Absolute path to the executable. Never a bare name: PATH belongs to the terminal, not to us. */
   readonly executable: string;
   readonly args: readonly string[];
-  /** Added to the terminal's environment, not a replacement for it. */
-  readonly env: Readonly<Record<string, string>>;
+  /**
+   * Added to the terminal's environment, not a replacement for it -- and `null`
+   * takes a variable AWAY, which the editor's own port spells the same way
+   * (`TerminalOptions.env`).
+   *
+   * The removals matter as much as the additions: an editor started from inside
+   * a Claude Code terminal hands every terminal we open the markers of that
+   * session, and one of them stops the CLI writing a transcript at all (A28).
+   */
+  readonly env: Readonly<Record<string, string | null>>;
 }

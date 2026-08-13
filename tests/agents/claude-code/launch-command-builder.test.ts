@@ -224,6 +224,48 @@ describe('LaunchCommandBuilder: the environment', () => {
     expect(env[TOKEN_ENV_VAR]).toBe(TOKEN);
   });
 
+  it('takes away the markers of the session that started the editor', () => {
+    /*
+     * A28, measured 2026-08-13, and the second defect the acceptance run of
+     * M2.16 found. A person who types `code .` inside a Claude Code terminal
+     * gives their editor that session's environment, and every terminal we open
+     * inherits it. With `CLAUDE_CODE_CHILD_SESSION` present the CLI writes NO
+     * transcript and no history line at all -- so the conversation cannot be
+     * resumed by anybody, ours or theirs, and the failure is silent.
+     *
+     * Removal and not an empty string: an empty `CLAUDECODE` is still a
+     * `CLAUDECODE`, and the editor's own port takes `null` for "unset this"
+     * (`TerminalOptions.env`).
+     */
+    const { env } = build('launch');
+
+    expect(env.CLAUDE_CODE_CHILD_SESSION).toBeNull();
+    expect(env.CLAUDECODE).toBeNull();
+    expect(env.CLAUDE_CODE_SSE_PORT).toBeNull();
+    expect(env.CLAUDE_CODE_SESSION_ID).toBeNull();
+    expect(env.CLAUDE_PID).toBeNull();
+  });
+
+  it('lets a recipe put back a marker it names on purpose', () => {
+    // The removal list is a default against junk nobody asked for; a recipe is
+    // somebody saying what this terminal is to have. Explicit beats default, so
+    // the removals go in first and the recipe over them.
+    const { env } = build('launch', {}, recipe({ extraEnv: { CLAUDE_PROJECT_DIR: 'D:/Projects/foo' } }));
+
+    expect(env.CLAUDE_PROJECT_DIR).toBe('D:/Projects/foo');
+    expect(env.CLAUDE_CODE_CHILD_SESSION).toBeNull();
+  });
+
+  it('leaves alone the variables a person sets on purpose', () => {
+    // `CLAUDE_CONFIG_DIR` chooses the profile -- credentials, settings, the lot
+    // -- and a person who set it means it. The rule is about the identity of a
+    // RUN, not about configuration that happens to start with the same word.
+    const { env } = build('launch');
+
+    expect(env.CLAUDE_CONFIG_DIR).toBeUndefined();
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
   it('does not let a recipe overwrite the token', () => {
     // A recipe that shadowed it would authenticate as nothing and every event
     // would come back 401 -- a terminal that runs and is never seen.

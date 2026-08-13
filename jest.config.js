@@ -25,11 +25,17 @@ module.exports = {
   },
   // Every suite under tests/, by subtraction rather than by enumeration: a list
   // of directories silently stops running the day someone adds a twelfth one.
-  // tests/integration is the single exclusion, and it is deliberate -- it
-  // imports the 'vscode' module, which exists only inside a running Extension
-  // Host. That suite belongs to `pnpm test:integration` (@vscode/test-cli).
+  // Two exclusions, and both are deliberate. `tests/integration` imports the
+  // 'vscode' module, which exists only inside a running Extension Host; it
+  // belongs to `pnpm test:integration` (@vscode/test-cli). `tests/acceptance`
+  // does the same AND starts a real `claude` that spends a real turn, so it
+  // belongs to `pnpm test:acceptance` and to nothing that runs by itself.
   testMatch: ['<rootDir>/tests/**/*.test.ts'],
-  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/tests/integration/'],
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '<rootDir>/tests/integration/',
+    '<rootDir>/tests/acceptance/',
+  ],
   collectCoverageFrom: ['packages/core/src/**/*.ts', '!packages/core/src/index.ts'],
   coverageThreshold: {
     global: {

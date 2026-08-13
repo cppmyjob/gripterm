@@ -106,6 +106,17 @@ function stand(strategy: LaunchStrategy = new ProcessLaunchStrategy()): Stand {
   return { clock, logger, registry, gateway, commands, lifecycle };
 }
 
+/**
+ * Lets the promises the service did not await finish.
+ *
+ * `start` does not wait for the editor to say which process it spawned -- a
+ * platform that never answered would otherwise hold up every restore -- so the
+ * pid arrives after the call returns, and a test has to give it that moment.
+ */
+async function flush(): Promise<void> {
+  await new Promise((resolve) => setImmediate(resolve));
+}
+
 function request(displayName = 'auth-refactor'): LaunchRequest {
   return { displayName, recipe: makeRecipe() };
 }
@@ -291,6 +302,100 @@ describe('TerminalLifecycleService starts a terminal', () => {
   });
 });
 
+describe('the pid of the process the editor started', () => {
+  /**
+   * П2 rests on this, and until 2026-08-13 nothing produced it.
+   *
+   * `mayBeRunning` (the restore predicate) reads a record with no pid as one
+   * whose `claude` may still be running, and refuses to bring it back --
+   * correctly, because "we have no evidence" is not "it is gone". The
+   * consequence went unnoticed for the whole of M2: EVERY record had a null pid,
+   * so every automatic restore was refused with `session-running`, and the
+   * acceptance run of M2.16 is what found it.
+   *
+   * The source is the editor itself, which knows the process it spawned. The
+   * hook environment carries the CLI's own pid too (A16), but only a command
+   * hook sees it -- one event, one channel, and nothing at all for a terminal
+   * whose session never announced itself.
+   */
+  it('is written onto the record, because the restore predicate has nothing else to ask', async () => {
+    const { lifecycle, gateway, registry } = stand();
+    gateway.pid = 4242;
+
+    const entry = await lifecycle.launch(request());
+    await flush();
+
+    expect(registry.get(entry.terminalId)?.observed.pid).toBe(4242);
+  });
+
+  it('leaves the record alone when the platform does not know it', async () => {
+    // `processId` resolves to `undefined` for a terminal whose process never
+    // came up. Writing a zero or a guess here would be worse than the null: the
+    // predicate would read it as a pid and ask whether a stranger is alive.
+    const { lifecycle, gateway, registry } = stand();
+    gateway.pid = null;
+
+    const entry = await lifecycle.launch(request());
+    await flush();
+
+    expect(registry.get(entry.terminalId)?.observed.pid).toBeNull();
+  });
+
+  it('says so in the log when there is no pid to be had', async () => {
+    const { lifecycle, gateway, logger } = stand();
+    gateway.pid = null;
+
+    await lifecycle.launch(request());
+    await flush();
+
+    expect(logger.infos.map((line) => line.message)).toContain(
+      'the editor did not say which process the terminal is running'
+    );
+  });
+
+  it('touches nothing but the pid, however far the record has moved by then', async () => {
+    // The pid arrives asynchronously, and a hook can beat it: the terminal is
+    // already `idle` when the editor answers. Writing back the record this
+    // method remembers would put `launching` on it again.
+    const { lifecycle, gateway, registry } = stand();
+    gateway.pid = 77;
+    gateway.holdPid();
+
+    const entry = await lifecycle.launch(request());
+    registry.ingest(entry.terminalId, {
+      kind: 'SessionStart',
+      sessionId: entry.sessionId,
+      source: 'startup',
+      promptId: null,
+      cwd: null,
+      transcriptPath: null,
+    });
+    gateway.releasePid();
+    await flush();
+
+    const held = registry.get(entry.terminalId);
+    expect(held?.observed.state).toBe('idle');
+    expect(held?.observed.pid).toBe(77);
+  });
+
+  it('does not resurrect a record this window no longer holds', async () => {
+    // The person deleted the row while the editor was still answering. `amend`
+    // would refuse it with a warning; the point of the check is that the warning
+    // never happens, because nothing here is amiss.
+    const { lifecycle, gateway, registry, logger } = stand();
+    gateway.pid = 99;
+    gateway.holdPid();
+
+    const entry = await lifecycle.launch(request());
+    registry.forget(entry.terminalId);
+    gateway.releasePid();
+    await flush();
+
+    expect(registry.knows(entry.terminalId)).toBe(false);
+    expect(logger.warnings).toStrictEqual([]);
+  });
+});
+
 describe('TerminalLifecycleService starts a terminal nobody asked for', () => {
   /** A record as a restore finds it in the store: mid-turn, from a window that is gone. */
   function midTurn(): TerminalEntry {
@@ -323,7 +428,12 @@ describe('TerminalLifecycleService starts a terminal nobody asked for', () => {
 
     await lifecycle.start(midTurn(), 'resume', 'hidden');
 
-    expect(logger.infos.at(-1)?.details).toMatchObject({ intent: 'resume', visibility: 'hidden' });
+    // By its message rather than by its position: since M2.16 the pid of the
+    // process the editor started arrives on its own schedule and writes a line
+    // of its own, and a test that meant "the start" while saying "the last one"
+    // would fail for a reason that has nothing to do with what it checks.
+    const started = logger.infos.find((line) => line.message === 'a terminal was started');
+    expect(started?.details).toMatchObject({ intent: 'resume', visibility: 'hidden' });
   });
 
   it('stamps the record launching, whatever it was doing when its window died', async () => {

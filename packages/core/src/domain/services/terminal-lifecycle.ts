@@ -240,6 +240,14 @@ export class TerminalLifecycleService implements Disposable {
     this._options.registry.register(starting);
     this._watch(handle, intent);
 
+    // Not awaited, and that is the decision: the editor settles this promise
+    // when the process is up, and a platform that never settled it would hold
+    // every restore of every window behind it. What it costs is that the record
+    // is without a pid for a moment after it appears, and a restore in that
+    // moment is refused rather than doubled -- the direction every unknown in
+    // this project falls (`gatherRestoreInputs`).
+    void this._notePid(handle);
+
     if (plan.initialInput !== null) {
       // `shell` mode only: the command is typed into the person's shell. A11 and
       // A12 live exactly here and nowhere else (see `ShellLaunchStrategy`).
@@ -409,6 +417,37 @@ export class TerminalLifecycleService implements Disposable {
       }),
       createdAt: startedAt,
     });
+  }
+
+  /**
+   * Writes down which process the editor started for this terminal.
+   *
+   * The pid is the only evidence any window has that a conversation has stopped
+   * running -- `mayBeRunning` reads its absence as "it may still be going" and
+   * refuses to restore -- so the record without one is the record that never
+   * comes back. Measured in the acceptance run of M2.16: with no producer at
+   * all, every restore was refused with `session-running`.
+   *
+   * The entry is re-read here rather than closed over. Between the start and
+   * this answer a hook can arrive, a person can rename the terminal or delete
+   * the row, and writing back the record this method remembers would undo
+   * whichever of those happened. A record that is gone is left gone: it is not
+   * this window's any more, and `amend` would be right to refuse it.
+   */
+  private async _notePid(handle: TerminalHandle): Promise<void> {
+    const { terminalId } = handle;
+    const pid = await handle.processId();
+    if (pid === null) {
+      this._options.logger.info('the editor did not say which process the terminal is running', {
+        terminalId: terminalId.value,
+      });
+      return;
+    }
+    const current = this._options.registry.get(terminalId);
+    if (current === undefined) {
+      return;
+    }
+    this._options.registry.amend(current.withObserved(current.observed.withPid(pid)));
   }
 
   private _watch(handle: TerminalHandle, intent: LaunchIntent): void {

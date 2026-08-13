@@ -1,4 +1,7 @@
 import * as assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { readFile, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import * as os from 'node:os';
 import * as vscode from 'vscode';
 import type { GriptermApi } from '../../packages/extension/src/extension';
@@ -32,6 +35,26 @@ function exiting(code: number): { readonly path: string, readonly args: readonly
   return process.platform === 'win32'
     ? { path: process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe', args: ['/c', `exit ${code}`] }
     : { path: '/bin/sh', args: ['-c', `exit ${code}`] };
+}
+
+/** A process that stays up until the terminal is disposed, so its pid can be asked about. */
+function lingering(): { readonly path: string, readonly args: readonly string[] } {
+  return process.platform === 'win32'
+    ? { path: process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe', args: ['/c', 'pause'] }
+    : { path: '/bin/sh', args: ['-c', 'read line'] };
+}
+
+/** The node the forwarder is run with, and a process that reports its own environment. */
+function nodePath(): string {
+  const found = execFileSync('where', ['node'], { encoding: 'utf8' }).split(/\r?\n/u)[0];
+  return found === undefined ? 'node' : found.trim();
+}
+
+/** What the operating system calls the process behind a pid. The check that the number is the right one. */
+function imageNameOf(pid: number): string {
+  return process.platform === 'win32'
+    ? execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf8' })
+    : execFileSync('ps', ['-p', String(pid), '-o', 'comm='], { encoding: 'utf8' });
 }
 
 async function api(): Promise<GriptermApi> {
@@ -113,6 +136,83 @@ suite('VsCodeTerminalGateway', () => {
 
     const exit = await closeOf(handle);
     assert.equal(exit.code, 3);
+  });
+
+  test('names the process the editor started, which is the whole of the pid channel', async () => {
+    /*
+     * M2.16, and the defect its acceptance run found: nothing wrote a pid onto
+     * a record, so the restore predicate read every one of them as "may still
+     * be running" and brought nothing back.
+     *
+     * Checked against the operating system rather than against a non-zero
+     * number: what matters is that `Terminal.processId` is the process we ASKED
+     * for and not a console host or a helper standing in front of it, because
+     * the question every window asks of that number is "is this conversation
+     * still running".
+     */
+    const { gateway } = await api();
+    const waiting = lingering();
+
+    const handle = await gateway.create({
+      terminalId: TERMINAL_ID,
+      name: 'gripterm-pid',
+      cwd: os.tmpdir(),
+      env: {},
+      shellPath: waiting.path,
+      shellArgs: waiting.args,
+    });
+
+    try {
+      const pid = await handle.processId();
+      assert.ok(pid !== null && pid > 0, `the editor named no process: ${String(pid)}`);
+      assert.match(imageNameOf(pid), /cmd\.exe/iu);
+    } finally {
+      handle.dispose();
+      await closeOf(handle);
+    }
+  });
+
+  test('takes a variable away when the spec says null, and not merely blanks it', async () => {
+    /*
+     * The platform half of A28. Our launch removes the markers of another Claude
+     * Code run from the terminal environment (`INHERITED_FROM_ANOTHER_RUN`), and
+     * the whole of that fix rests on the editor honouring `null` in
+     * `TerminalOptions.env` as "unset". An empty string would not do: the CLI
+     * reads presence, not value.
+     *
+     * `NUMBER_OF_PROCESSORS` stands in for a marker here -- it is always in a
+     * Windows environment, it belongs to nobody, and its absence is unambiguous.
+     */
+    const { gateway } = await api();
+    const dump = join(os.tmpdir(), `gripterm-env-${String(process.pid)}.json`);
+    const script = join(os.tmpdir(), `gripterm-env-${String(process.pid)}.js`);
+    // A script rather than a redirection: the arguments of a terminal process go
+    // to the process, not through a shell, so `>` would be a literal argument.
+    await writeFile(script, 'require("fs").writeFileSync(process.argv[2], JSON.stringify(process.env));', 'utf8');
+    await rm(dump, { force: true });
+
+    const handle = await gateway.create({
+      terminalId: TERMINAL_ID,
+      name: 'gripterm-env',
+      cwd: os.tmpdir(),
+      env: { GRIPTERM_KEPT: 'yes', NUMBER_OF_PROCESSORS: null },
+      shellPath: nodePath(),
+      shellArgs: [script, dump],
+    });
+
+    try {
+      await closeOf(handle);
+      const written = JSON.parse(await readFile(dump, 'utf8')) as Record<string, string>;
+      assert.equal(written.GRIPTERM_KEPT, 'yes', 'the variable we added is not there');
+      assert.equal(
+        written.NUMBER_OF_PROCESSORS,
+        undefined,
+        'the variable we removed is still there'
+      );
+    } finally {
+      await rm(dump, { force: true });
+      await rm(script, { force: true });
+    }
   });
 
   test('forgets a terminal once it has closed', async () => {

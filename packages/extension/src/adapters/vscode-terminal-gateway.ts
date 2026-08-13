@@ -122,6 +122,17 @@ class VsCodeTerminalHandle implements TerminalHandle {
     this._terminal = terminal;
   }
 
+  /**
+   * `Terminal.processId` is a promise the editor settles once the process is
+   * spawned, and `undefined` when it has none to report -- a terminal whose
+   * process never came up, or one the platform lost track of. Both arrive here
+   * as `null`: the record stores a pid or the absence of one, and inventing a
+   * number would make the restore predicate ask whether a stranger is alive.
+   */
+  public async processId(): Promise<number | null> {
+    return (await this._terminal.processId) ?? null;
+  }
+
   public sendText(text: string, execute: boolean): void {
     this._terminal.sendText(text, execute);
   }

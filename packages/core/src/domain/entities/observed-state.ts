@@ -65,4 +65,24 @@ export class ObservedState {
     }
     return new ObservedState(params, params.lastEventAt.getTime());
   }
+
+  /**
+   * The same snapshot, with the process the editor named on it.
+   *
+   * Its own method because the pid arrives from a channel of its own, after
+   * everything else and on the editor's schedule (M2.16): a caller rebuilding
+   * the whole state around one field would be writing back whatever it happened
+   * to remember about the other six.
+   */
+  public withPid(pid: number | null): ObservedState {
+    return ObservedState.create({
+      state: this.state,
+      lastEventAt: this.lastEventAt,
+      currentTool: this.currentTool,
+      lastAssistantMessage: this.lastAssistantMessage,
+      cost: this.cost,
+      contextWindow: this.contextWindow,
+      pid,
+    });
+  }
 }

@@ -18,7 +18,8 @@ export interface TerminalSpec {
   /** The title the person sees in the terminal list. */
   readonly name: string;
   readonly cwd: string;
-  readonly env: Readonly<Record<string, string>>;
+  /** Added to the terminal's environment; `null` removes a variable the editor would otherwise pass on. */
+  readonly env: Readonly<Record<string, string | null>>;
   /** Absolute path to the executable that becomes the terminal process, or `null` to run the user's shell and type the command in afterwards (`gripterm.launch.mode: shell`). */
   readonly shellPath: string | null;
   readonly shellArgs: readonly string[];
@@ -38,6 +39,22 @@ export interface TerminalExit {
 
 export interface TerminalHandle {
   readonly terminalId: TerminalId;
+  /**
+   * The process the editor started for this terminal, or `null` when it does not
+   * know one.
+   *
+   * On the default path this IS `claude` (§4.4), and it is the only evidence any
+   * window has that a conversation stopped running: the restore predicate reads
+   * a record with no pid as one that may still be going and refuses to bring it
+   * back (M2.16 measured what that costs -- every restore refused, П2 broken).
+   * Under `gripterm.launch.mode: shell` it is the shell, which answers the same
+   * question one level out: nothing survives the shell that started it.
+   *
+   * A promise because the editor spawns the process asynchronously, and `null`
+   * rather than `undefined` because "the platform has no answer" is a value this
+   * project stores, not a hole in an object.
+   */
+  processId: () => Promise<number | null>;
   sendText: (text: string, execute: boolean) => void;
   show: (preserveFocus: boolean) => void;
   dispose: () => void;

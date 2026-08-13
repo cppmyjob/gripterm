@@ -118,11 +118,37 @@ export class FakeTerminalHandle implements TerminalHandle {
   /** The `preserveFocus` argument of each `show()`, in order. */
   public readonly shownWith: boolean[] = [];
   public disposed = false;
+  /** What the editor will say the terminal's process is, or `null` for a platform that does not know. */
+  public pid: number | null = null;
 
   private readonly _closeListeners = new Set<(exit: TerminalExit) => void>();
+  /** The resolver of a held `processId()`, so a test can decide what arrives first. */
+  private _release: (() => void) | null = null;
+  private _holding = false;
 
   constructor(terminalId: TerminalId) {
     this.terminalId = terminalId;
+  }
+
+  public async processId(): Promise<number | null> {
+    if (this._holding) {
+      await new Promise<void>((resolve) => {
+        this._release = resolve;
+      });
+    }
+    return this.pid;
+  }
+
+  /** Makes the next `processId()` wait until `releasePid`. */
+  public holdPid(): void {
+    this._holding = true;
+  }
+
+  public releasePid(): void {
+    this._holding = false;
+    const waiting = this._release;
+    this._release = null;
+    waiting?.();
   }
 
   public sendText(text: string, execute: boolean): void {
@@ -160,14 +186,33 @@ export class FakeTerminalHandle implements TerminalHandle {
 
 export class InMemoryTerminalGateway implements TerminalGateway {
   public readonly specs: TerminalSpec[] = [];
+  /** The pid every terminal this gateway creates will report. */
+  public pid: number | null = null;
 
   private readonly _handles = new Map<string, FakeTerminalHandle>();
+  private _holdPids = false;
 
   public async create(spec: TerminalSpec): Promise<TerminalHandle> {
     this.specs.push(spec);
     const handle = new FakeTerminalHandle(spec.terminalId);
+    handle.pid = this.pid;
+    if (this._holdPids) {
+      handle.holdPid();
+    }
     this._handles.set(spec.terminalId.value, handle);
     return handle;
+  }
+
+  /** Every terminal created from now on holds its pid back until `releasePid`. */
+  public holdPid(): void {
+    this._holdPids = true;
+  }
+
+  public releasePid(): void {
+    this._holdPids = false;
+    for (const handle of this._handles.values()) {
+      handle.releasePid();
+    }
   }
 
   public listKnown(): readonly TerminalHandle[] {

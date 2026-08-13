@@ -409,11 +409,11 @@ export default tseslint.config(
 
   {
     // The analogue of the source project's Playwright block. Scoped to the Jest
-    // suites alone: `tests/integration` runs under Mocha inside a real VS Code,
-    // where `suite` and `test` are Mocha's and these rules would read them as
-    // Jest's.
+    // suites alone: `tests/integration` and `tests/acceptance` run under Mocha
+    // inside a real VS Code, where `suite` and `test` are Mocha's and these
+    // rules would read them as Jest's.
     files: ['tests/**/*.ts'],
-    ignores: ['tests/integration/**/*.ts'],
+    ignores: ['tests/integration/**/*.ts', 'tests/acceptance/**/*.ts'],
     ...jest.configs['flat/recommended'],
     rules: {
       ...jest.configs['flat/recommended'].rules,

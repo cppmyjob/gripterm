@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.integration.json",
+  // The acceptance suite is built by the same rules as the integration one and
+  // kept out of its glob on purpose: it starts a real `claude` and spends a real
+  // turn, so it must never be swept up by `test:integration`.
+  "include": ["tests/acceptance/**/*.ts"]
+}

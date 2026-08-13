@@ -191,6 +191,16 @@ export interface GriptermApi {
   readonly registry: SessionRegistry;
   readonly gateway: VsCodeTerminalGateway;
   readonly lifecycle: TerminalLifecycleService;
+  /**
+   * The five things a person changes about their own record.
+   *
+   * Exposed for the acceptance suite of M2.16, where П2 asks whether a task and
+   * a note survive a restart: writing them into the record file by hand would
+   * check the restore against a record no part of this build ever produced, and
+   * the commands that normally write them stand behind an input box a run cannot
+   * answer.
+   */
+  readonly metadata: TerminalMetadataService;
   readonly identity: OwnerIdentity;
   /**
    * The list itself, not merely its data provider.
@@ -599,6 +609,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     registry,
     gateway,
     lifecycle,
+    metadata,
     identity,
     view,
     tree,

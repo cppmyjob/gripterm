@@ -67,11 +67,51 @@ export class LaunchCommandBuilder {
       args: Object.freeze(args),
       // Ours last: a recipe that shadowed the token would authenticate as an
       // empty string, every hook would come back 401, and the terminal would run
-      // perfectly while being invisible.
-      env: Object.freeze({ ...launch.extraEnv, [TOKEN_ENV_VAR]: params.token }),
+      // perfectly while being invisible. The removals come FIRST, so a recipe
+      // that names one of them on purpose still wins.
+      env: Object.freeze({
+        ...INHERITED_FROM_ANOTHER_RUN,
+        ...launch.extraEnv,
+        [TOKEN_ENV_VAR]: params.token,
+      }),
     });
   }
 }
+
+/**
+ * The variables a running Claude Code session exports to whatever it starts,
+ * every one of them removed from the terminals we open.
+ *
+ * WHY, measured (A28, 2026-08-13). A person who types `code .` inside a Claude
+ * Code terminal gives their editor that session's environment, and every
+ * terminal the editor opens inherits it. With `CLAUDE_CODE_CHILD_SESSION`
+ * present the CLI writes **no transcript and no history line at all** -- so the
+ * conversation cannot be resumed by us, by `claude --resume`, or by anything
+ * else, and nothing says so. Isolated by measurement: with that one variable
+ * kept and the rest removed, nothing is written; with it removed and the rest
+ * kept, the transcript appears the moment the turn ends.
+ *
+ * The others are on the list for the same reason rather than by measurement:
+ * each of them NAMES ANOTHER RUN -- its pid, its session id, its IDE channel,
+ * its binary, its env file, its project -- and a terminal of ours is not that
+ * run's child. The CLI sets the ones it wants for its own children itself.
+ *
+ * What is deliberately NOT here: `CLAUDE_CONFIG_DIR`, which chooses the profile
+ * a person is logged into, `CLAUDE_EFFORT`, and everything `ANTHROPIC_*`. Those
+ * are configuration somebody may have set on purpose, and this rule is about the
+ * identity of a run, not about every name that starts with the same word.
+ */
+const INHERITED_FROM_ANOTHER_RUN: Readonly<Record<string, null>> = Object.freeze({
+  CLAUDE_CODE_CHILD_SESSION: null,
+  CLAUDECODE: null,
+  CLAUDE_CODE_ENTRYPOINT: null,
+  CLAUDE_CODE_SESSION_ID: null,
+  CLAUDE_CODE_SSE_PORT: null,
+  CLAUDE_CODE_EXECPATH: null,
+  CLAUDE_PID: null,
+  CLAUDE_ENV_FILE: null,
+  CLAUDE_PROJECT_DIR: null,
+});
 
 function variadic(flag: string, values: readonly string[]): string[] {
   return values.length === 0 ? [] : [flag, ...values];
