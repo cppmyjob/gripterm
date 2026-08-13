@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { isGriptermError, presentTerminal, terminalIdFrom } from '@gripterm/core';
-import { FINISHED_ROWS, pickTerminal } from './pick-terminal';
+import { isGriptermError, presentTerminal } from '@gripterm/core';
+import { FINISHED_ROWS, whichTerminal } from './pick-terminal';
 import { say } from '../ui/say';
 import type { Logger, SessionRegistry, TerminalLifecycleService } from '@gripterm/core';
 
@@ -35,18 +35,16 @@ export function registerStartOver(
   logger: Logger
 ): vscode.Disposable {
   return vscode.commands.registerCommand(START_OVER_COMMAND, async (target: unknown) => {
-    const named = terminalIdFrom(target);
-    const terminalId =
-      named ??
-      (await pickTerminal(registry, logger, {
-        title: 'Start Over',
-        placeHolder: 'Start which terminal over?',
-        rows: FINISHED_ROWS,
-        whenEmpty: 'Gripterm: every terminal of this window is still running.',
-        // Asked even when there is one (M2.18): this archives the record whose
-        // conversation id is the only handle on the old conversation.
-        whenSole: 'ask',
-      }));
+    const terminalId = await whichTerminal(registry, logger, {
+      target,
+      title: 'Start Over',
+      placeHolder: 'Start which terminal over?',
+      rows: FINISHED_ROWS,
+      whenEmpty: 'Gripterm: every terminal of this window is still running.',
+      // Asked even when there is one (M2.18): this archives the record whose
+      // conversation id is the only handle on the old conversation.
+      whenSole: 'ask',
+    });
     if (terminalId === null) {
       return;
     }

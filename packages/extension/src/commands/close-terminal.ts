@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { CONTEXT_LIVE, terminalIdFrom } from '@gripterm/core';
-import { pickTerminal } from './pick-terminal';
+import { CONTEXT_LIVE } from '@gripterm/core';
+import { whichTerminal } from './pick-terminal';
 import type { Logger, SessionRegistry, TerminalLifecycleService } from '@gripterm/core';
 
 export const CLOSE_TERMINAL_COMMAND = 'gripterm.closeTerminal';
@@ -27,19 +27,17 @@ export function registerCloseTerminal(
   logger: Logger
 ): vscode.Disposable {
   return vscode.commands.registerCommand(CLOSE_TERMINAL_COMMAND, async (target: unknown) => {
-    const named = terminalIdFrom(target);
-    const terminalId =
-      named ??
-      (await pickTerminal(registry, logger, {
-        title: 'Close Terminal',
-        placeHolder: 'Close which terminal?',
-        rows: [CONTEXT_LIVE],
-        whenEmpty: 'Gripterm: there is no running terminal to close.',
-        // Asked even when there is one, unlike the edit commands (M2.18): this
-        // ends a conversation and opens no second dialog, so the picker is the
-        // last place a person sees what they are about to close.
-        whenSole: 'ask',
-      }));
+    const terminalId = await whichTerminal(registry, logger, {
+      target,
+      title: 'Close Terminal',
+      placeHolder: 'Close which terminal?',
+      rows: [CONTEXT_LIVE],
+      whenEmpty: 'Gripterm: there is no running terminal to close.',
+      // Asked even when there is one, unlike the edit commands (M2.18): this
+      // ends a conversation and opens no second dialog, so the picker is the
+      // last place a person sees what they are about to close.
+      whenSole: 'ask',
+    });
     if (terminalId === null) {
       return;
     }

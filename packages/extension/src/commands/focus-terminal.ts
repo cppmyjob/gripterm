@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { FOCUS_TERMINAL_COMMAND, terminalIdFrom } from '@gripterm/core';
+import { FOCUS_TERMINAL_COMMAND, terminalTargetOf } from '@gripterm/core';
+import { say } from '../ui/say';
 import type { Logger } from '@gripterm/core';
 import type { VsCodeTerminalGateway } from '../adapters/vscode-terminal-gateway';
 
@@ -16,12 +17,24 @@ export function registerFocusTerminal(
   logger: Logger
 ): vscode.Disposable {
   return vscode.commands.registerCommand(FOCUS_TERMINAL_COMMAND, (target: unknown) => {
-    const terminalId = terminalIdFrom(target);
-    if (terminalId === null) {
-      logger.warn('focusTerminal was called without a terminal id', { target: String(target) });
+    const resolved = terminalTargetOf(target);
+    if (resolved.kind !== 'terminal') {
+      // Said aloud when something WAS handed over, silent when nothing was
+      // (M2.21). The first is a button or a row wired to the wrong thing and
+      // nobody would ever find it in a log; the second is somebody running the
+      // command from the palette, where it has nothing to act on and no popup
+      // to offer.
+      if (resolved.kind === 'unreadable') {
+        say('warning', 'Gripterm: could not tell which terminal that was.', logger);
+      }
+      logger.warn('focusTerminal was called with no terminal to show', {
+        target: String(target),
+        why: resolved.kind,
+      });
       return;
     }
 
+    const terminalId = resolved.terminalId;
     const handle = gateway.handleFor(terminalId);
     if (handle === undefined) {
       logger.info('focusTerminal found no terminal to show', { terminalId: terminalId.value });

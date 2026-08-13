@@ -2,7 +2,8 @@ import { TerminalEntry } from '../entities/terminal-entry';
 import { TerminalId } from '../entities/terminal-id';
 
 /**
- * Which terminal a command was invoked on.
+ * Which terminal a command was invoked on -- and, when the answer is none, WHICH
+ * of the two ways of having none it is.
  *
  * An editor command is reachable from three places and each hands over
  * something different: a notification button passes the argument we put in it
@@ -16,15 +17,34 @@ import { TerminalId } from '../entities/terminal-id';
  * `packages/extension` is outside the coverage thresholds (§3.5), and "what
  * counts as a terminal here" is a decision, not plumbing.
  *
- * Everything unrecognised -- including a string that is not a uuid -- comes back
- * as `null` rather than as a guess. The caller then says so; a wrong terminal is
- * worse than none, because closing is one of the things these commands do.
+ * **THREE ANSWERS RATHER THAN AN ID OR NULL, and the third one is a defect the
+ * owner had to find for us (M2.21).** The tree began handing back a wrapper
+ * around the entry when the list grew project headings (M2.14); this read the
+ * wrapper as no id, every row menu fell through to the picker, and `Delete
+ * Record` on a row answered "the record of which terminal?" -- with somebody
+ * else's row under the cursor, one Enter away. Nothing logged, nothing thrown:
+ * the commands could not tell "nobody said which" (ask, which is right for the
+ * palette) from "I was told and could not read it" (a bug, and never a guess).
+ * They can now, and they say so.
  */
-export function terminalIdFrom(target: unknown): TerminalId | null {
-  if (target instanceof TerminalEntry) {
-    return target.terminalId;
+export type TerminalTarget =
+  /** Nothing was passed: the palette, a keybinding, `executeCommand` with no argument. */
+  | { readonly kind: 'none' }
+  /** Something was passed and it is not a terminal of ours. Never a guess, always said aloud. */
+  | { readonly kind: 'unreadable' }
+  | { readonly kind: 'terminal', readonly terminalId: TerminalId };
+
+export function terminalTargetOf(target: unknown): TerminalTarget {
+  if (target === undefined) {
+    return { kind: 'none' };
   }
-  return typeof target === 'string' ? TerminalId.tryFromString(target) : null;
+  if (target instanceof TerminalEntry) {
+    return { kind: 'terminal', terminalId: target.terminalId };
+  }
+  // A string that is not a uuid is `unreadable` and not `none`: it came from a
+  // button of ours carrying the wrong thing, which is worth hearing about.
+  const named = typeof target === 'string' ? TerminalId.tryFromString(target) : null;
+  return named === null ? { kind: 'unreadable' } : { kind: 'terminal', terminalId: named };
 }
 
 /**

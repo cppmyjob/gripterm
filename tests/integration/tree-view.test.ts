@@ -11,10 +11,14 @@ import {
   TerminalEntry,
   TerminalId,
   ownerRefFor,
+  terminalTargetOf,
   type OwnerIdentity,
 } from '../../packages/core/src/index';
 import type { GriptermApi } from '../../packages/extension/src/extension';
-import type { TerminalTreeNode } from '../../packages/extension/src/ui/terminal-tree';
+import type {
+  TerminalTreeDataProvider,
+  TerminalTreeNode,
+} from '../../packages/extension/src/ui/terminal-tree';
 
 const ROW_TERMINAL = '5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b';
 const ROW_SESSION = '9c0d1e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f';
@@ -67,9 +71,18 @@ function failedRestore(identity: OwnerIdentity): TerminalEntry {
   });
 }
 
-/** A node's terminal id, or the key of the heading it turned out to be. */
-function named(node: TerminalTreeNode): string {
-  return node.kind === 'terminal' ? node.entry.terminalId.value : `project:${node.group.key}`;
+/**
+ * What the workbench would call this node -- asked of the provider, which is who
+ * the workbench asks.
+ *
+ * Reading the node's own fields is what this file may NOT do: the host loads the
+ * bundle and this file is compiled beside it, so the classes here are not the
+ * classes there, and a value imported out of the extension does not even load
+ * (its `@gripterm/core` is a name only the bundler resolves). The tree item's id
+ * crosses both boundaries because it is a string.
+ */
+function named(tree: TerminalTreeDataProvider, node: TerminalTreeNode): string {
+  return String(tree.getTreeItem(node).id);
 }
 
 /**
@@ -136,7 +149,7 @@ suite('the terminals view', () => {
    * simply not selected.
    */
   test('selects the row a notification points at', async () => {
-    const { registry, view, identity, readiness } = await api();
+    const { registry, view, tree, identity, readiness } = await api();
     const entry = failedRestore(identity);
     registry.register(entry);
 
@@ -144,7 +157,7 @@ suite('the terminals view', () => {
       await vscode.commands.executeCommand('gripterm.showRecord', ROW_TERMINAL);
 
       assert.deepEqual(
-        view.selection.map(named),
+        view.selection.map((node) => named(tree, node)),
         [ROW_TERMINAL],
         'the record was not selected in the list'
       );
@@ -173,14 +186,128 @@ suite('the terminals view', () => {
 
       assert.ok(roots.length > 0, 'the list has no headings at all');
       assert.deepEqual(
-        [...new Set(roots.map((node) => node.kind))],
+        [...new Set(roots.map((node) => named(tree, node).split(':')[0]))],
         ['project'],
         'a terminal is drawn at the root of the list rather than under a project'
       );
       const holding = roots.filter((root) =>
-        tree.getChildren(root).some((child) => named(child) === ROW_TERMINAL)
+        tree.getChildren(root).some((child) => named(tree, child) === ROW_TERMINAL)
       );
       assert.equal(holding.length, 1, 'the record is not under exactly one heading');
+    } finally {
+      registry.forget(entry.terminalId);
+      await cleanUp(readiness.storageDir);
+    }
+  });
+
+  /*
+   * The boundary this suite runs across, discovered by a run (M2.21).
+   *
+   * The host loads the BUNDLE, and this file is compiled separately: there are
+   * two copies of every class in `@gripterm/core` in the same process, and a
+   * record built here is not an `instanceof` anything the bundle holds. The
+   * suite drives the extension with records of its own all the same -- that is
+   * how it puts a row on the screen at all -- so the list may not tell a heading
+   * from a row by asking which class the node is. It asks what the node HAS,
+   * which crosses the boundary.
+   *
+   * The cost of getting this wrong is not a wrong row: `getTreeItem` took the
+   * heading branch, read `group.key` off a record, and threw inside the
+   * platform's own draw.
+   */
+  test('draws a registered record as its own row', async () => {
+    const { registry, tree, identity, readiness } = await api();
+    const entry = failedRestore(identity);
+    registry.register(entry);
+
+    try {
+      assert.equal(
+        tree.getTreeItem(entry).id,
+        ROW_TERMINAL,
+        'the list does not draw a record as its own row'
+      );
+    } finally {
+      registry.forget(entry.terminalId);
+      await cleanUp(readiness.storageDir);
+    }
+  });
+
+  /*
+   * The other half of M2.21: what a row command does when it cannot read what it
+   * was handed.
+   *
+   * `packages/extension` is outside the coverage thresholds (§3.5), and this is
+   * the branch nothing else reaches. It must say so and stop. What it must NOT
+   * do is what it used to: fall through to the picker, which offers OTHER
+   * terminals with the first one selected -- one Enter from another record in
+   * the trash.
+   *
+   * The observable is the promise. A picker waits for a person, so a command
+   * that opened one never finishes; the record registered above is what makes
+   * sure there is something for a picker to offer, or the wrong build would
+   * finish quickly too, having found nothing.
+   */
+  test('a row command handed something it cannot read does not ask which terminal', async () => {
+    const { registry, identity, readiness } = await api();
+    const entry = failedRestore(identity);
+    registry.register(entry);
+
+    try {
+      const done = Promise.resolve(
+        vscode.commands.executeCommand('gripterm.deleteTerminal', { not: 'a terminal' })
+      ).then(() => 'finished');
+      const waited = new Promise<string>((resolve) => {
+        setTimeout(() => {
+          resolve('still asking which terminal');
+        }, 5000);
+      });
+
+      const outcome = await Promise.race([done, waited]);
+      // Whatever it opened is not left open for the next test.
+      await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
+
+      assert.equal(outcome, 'finished', 'the command asked which terminal instead of saying so');
+    } finally {
+      registry.forget(entry.terminalId);
+      await cleanUp(readiness.storageDir);
+    }
+  });
+
+  /*
+   * The defect the owner found, and the reason it needs a host (M2.21).
+   *
+   * A row's menu hands the command the ELEMENT this provider returned, and every
+   * one of those commands asks `terminalTargetOf` what it was given. From M2.14
+   * that element was a wrapper around the entry -- correct TypeScript, correct
+   * `TreeDataProvider`, and correct in any unit test that built a tree by hand --
+   * and nothing recognised it. So every menu entry on every row fell through to
+   * the picker: `Delete Record` on a row answered "the record of WHICH
+   * terminal?", offering other terminals with the first one selected. Nothing
+   * threw, nothing was logged, and only a person clicking a row could see it.
+   *
+   * This asserts the join the wrapper broke, over the tree the workbench is
+   * actually drawing from: a row of the list resolves to the terminal it draws.
+   */
+  test('hands back rows the row menus can act on', async () => {
+    const { registry, tree, identity, readiness } = await api();
+    const entry = failedRestore(identity);
+    registry.register(entry);
+
+    try {
+      // Every row is put through the resolver the commands use, and nothing
+      // else touches the nodes: a test that first found the row by reading its
+      // fields would be testing the shape it expected rather than the one the
+      // commands can read.
+      const rows = tree.getChildren().flatMap((heading) => tree.getChildren(heading));
+      const answers = rows
+        .map((row) => terminalTargetOf(row))
+        .map((one) => (one.kind === 'terminal' ? one.terminalId.value : one.kind));
+
+      assert.ok(
+        answers.includes(ROW_TERMINAL),
+        'a row of the list does not resolve to the terminal it draws, so its menu asks ' +
+          `which terminal; the rows answered ${JSON.stringify(answers)}`
+      );
     } finally {
       registry.forget(entry.terminalId);
       await cleanUp(readiness.storageDir);

@@ -6,9 +6,8 @@ import {
   formatTags,
   isBlank,
   parseTags,
-  terminalIdFrom,
 } from '@gripterm/core';
-import { EDITABLE_ROWS, pickTerminal } from './pick-terminal';
+import { EDITABLE_ROWS, whichTerminal } from './pick-terminal';
 import type {
   Logger,
   SessionRegistry,
@@ -181,18 +180,16 @@ async function entryFor(
   logger: Logger,
   title: string
 ): Promise<TerminalEntry | null> {
-  const named = terminalIdFrom(target);
-  const terminalId: TerminalId | null =
-    named ??
-    (await pickTerminal(registry, logger, {
-      title,
-      placeHolder: 'Which terminal?',
-      rows: EDITABLE_ROWS,
-      whenEmpty: 'Gripterm: there is no terminal of this window to edit.',
-      // The only row there could be is the one being edited, and the box that
-      // opens next shows its current value with its own title above it (M2.18).
-      whenSole: 'take',
-    }));
+  const terminalId: TerminalId | null = await whichTerminal(registry, logger, {
+    target,
+    title,
+    placeHolder: 'Which terminal?',
+    rows: EDITABLE_ROWS,
+    whenEmpty: 'Gripterm: there is no terminal of this window to edit.',
+    // The only row there could be is the one being edited, and the box that
+    // opens next shows its current value with its own title above it (M2.18).
+    whenSole: 'take',
+  });
   if (terminalId === null) {
     return null;
   }

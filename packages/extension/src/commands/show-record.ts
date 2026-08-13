@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { SHOW_RECORD_COMMAND, terminalIdFrom } from '@gripterm/core';
+import { SHOW_RECORD_COMMAND, terminalTargetOf } from '@gripterm/core';
 import { TERMINALS_VIEW_ID } from '../ui/terminal-tree';
 import { say } from '../ui/say';
 import type { TerminalTreeDataProvider, TerminalTreeNode } from '../ui/terminal-tree';
@@ -29,9 +29,9 @@ export function registerShowRecord(
   logger: Logger
 ): vscode.Disposable {
   return vscode.commands.registerCommand(SHOW_RECORD_COMMAND, async (target: unknown) => {
-    const terminalId = terminalIdFrom(target);
-    const node = terminalId === null ? null : tree.nodeFor(terminalId);
-    if (node?.kind !== 'terminal') {
+    const resolved = terminalTargetOf(target);
+    const node = resolved.kind === 'terminal' ? tree.nodeFor(resolved.terminalId) : null;
+    if (node === null) {
       // Deleted between the toast and the press. Opening the list is still the
       // right answer: it is where the person was going.
       await vscode.commands.executeCommand(`${TERMINALS_VIEW_ID}.focus`);
@@ -44,11 +44,11 @@ export function registerShowRecord(
       // `reveal` is the platform's, and it throws when it cannot find the
       // element in the tree it drew. The list itself is still worth opening.
       logger.warn('a record could not be selected in the list', {
-        terminalId: node.entry.terminalId.value,
+        terminalId: node.terminalId.value,
         cause: String(cause),
       });
       await vscode.commands.executeCommand(`${TERMINALS_VIEW_ID}.focus`);
-      say('warning', `Gripterm: "${node.entry.metadata.displayName}" is in the list below.`, logger);
+      say('warning', `Gripterm: "${node.metadata.displayName}" is in the list below.`, logger);
     }
   });
 }

@@ -1,4 +1,4 @@
-import { TerminalId, chooseTerminal, terminalIdFrom } from '../../packages/core/src/index';
+import { TerminalId, chooseTerminal, terminalTargetOf } from '../../packages/core/src/index';
 import { NEXT_SESSION_UUID, SESSION_UUID, TERMINAL_UUID, makeEntry } from '../helpers/domain-fixtures';
 
 /**
@@ -7,34 +7,56 @@ import { NEXT_SESSION_UUID, SESSION_UUID, TERMINAL_UUID, makeEntry } from '../he
  * from, not the id we put on the item. A command that read only strings would
  * be a menu entry that silently does nothing.
  */
-describe('terminalIdFrom reads the terminal a command was invoked on', () => {
+describe('terminalTargetOf reads the terminal a command was invoked on', () => {
   it('reads the id a notification button carried', () => {
-    expect(terminalIdFrom(TERMINAL_UUID)?.value).toBe(TERMINAL_UUID);
+    expect(terminalTargetOf(TERMINAL_UUID)).toEqual({
+      kind: 'terminal',
+      terminalId: TerminalId.fromString(TERMINAL_UUID),
+    });
   });
 
-  it('reads the entry a tree menu passed', () => {
+  it('reads the entry a tree row is', () => {
     const entry = makeEntry();
 
-    expect(terminalIdFrom(entry)?.value).toBe(entry.terminalId.value);
+    expect(terminalTargetOf(entry)).toEqual({ kind: 'terminal', terminalId: entry.terminalId });
   });
 
-  it('refuses the command palette, which passes nothing', () => {
-    expect(terminalIdFrom(undefined)).toBeNull();
+  it('says nothing was passed when the command came from the palette', () => {
+    expect(terminalTargetOf(undefined)).toEqual({ kind: 'none' });
   });
 
   it('refuses a string that is not an id', () => {
     // Guessing here would be a wrong terminal, and closing is one of the things
     // these commands do.
-    expect(terminalIdFrom('auth-refactor')).toBeNull();
-    expect(terminalIdFrom('')).toBeNull();
+    expect(terminalTargetOf('auth-refactor')).toEqual({ kind: 'unreadable' });
+    expect(terminalTargetOf('')).toEqual({ kind: 'unreadable' });
   });
 
   it('refuses an object that merely looks like an entry', () => {
     // `instanceof`, not a shape check: the tree passes our own instances, and
     // anything else claiming to be one has come from somewhere we do not know.
-    expect(terminalIdFrom({ terminalId: { value: TERMINAL_UUID } })).toBeNull();
-    expect(terminalIdFrom(null)).toBeNull();
-    expect(terminalIdFrom(42)).toBeNull();
+    expect(terminalTargetOf({ terminalId: { value: TERMINAL_UUID } })).toEqual({
+      kind: 'unreadable',
+    });
+    expect(terminalTargetOf(null)).toEqual({ kind: 'unreadable' });
+    expect(terminalTargetOf(42)).toEqual({ kind: 'unreadable' });
+  });
+
+  /**
+   * The defect this answer was split for (M2.21, reported by the owner).
+   *
+   * A row's `Delete Record` opened the picker -- "delete the record of which
+   * terminal?" -- because the tree had started handing back a wrapper around the
+   * entry and the resolver read it as nothing at all. Both ways of having no id
+   * answered the same, so the command could not tell "nobody said which" from "I
+   * was told and could not read it", and quietly asked. One Enter on the first
+   * row of that picker is another terminal's record in the trash.
+   */
+  it('tells nothing-was-passed from that-was-not-a-terminal', () => {
+    const wrapped = { kind: 'terminal', entry: makeEntry() };
+
+    expect(terminalTargetOf(wrapped).kind).toBe('unreadable');
+    expect(terminalTargetOf(undefined).kind).toBe('none');
   });
 });
 

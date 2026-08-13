@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { explainRefusal, planRestore, presentTerminal, terminalIdFrom } from '@gripterm/core';
-import { ADOPTABLE_ROWS, pickTerminal } from './pick-terminal';
+import { explainRefusal, planRestore, presentTerminal } from '@gripterm/core';
+import { ADOPTABLE_ROWS, whichTerminal } from './pick-terminal';
 import { say } from '../ui/say';
 import type {
   Logger,
@@ -88,19 +88,17 @@ export function registerAdoptTerminal(parts: AdoptTerminalParts): vscode.Disposa
       return;
     }
 
-    const named = terminalIdFrom(target);
-    const terminalId =
-      named ??
-      (await pickTerminal(registry, logger, {
-        title: 'Take Over Terminal',
-        placeHolder: 'Take over which terminal?',
-        rows: ADOPTABLE_ROWS,
-        // Asked even when there is one (M2.18): this takes a record from
-        // another window, and the row says whose window and when it last spoke.
-        whenSole: 'ask',
-        whenEmpty: 'Gripterm: every terminal of another window belongs to a window that is still answering.',
-        foreignLiveness: (entry) => base.reconciler.livenessOf(entry.owner.ownerId),
-      }));
+    const terminalId = await whichTerminal(registry, logger, {
+      target,
+      title: 'Take Over Terminal',
+      placeHolder: 'Take over which terminal?',
+      rows: ADOPTABLE_ROWS,
+      // Asked even when there is one (M2.18): this takes a record from
+      // another window, and the row says whose window and when it last spoke.
+      whenSole: 'ask',
+      whenEmpty: 'Gripterm: every terminal of another window belongs to a window that is still answering.',
+      foreignLiveness: (entry) => base.reconciler.livenessOf(entry.owner.ownerId),
+    });
     if (terminalId === null) {
       return;
     }

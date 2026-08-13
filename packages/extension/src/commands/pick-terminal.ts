@@ -5,6 +5,7 @@ import {
   CONTEXT_OVER,
   chooseTerminal,
   presentTerminal,
+  terminalTargetOf,
 } from '@gripterm/core';
 import { say } from '../ui/say';
 import type {
@@ -56,6 +57,17 @@ interface TerminalPick extends vscode.QuickPickItem {
 
 export interface TerminalPickRequest {
   /**
+   * Whatever the editor handed the command: a row of the list, an id from a
+   * button of ours, or nothing at all from the palette.
+   *
+   * Required, and passed in raw rather than resolved by each caller, because
+   * resolving it is where M2.21 went wrong: an argument that could not be read
+   * looked exactly like no argument, and the command asked WHICH terminal while
+   * the person had one under the cursor. One place reads it, and the one place
+   * knows the difference.
+   */
+  readonly target: unknown;
+  /**
    * What the command is, above the box.
    *
    * Required rather than optional, and this is the M2.18 defect written into
@@ -89,11 +101,19 @@ export interface TerminalPickRequest {
 }
 
 /**
- * Which terminal, when the caller did not say.
+ * Which terminal a command is about: the one it was invoked on, or the one the
+ * person is asked for.
  *
  * Every one of these commands is reachable two ways and both are real: a menu on
  * a tree row hands over the row's element, and the palette hands over nothing --
  * which is why there is a picker here rather than a refusal.
+ *
+ * **The third case is neither, and it used to be silent (M2.21):** something was
+ * handed over and could not be read. Asking then is the wrong answer twice over
+ * -- the person already said which one, and the picker they get instead is a
+ * list of OTHER terminals with the first one selected. So it is said aloud and
+ * nothing is done, which is the only way a wiring defect of this kind ever
+ * reaches anybody.
  *
  * One picker rather than one per command, because the interesting part is the
  * same in all of them and it is a rule: only records this window can act on are
@@ -114,11 +134,20 @@ export interface TerminalPickRequest {
  * is a decision -- and because this package is outside the coverage thresholds
  * (§3.5), where a rule about which terminal to act on has no business being.
  */
-export async function pickTerminal(
+export async function whichTerminal(
   registry: SessionRegistry,
   logger: Logger,
   request: TerminalPickRequest
 ): Promise<TerminalId | null> {
+  const target = terminalTargetOf(request.target);
+  if (target.kind === 'terminal') {
+    return target.terminalId;
+  }
+  if (target.kind === 'unreadable') {
+    say('warning', 'Gripterm: could not tell which terminal that was.', logger);
+    return null;
+  }
+
   const picks: TerminalPick[] = candidates(registry, request)
     .filter(({ shown }) => request.rows.includes(shown.contextValue))
     .map(({ entry, shown }) => ({

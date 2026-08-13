@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { presentTerminal, terminalIdFrom } from '@gripterm/core';
-import { FINISHED_ROWS, pickTerminal } from './pick-terminal';
+import { presentTerminal } from '@gripterm/core';
+import { FINISHED_ROWS, whichTerminal } from './pick-terminal';
 import { say } from '../ui/say';
 import type { Logger, SessionRegistry, TerminalLifecycleService } from '@gripterm/core';
 
@@ -36,19 +36,17 @@ export function registerDeleteTerminal(
   logger: Logger
 ): vscode.Disposable {
   return vscode.commands.registerCommand(DELETE_TERMINAL_COMMAND, async (target: unknown) => {
-    const named = terminalIdFrom(target);
-    const terminalId =
-      named ??
-      (await pickTerminal(registry, logger, {
-        title: 'Delete Record',
-        placeHolder: 'Delete the record of which terminal?',
-        rows: FINISHED_ROWS,
-        whenEmpty: 'Gripterm: every terminal of this window is still running.',
-        // Asked even when there is one (M2.18). The modal below names what goes
-        // and what stays, and this is where the person reads WHICH record that
-        // is about.
-        whenSole: 'ask',
-      }));
+    const terminalId = await whichTerminal(registry, logger, {
+      target,
+      title: 'Delete Record',
+      placeHolder: 'Delete the record of which terminal?',
+      rows: FINISHED_ROWS,
+      whenEmpty: 'Gripterm: every terminal of this window is still running.',
+      // Asked even when there is one (M2.18). The modal below names what goes
+      // and what stays, and this is where the person reads WHICH record that
+      // is about.
+      whenSole: 'ask',
+    });
     if (terminalId === null) {
       return;
     }

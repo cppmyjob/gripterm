@@ -15,17 +15,54 @@ export const TERMINALS_VIEW_ID = 'gripterm.terminals';
 /** What a `when` clause on a heading would test. Nothing is offered on one yet. */
 export const CONTEXT_PROJECT = 'gripterm.project';
 
+/** A heading: one project, with the rows of every window that has it open. */
+export interface ProjectNode {
+  readonly kind: 'project';
+  readonly group: TerminalGroup;
+}
+
 /**
- * A row of the list: a project heading, or a terminal under one.
+ * A row of the list: a project heading, or a terminal record itself.
  *
  * A union rather than two views, because the platform's tree is one tree and
- * `reveal` walks it through `getParent`. The `groupKey` is carried on the
- * terminal rather than looked up later so that a node handed back to us by the
- * editor still knows where it lives.
+ * `reveal` walks it through `getParent`.
+ *
+ * **THE ROW IS THE ENTRY, and that is a rule rather than a convenience
+ * (M2.21).** Whatever `getChildren` returns here is what the editor hands to a
+ * command when somebody uses that row's menu, and every one of those commands
+ * asks `terminalTargetOf` what it was given. For two milestones this was a
+ * wrapper -- `{ kind: 'terminal', entry, groupKey }` -- which is not a terminal
+ * anything recognises, so every menu entry on every row quietly fell through to
+ * a picker asking which terminal the person meant. Nothing here may wrap an
+ * entry again without teaching that function about it in the same commit.
+ *
+ * The heading a row belongs under is looked up rather than carried on the row
+ * for the same reason: a copy of `group.key` on the node is a second place where
+ * the answer lives, and a record whose window changed folder would then be
+ * revealed under a heading it is no longer in.
  */
-export type TerminalTreeNode =
-  | { readonly kind: 'project', readonly group: TerminalGroup }
-  | { readonly kind: 'terminal', readonly entry: TerminalEntry, readonly groupKey: string };
+export type TerminalTreeNode = TerminalEntry | ProjectNode;
+
+/**
+ * Which of the two a node is -- asked of what it HAS, never of which class it is.
+ *
+ * `node instanceof TerminalEntry` is the obvious spelling and it is wrong here,
+ * which a run said and reading could not (M2.21). The host loads the BUNDLE
+ * while the integration suite is compiled beside it: two copies of every class
+ * of `@gripterm/core` live in one process, and a record the suite builds is an
+ * instance of neither the bundle's class nor any other the bundle can name. The
+ * suite hands such records to the registry -- that is how it gets a row drawn at
+ * all -- so `instanceof` sent every one of them down the heading branch, where
+ * `getTreeItem` read `group.label` off a terminal record and threw inside the
+ * platform's draw.
+ *
+ * The discriminant is the heading's, because the heading is the type this file
+ * owns. A record is anything that is not one, which is also what makes a record
+ * arriving from anywhere -- the store, another window, a test -- a row.
+ */
+function isHeading(node: TerminalTreeNode): node is ProjectNode {
+  return (node as Partial<ProjectNode>).kind === 'project';
+}
 
 export interface TerminalTreeOptions {
   readonly registry: SessionRegistry;
@@ -95,21 +132,14 @@ implements vscode.TreeDataProvider<TerminalTreeNode>, Disposable {
   }
 
   public getTreeItem(node: TerminalTreeNode): vscode.TreeItem {
-    return node.kind === 'project' ? projectItem(node.group) : this._terminalItem(node.entry);
+    return isHeading(node) ? projectItem(node.group) : this._terminalItem(node);
   }
 
   public getChildren(node?: TerminalTreeNode): TerminalTreeNode[] {
     if (node === undefined) {
       return this._groups().map((group) => ({ kind: 'project', group }));
     }
-    if (node.kind === 'terminal') {
-      return [];
-    }
-    return node.group.entries.map((entry) => ({
-      kind: 'terminal',
-      entry,
-      groupKey: node.group.key,
-    }));
+    return isHeading(node) ? [...node.group.entries] : [];
   }
 
   /**
@@ -119,21 +149,32 @@ implements vscode.TreeDataProvider<TerminalTreeNode>, Disposable {
    * built here matches the one `getChildren` produced. Remembering them instead
    * would mean a `reveal` that arrives before the first draw -- which is exactly
    * when a notification's button fires -- had nothing to walk.
+   *
+   * **What this ANSWERS is not pinned by anything, and that is measured rather
+   * than assumed (M2.21):** a mutant that never finds the heading -- every row an
+   * orphan -- survives the whole suite, `reveal` included. What the host refuses
+   * outright is a provider with no `getParent` at all (M2.13), and that is all
+   * the suite can hold it to; the answer matters where a headless run cannot go,
+   * with the view on screen and the heading collapsed. Written for the reader
+   * rather than for a test, then: the row is found by its id, not by a key
+   * copied onto it, so a record whose window moved folder is revealed under the
+   * heading it is in now.
    */
   public getParent(node: TerminalTreeNode): TerminalTreeNode | undefined {
-    if (node.kind === 'project') {
+    if (isHeading(node)) {
       return undefined;
     }
-    const group = this._groups().find((one) => one.key === node.groupKey);
+    const group = this._groups().find((one) =>
+      one.entries.some((held) => held.terminalId.equals(node.terminalId)));
     return group === undefined ? undefined : { kind: 'project', group };
   }
 
-  /** The node for a terminal id, for the commands that select a row (M2.13). */
-  public nodeFor(terminalId: TerminalId): TerminalTreeNode | null {
+  /** The row for a terminal id, for the commands that select one (M2.13). */
+  public nodeFor(terminalId: TerminalId): TerminalEntry | null {
     for (const group of this._groups()) {
       const entry = group.entries.find((one) => one.terminalId.equals(terminalId));
       if (entry !== undefined) {
-        return { kind: 'terminal', entry, groupKey: group.key };
+        return entry;
       }
     }
     return null;
