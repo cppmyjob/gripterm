@@ -90,6 +90,22 @@ export interface TerminalHandle {
    */
   processId: () => Promise<number | null>;
   sendText: (text: string, execute: boolean) => void;
+  /**
+   * The line that starts the agent, typed into the person's own shell.
+   *
+   * Separate from `sendText` because it carries a rule that no other typing
+   * does: it must not overtake what the environment does to a fresh shell.
+   * Measured 2026-08-14 -- another extension types into a terminal some 20-60 ms
+   * after it is made, and a line of ours sent on creation lands FIRST, so the
+   * environment's own command ends up typed into the agent's prompt instead of
+   * the shell's. An adapter is therefore free to hold this line back until the
+   * shell is listening and nobody else is mid-command.
+   *
+   * Nothing is promised about WHEN it is typed, only about what it comes after,
+   * and it returns nothing: by the time it is typed the caller is long gone, and
+   * a shell that never goes quiet is a wait rather than a failure.
+   */
+  runLaunchCommand: (commandLine: string) => void;
   show: (preserveFocus: boolean) => void;
   /**
    * Puts a new name on the terminal's own tab.

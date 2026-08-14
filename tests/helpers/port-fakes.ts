@@ -115,6 +115,8 @@ export class SequentialIdGenerator implements IdGenerator {
 export class FakeTerminalHandle implements TerminalHandle {
   public readonly terminalId: TerminalId;
   public readonly sent: { readonly text: string, readonly execute: boolean }[] = [];
+  /** Every launch line this terminal was asked to run, in order. */
+  public readonly launched: string[] = [];
   /** The `preserveFocus` argument of each `show()`, in order. */
   public readonly shownWith: boolean[] = [];
   /** Every name the tab was asked to take, in order. */
@@ -155,6 +157,16 @@ export class FakeTerminalHandle implements TerminalHandle {
 
   public sendText(text: string, execute: boolean): void {
     this.sent.push({ text, execute });
+  }
+
+  /**
+   * Recorded apart from `sent`, because the port promises something different
+   * about it: the launch line comes after whatever the environment does to a
+   * fresh shell (M2.25). A test that could not tell the two apart could not tell
+   * a launch from a `/rename` typed into a running agent.
+   */
+  public runLaunchCommand(commandLine: string): void {
+    this.launched.push(commandLine);
   }
 
   public show(preserveFocus: boolean): void {

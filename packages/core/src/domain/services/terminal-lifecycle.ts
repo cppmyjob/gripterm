@@ -249,9 +249,12 @@ export class TerminalLifecycleService implements Disposable {
     void this._notePid(handle);
 
     if (plan.initialInput !== null) {
-      // `shell` mode only: the command is typed into the person's shell. A11 and
-      // A12 live exactly here and nowhere else (see `ShellLaunchStrategy`).
-      handle.sendText(plan.initialInput, true);
+      // `shell` mode only: the command is typed into the person's shell. A11
+      // lives exactly here and nowhere else (see `ShellLaunchStrategy`). A12 --
+      // the readiness race -- is the port's business now: `runLaunchCommand`
+      // promises the line comes after whatever the environment does to a fresh
+      // shell, and an adapter that has to wait for that waits without us.
+      handle.runLaunchCommand(plan.initialInput);
     }
     if (visibility === 'focus') {
       // Takes the focus: somebody asked for a terminal, and leaving the cursor

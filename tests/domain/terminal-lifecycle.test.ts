@@ -213,21 +213,28 @@ describe('TerminalLifecycleService starts a terminal', () => {
 
   it('types nothing when the agent IS the terminal process', async () => {
     const { lifecycle, gateway } = stand();
+    const handle = gateway.handleFor((await lifecycle.launch(request())).terminalId);
 
-    const entry = await lifecycle.launch(request());
-
-    expect(gateway.handleFor(entry.terminalId).sent).toStrictEqual([]);
+    expect(handle.sent).toStrictEqual([]);
+    expect(handle.launched).toStrictEqual([]);
   });
 
-  it('types the command line when a shell is underneath', async () => {
+  it('runs the command line as a launch when a shell is underneath', async () => {
     const { lifecycle, gateway } = stand(new ShellLaunchStrategy('powershell'));
 
     const entry = await lifecycle.launch(request());
     const handle = gateway.handleFor(entry.terminalId);
 
-    expect(handle.sent).toHaveLength(1);
-    expect(handle.sent[0]?.text).toContain(EXECUTABLE);
-    expect(handle.sent[0]?.execute).toBe(true);
+    expect(handle.launched).toHaveLength(1);
+    expect(handle.launched[0]).toContain(EXECUTABLE);
+    /*
+     * And NOT through the plain typing path. The difference is the promise
+     * M2.25 rests on: a launch line waits for the shell to be the person's own,
+     * while `sendText` is for a terminal that is already the agent's. Measured
+     * 2026-08-14 -- with the launch typed on creation, another extension's own
+     * line arrived second and landed in the agent's prompt.
+     */
+    expect(handle.sent).toStrictEqual([]);
   });
 
   it('stamps the record with the clock, not with a second source of now', async () => {

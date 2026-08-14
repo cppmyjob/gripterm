@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { VsCodeEditorStrip } from './vscode-editor-strip';
+import { VsCodeQuietShell } from './vscode-quiet-shell';
 import type {
   Disposable,
   LaunchLocation,
@@ -118,12 +119,14 @@ export class VsCodeTerminalGateway implements TerminalGateway, Disposable {
   private readonly _activeSubscription: vscode.Disposable;
   private readonly _location: LaunchLocation;
   private readonly _strip: VsCodeEditorStrip;
+  private readonly _quiet: VsCodeQuietShell;
   private readonly _logger: Logger;
 
   constructor(location: LaunchLocation, logger: Logger) {
     this._location = location;
     this._logger = logger;
     this._strip = new VsCodeEditorStrip(logger);
+    this._quiet = new VsCodeQuietShell(logger);
     this._closeSubscription = vscode.window.onDidCloseTerminal((terminal) => {
       this._onClosed(terminal);
     });
@@ -158,7 +161,7 @@ export class VsCodeTerminalGateway implements TerminalGateway, Disposable {
       ...(spec.shellPath === null ? {} : { shellPath: spec.shellPath }),
     });
 
-    const handle = new VsCodeTerminalHandle(spec.terminalId, terminal);
+    const handle = new VsCodeTerminalHandle(spec.terminalId, terminal, this._quiet);
     this._handles.set(spec.terminalId.value, handle);
     return handle;
   }
@@ -228,13 +231,15 @@ class VsCodeTerminalHandle implements TerminalHandle {
   public readonly terminalId: TerminalId;
 
   private readonly _terminal: vscode.Terminal;
+  private readonly _quiet: VsCodeQuietShell;
   private readonly _listeners = new Set<(exit: TerminalExit) => void>();
   /** A name this terminal is to take as soon as it is the one being looked at. */
   private _pendingName: string | null = null;
 
-  constructor(terminalId: TerminalId, terminal: vscode.Terminal) {
+  constructor(terminalId: TerminalId, terminal: vscode.Terminal, quiet: VsCodeQuietShell) {
     this.terminalId = terminalId;
     this._terminal = terminal;
+    this._quiet = quiet;
   }
 
   /**
@@ -250,6 +255,17 @@ class VsCodeTerminalHandle implements TerminalHandle {
 
   public sendText(text: string, execute: boolean): void {
     this._terminal.sendText(text, execute);
+  }
+
+  /**
+   * The launch line, held back until this shell is the person's own.
+   *
+   * The whole difference from `sendText` is the holding back, and it belongs
+   * here rather than in the caller: the domain says what to run, and WHEN a
+   * particular editor's shell is ready for it is a fact about that editor.
+   */
+  public runLaunchCommand(commandLine: string): void {
+    this._quiet.typeWhenQuiet(this._terminal, commandLine);
   }
 
   public show(preserveFocus: boolean): void {

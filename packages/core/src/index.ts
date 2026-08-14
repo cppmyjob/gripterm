@@ -35,6 +35,13 @@ export {
 } from './domain/services/editor-layout';
 
 export {
+  shellQuietVerdict,
+  type ShellQuietPolicy,
+  type ShellQuietState,
+  type ShellQuietVerdict,
+} from './domain/services/shell-quiet';
+
+export {
   disposalOf,
   explainCleanup,
   planCleanup,
