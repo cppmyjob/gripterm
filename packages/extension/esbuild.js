@@ -49,6 +49,16 @@ const PTY_KEEP = ['package.json', 'LICENSE', 'lib', 'prebuilds'];
  */
 const PTY_DROP = ['.pdb', '.map', '.test.js'];
 
+/**
+ * Where the page lands: beside the bundle, in `dist/webview/`.
+ *
+ * `.vscodeignore` keeps `src/`, `out/` and every `.ts` out of the archive but
+ * says nothing about `dist/`, which is where the extension's own bundle already
+ * travels from. The view's `localResourceRoots` names this directory and only
+ * this one.
+ */
+const PAGE_DESTINATION = path.join(__dirname, 'dist', 'webview');
+
 /** @type {import('esbuild').BuildOptions} */
 const options = {
   // Paths resolve against the package, not against whatever directory the
@@ -69,6 +79,39 @@ const options = {
   format: 'cjs',
   platform: 'node',
   target: 'node20',
+  sourcemap: !production,
+  minify: production,
+  logLevel: 'info',
+};
+
+/**
+ * The page, and it is a SECOND CONFIGURATION rather than a second entry point of
+ * the first (M3.6).
+ *
+ * Nothing about it is shared with the bundle above: it runs in a browser and not
+ * in Node, it has no `require` and no editor API, it emits a stylesheet beside
+ * its script, and its font has to come out as a file of its own. One config with
+ * two entries would have to be right for both, and the half that lost would lose
+ * silently -- a `platform: 'node'` page loads and then does nothing.
+ *
+ * The `.ttf` loader is what makes the codicon font a real file in `dist/webview/`
+ * with the stylesheet's url rewritten to match. Without it the font travels as a
+ * base64 data uri inside the CSS, which `font-src` would then have to allow --
+ * and widening a content policy to avoid writing a file is the wrong trade.
+ *
+ * @type {import('esbuild').BuildOptions}
+ */
+const pageOptions = {
+  absWorkingDir: path.join(__dirname, '..', 'webview'),
+  entryPoints: ['src/page/main.ts'],
+  bundle: true,
+  outdir: PAGE_DESTINATION,
+  entryNames: '[name]',
+  assetNames: '[name]-[hash]',
+  loader: { '.ttf': 'file' },
+  format: 'iife',
+  platform: 'browser',
+  target: 'es2022',
   sourcemap: !production,
   minify: production,
   logLevel: 'info',
@@ -139,32 +182,66 @@ function copyNodePty() {
 }
 
 /**
- * Refuses to bundle a core that is older than its own source (found 2026-08-17,
- * M3.5).
+ * Refuses to bundle a workspace package that is older than its own source
+ * (found 2026-08-17, M3.5; widened in M3.6).
  *
- * `@gripterm/core` resolves through its `main` to `dist/index.js`, so what this
- * bundle contains is the COMPILED core -- and nothing in `build:extension`
- * compiles it. Until this check existed, an integration run after a change to
- * the core tested the previous build of it and said nothing: the suite was green
- * about code that was not in the bundle. It was found by a mutation that
- * survived, which is exactly the shape of defect this repository keeps meeting
- * (M1.5, M2.11) -- a run that measures something other than what it names.
+ * Both packages below are resolved through their `main`, which points at
+ * COMPILED output -- `@gripterm/core` at `dist/`, `@gripterm/webview` at `out/`
+ * -- and nothing in `build:extension` compiles either. Until this check existed,
+ * an integration run after a change to the core tested the previous build of it
+ * and said nothing: the suite was green about code that was not in the bundle.
+ * It was found by a mutation that survived, which is exactly the shape of defect
+ * this repository keeps meeting (M1.5, M2.11) -- a run that measures something
+ * other than what it names.
  *
  * The scripts now build first, and this is the second lock: it is what a person
  * running `node esbuild.js` by hand, or a script written next year, meets
  * instead of a silent stale bundle.
  */
-function refuseAStaleCore() {
-  const core = path.join(__dirname, '..', 'core');
-  const source = newestUnder(path.join(core, 'src'));
-  const built = newestUnder(path.join(core, 'dist'));
-  if (source === null || (built !== null && built >= source)) {
-    return;
+function refuseStaleBuilds() {
+  const packages = [
+    { name: '@gripterm/core', directory: 'core', built: 'dist' },
+    // The page itself is bundled from SOURCE by `pageOptions` below, so only the
+    // protocol module -- the half the extension imports through the package
+    // name -- can go stale here. That is enough: it is the parser both sides of
+    // the channel are checked against.
+    { name: '@gripterm/webview', directory: 'webview', built: 'out' },
+  ];
+  for (const target of packages) {
+    const root = path.join(__dirname, '..', target.directory);
+    const source = newestUnder(path.join(root, 'src'));
+    const built = newestUnder(path.join(root, target.built));
+    if (source === null || (built !== null && built >= source)) {
+      continue;
+    }
+    throw new Error(
+      `the compiled ${target.name} is older than its source, and this bundle would carry the old one. ` +
+      'Run `pnpm run build` first -- `build:extension` bundles what `tsc` emitted, it does not emit it.'
+    );
   }
-  throw new Error(
-    'the compiled @gripterm/core is older than its source, and this bundle would carry the old one. ' +
-    'Run `pnpm run build` first -- `build:extension` bundles `packages/core/dist`, it does not compile it.'
-  );
+}
+
+/**
+ * Refuses a page that is missing a piece, right where it was written.
+ *
+ * The archive's own check is `vsce ls` in the integration run; this is the one
+ * that fires four seconds earlier, in the build that produced the gap. Both are
+ * needed: a missing stylesheet is invisible in a bundle log and shows up as an
+ * unstyled panel in somebody's editor.
+ */
+function refuseAnIncompletePage() {
+  const written = fs.readdirSync(PAGE_DESTINATION);
+  const wanted = [
+    ['main.js', (name) => name === 'main.js'],
+    ['main.css', (name) => name === 'main.css'],
+    ['a codicon font', (name) => /^codicon-.*\.ttf$/.test(name)],
+  ];
+  const missing = wanted.filter(([, matches]) => !written.some(matches)).map(([what]) => what);
+  if (missing.length > 0) {
+    throw new Error(
+      `the page was built without ${missing.join(', ')} -- ${PAGE_DESTINATION} holds ${written.join(', ')}`
+    );
+  }
 }
 
 /** The newest modification time under a directory, or `null` when there is nothing to read. */
@@ -187,14 +264,18 @@ function newestUnder(directory) {
 }
 
 async function main() {
-  refuseAStaleCore();
+  refuseStaleBuilds();
   copyNodePty();
   if (watch) {
-    const ctx = await esbuild.context(options);
-    await ctx.watch();
+    for (const config of [options, pageOptions]) {
+      const ctx = await esbuild.context(config);
+      await ctx.watch();
+    }
     return;
   }
   await esbuild.build(options);
+  await esbuild.build(pageOptions);
+  refuseAnIncompletePage();
 }
 
 main().catch((error) => {

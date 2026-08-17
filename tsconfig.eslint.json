@@ -12,9 +12,16 @@
     // references, and neither of these two configs emits anything.
     "baseUrl": ".",
     "paths": {
-      "@gripterm/core": ["packages/core/src/index.ts"]
+      "@gripterm/core": ["packages/core/src/index.ts"],
+      "@gripterm/webview": ["packages/webview/src/protocol.ts"]
     },
     "types": ["node", "jest", "vscode", "mocha"]
   },
-  "include": ["packages/**/src/**/*.ts", "tests/**/*.ts"]
+  "include": ["packages/**/src/**/*.ts", "tests/**/*.ts"],
+  // The page is the one thing here compiled for a BROWSER: it needs the DOM
+  // library and must not see @types/node, and this config gives every file the
+  // opposite of both. It is type-checked by its own project (`tsc --build`) and
+  // linted through it -- see the `packages/webview/src/page` block in
+  // `eslint.config.mjs`.
+  "exclude": ["packages/webview/src/page/**"]
 }

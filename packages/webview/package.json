@@ -1,0 +1,18 @@
+{
+  "name": "@gripterm/webview",
+  "version": "0.0.1",
+  "private": true,
+  "description": "The page Gripterm draws in its panel: the terminal screen, the details half, and the contract between the page and the extension host.",
+  "license": "Apache-2.0",
+  "main": "./out/protocol.js",
+  "types": "./out/protocol.d.ts",
+  "scripts": {
+    "build": "tsc --build"
+  },
+  "dependencies": {
+    "@vscode/codicons": "0.0.45",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/addon-unicode11": "0.9.0",
+    "@xterm/xterm": "6.0.0"
+  }
+}

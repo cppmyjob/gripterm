@@ -19,6 +19,7 @@ module.exports = {
   // CommonJS -- where the extension is optional, as in any `require`.
   moduleNameMapper: {
     '^@gripterm/core$': '<rootDir>/packages/core/src/index.ts',
+    '^@gripterm/webview$': '<rootDir>/packages/webview/src/protocol.ts',
   },
   transform: {
     '^.+\\.ts$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.eslint.json' }],
@@ -36,7 +37,17 @@ module.exports = {
     '<rootDir>/tests/integration/',
     '<rootDir>/tests/acceptance/',
   ],
-  collectCoverageFrom: ['packages/core/src/**/*.ts', '!packages/core/src/index.ts'],
+  // The core, plus the two pure rules the page is built on. The page ITSELF is
+  // not here and cannot be: it needs a document, and it is checked in a real
+  // editor by `tests/integration/workbench-view.test.ts`. These two are total
+  // functions of their arguments -- one parses a message, one places a border --
+  // and both run on a side of the channel this suite can reach.
+  collectCoverageFrom: [
+    'packages/core/src/**/*.ts',
+    '!packages/core/src/index.ts',
+    'packages/webview/src/protocol.ts',
+    'packages/webview/src/split-rule.ts',
+  ],
   coverageThreshold: {
     global: {
       branches: 65,
@@ -95,6 +106,24 @@ module.exports = {
       statements: 100,
     },
     'packages/core/src/domain/services/window-shutdown.ts': {
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100,
+    },
+    // The two rules of M3.6, held at the same number for a reason of their own:
+    // both stand between a webview and the rest of the build. The parser is the
+    // only thing that reads a message from a document with its own lifetime, and
+    // the split rule is the only thing that refuses to lay out a box that has no
+    // geometry -- the `NaN` that xterm.js#3029 produces from a hidden panel. A
+    // branch of either that nothing exercises is a refusal nobody has checked.
+    'packages/webview/src/protocol.ts': {
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100,
+    },
+    'packages/webview/src/split-rule.ts': {
       branches: 100,
       functions: 100,
       lines: 100,

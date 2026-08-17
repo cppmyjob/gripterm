@@ -13,7 +13,8 @@
     // this says which copy the type checker reads.
     "baseUrl": ".",
     "paths": {
-      "@gripterm/core": ["packages/core/src/index.ts"]
+      "@gripterm/core": ["packages/core/src/index.ts"],
+      "@gripterm/webview": ["packages/webview/src/protocol.ts"]
     },
     "types": ["node", "vscode", "mocha"]
   },

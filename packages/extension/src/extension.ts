@@ -107,6 +107,7 @@ import { StatusBarPresenter } from './ui/status-bar-presenter';
 import { VsCodeAttentionPresenter } from './ui/vscode-attention-presenter';
 import { TerminalDecorationProvider } from './ui/terminal-decorations';
 import { TERMINALS_VIEW_ID, TerminalTreeDataProvider } from './ui/terminal-tree';
+import { WORKBENCH_VIEW_ID, WorkbenchView } from './ui/workbench-view';
 import type { TerminalTreeNode } from './ui/terminal-tree';
 
 /** The agent this build knows how to start, by the name it goes by on a PATH. */
@@ -262,6 +263,16 @@ export interface GriptermApi {
    * is the only place that can be shown to happen (M2.13).
    */
   readonly view: vscode.TreeView<TerminalTreeNode>;
+  /**
+   * The panel this extension draws in (M3.6).
+   *
+   * Exposed for the same reason as the gateway: the page reports its own box,
+   * its own font and its own content-policy violations, and those reports are
+   * the only way anything about a webview can be checked without a person
+   * looking at a screen. The suite drives THIS object -- the one the person's
+   * window is using -- rather than a second copy of the provider.
+   */
+  readonly workbench: WorkbenchView;
   /**
    * The data provider, for the one question only a real host answers about the
    * grouping (M2.14): what the ROOT of the contributed view actually contains.
@@ -486,6 +497,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   // and a data provider alone cannot select anything (M2.13).
   const view = vscode.window.createTreeView(TERMINALS_VIEW_ID, { treeDataProvider: tree });
   context.subscriptions.push(view);
+  /*
+   * The panel tab and the page inside it (M3.6).
+   *
+   * `retainContextWhenHidden: true` is the owner's decision of 2026-08-17, taken
+   * on the M3.1 measurement: with it, ten hide-and-shows over five sessions
+   * never rebuilt the page. The panel is hidden and shown many times a day --
+   * `Ctrl+J`, and every switch to TERMINAL -- and a rebuilt page would cost the
+   * person their scrollback, their selection and the position of their cursor
+   * each time. What it costs instead is the memory of every hidden terminal,
+   * which was NOT measured and is named unmeasured in the plan; and it puts a
+   * requirement on M3.7, which is written there: a hidden webview has its timers
+   * throttled by Chromium, so acknowledgements stop arriving and invisibility
+   * must lift back-pressure unconditionally.
+   */
+  const workbench = new WorkbenchView({ extensionUri: context.extensionUri, logger });
+  context.subscriptions.push(workbench);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(WORKBENCH_VIEW_ID, workbench, {
+      webviewOptions: { retainContextWhenHidden: true },
+    })
+  );
   // The person's own colour, on the row's label. The icon's colour belongs to
   // the state, and the two must not be confusable (M2.7).
   const decorations = new TerminalDecorationProvider(registry);
@@ -761,6 +793,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     identity,
     view,
     tree,
+    workbench,
     readiness: {
       cliPath: cli.path,
       cliVersion: cli.version,

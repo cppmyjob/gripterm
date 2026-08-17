@@ -79,9 +79,27 @@ importers:
       '@gripterm/core':
         specifier: workspace:*
         version: link:../core
+      '@gripterm/webview':
+        specifier: workspace:*
+        version: link:../webview
       node-pty:
         specifier: 1.1.0
         version: 1.1.0
+
+  packages/webview:
+    dependencies:
+      '@vscode/codicons':
+        specifier: 0.0.45
+        version: 0.0.45
+      '@xterm/addon-fit':
+        specifier: 0.11.0
+        version: 0.11.0
+      '@xterm/addon-unicode11':
+        specifier: 0.9.0
+        version: 0.9.0
+      '@xterm/xterm':
+        specifier: 6.0.0
+        version: 6.0.0
 
   spikes/panel-keys: {}
 
@@ -976,6 +994,9 @@ packages:
     resolution: {integrity: sha512-nAB74NfSNKknqQ1RrYj6uz8FcXEomu/MATJZxh/x+BArzN2U3JbOYC0APYzUIGhVY3m5hRxA8VPNdPBoG8txlA==}
     cpu: [x64]
     os: [win32]
+
+  '@vscode/codicons@0.0.45':
+    resolution: {integrity: sha512-1KAZ7XCMagp5Gdrlr4bbbcAqgcIL623iO1wW6rfcSVGAVUQvR0WP7bQx1SbJ11gmV3fdQTSEFIJQ/5C+HuVasw==}
 
   '@vscode/test-cli@0.0.10':
     resolution: {integrity: sha512-B0mMH4ia+MOOtwNiLi79XhA+MLmUItIC8FckEuKrVAVriIuSWjt7vv4+bF8qVFiNFe4QRfzPaIZk39FZGWEwHA==}
@@ -4585,6 +4606,8 @@ snapshots:
 
   '@unrs/resolver-binding-win32-x64-msvc@1.12.2':
     optional: true
+
+  '@vscode/codicons@0.0.45': {}
 
   '@vscode/test-cli@0.0.10':
     dependencies:

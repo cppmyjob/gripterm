@@ -1,0 +1,87 @@
+/*
+ * The page's own furniture: two halves and the border between them.
+ *
+ * Every colour is one of the editor's variables, so the page follows the
+ * person's theme without asking anybody -- including themes we have never seen.
+ * Sizes are the only literals, and the ones that are RULES rather than taste
+ * (the minimum width of each half, the width of the divider) live in
+ * `split-rule.ts` and `layout.ts`, where they can be tested.
+ */
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--vscode-panel-background);
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+
+#gripterm-root {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  height: 100%;
+  width: 100%;
+}
+
+.gripterm-terminal {
+  min-width: 0;
+  overflow: hidden;
+  background: var(--vscode-terminal-background, var(--vscode-panel-background));
+}
+
+/*
+ * The divider is four pixels wide and grabbable across eleven: a border a
+ * person has to aim at is a border they drag by accident. The padding is
+ * negative margin rather than width, so the layout rule keeps its four.
+ */
+.gripterm-splitter {
+  flex: 0 0 4px;
+  position: relative;
+  cursor: col-resize;
+  background: var(--vscode-panel-border, transparent);
+  touch-action: none;
+}
+
+.gripterm-splitter::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  right: -4px;
+}
+
+.gripterm-splitter:hover,
+.gripterm-splitter.gripterm-dragging {
+  background: var(--vscode-focusBorder);
+}
+
+.gripterm-details {
+  min-width: 0;
+  overflow: auto;
+  padding: 10px 14px;
+  background: var(--vscode-panel-background);
+}
+
+.gripterm-details h2 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.gripterm-details p {
+  margin: 0 0 10px;
+  line-height: 1.45;
+  opacity: 0.8;
+}

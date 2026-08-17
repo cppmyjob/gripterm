@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "out",
+    "tsBuildInfoFile": "out/.tsbuildinfo",
+    // The one project in this build that is compiled for a BROWSER: the page
+    // runs inside the editor's webview, where there is no `require`, no
+    // `process` and no editor API -- only a document and one message channel.
+    // `types: []` is the half of that which the compiler can enforce: without
+    // it, `@types/node` leaks in from the workspace root and `process.env` in
+    // the page would type-check all the way to a blank panel at runtime.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": []
+  },
+  "include": ["src/**/*.ts"]
+}

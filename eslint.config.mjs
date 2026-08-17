@@ -60,6 +60,22 @@ const NO_AGENT_CLI = {
   message: 'the neutral domain must not know which agent CLI it is observing',
 };
 
+/**
+ * The page's boundary, and it is the only one here that is about a RUNTIME
+ * rather than a layer: `packages/webview/src/page/**` is loaded by a webview,
+ * which has a document, one message channel and nothing else. No editor API, no
+ * Node builtins, no `require`.
+ *
+ * The type system states half of it already -- that project compiles with
+ * `types: []`, so `@types/node` is not visible and a bare `import 'fs'` does not
+ * type-check. This rule states the other half, the one an added dependency could
+ * otherwise make true: `node:*` specifiers, which resolve by name.
+ */
+const PAGE_IS_A_BROWSER = {
+  group: ['vscode', 'node:*'],
+  message: 'the page runs inside a webview: no editor API and no Node builtins reach it',
+};
+
 export default tseslint.config(
   {
     ignores: [
@@ -446,6 +462,35 @@ export default tseslint.config(
         {
           patterns: [NO_EDITOR_API, NO_NATIVE_PTY, NO_AGENT_CLI],
         },
+      ],
+    },
+  },
+
+  {
+    // The page, and it is the one thing in this repository compiled for a
+    // BROWSER (M3.6).
+    //
+    // It gets its own parser project because `tsconfig.eslint.json` describes
+    // the union of the Node-side projects -- DOM-free, `@types/node` included --
+    // and every page file linted through it would fail on `document` before a
+    // single rule had a chance to run. The project named here is the one `tsc
+    // --build` compiles the page with, so the linter and the compiler read the
+    // same file the same way.
+    files: ['packages/webview/src/page/**/*.ts'],
+    languageOptions: {
+      globals: globals.browser,
+      parserOptions: {
+        project: './packages/webview/tsconfig.json',
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      // `NO_NATIVE_PTY` is restated for the reason given at the constants: this
+      // object REPLACES the options of the rule for every file it matches, and
+      // leaving it out would exempt the page from the native boundary.
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        { patterns: [PAGE_IS_A_BROWSER, NO_NATIVE_PTY] },
       ],
     },
   },
