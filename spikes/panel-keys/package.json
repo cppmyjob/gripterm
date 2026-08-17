@@ -74,6 +74,10 @@
       { "command": "spikePanelKeys.key.tab", "title": "Spike key: Tab" },
       { "command": "spikePanelKeys.key.ctrlShiftL", "title": "Spike key: Ctrl+Shift+L" },
       { "command": "spikePanelKeys.key.guardProbe", "title": "Spike key: Ctrl+Alt+F9 (guard probe)" },
+      { "command": "spikePanelKeys.guard.ctrlJ", "title": "Spike guard: Ctrl+J" },
+      { "command": "spikePanelKeys.guard.ctrlP", "title": "Spike guard: Ctrl+P" },
+      { "command": "spikePanelKeys.guard.ctrlR", "title": "Spike guard: Ctrl+R" },
+      { "command": "spikePanelKeys.guard.ctrlAltF9", "title": "Spike guard: Ctrl+Alt+F9" },
       { "command": "spikePanelKeys.saveProtocol", "title": "Spike: save protocol" }
     ],
     "keybindings": [
@@ -100,7 +104,11 @@
       { "command": "spikePanelKeys.key.ctrlI", "key": "ctrl+i", "when": "focusedView == spikePanelKeys.board" },
       { "command": "spikePanelKeys.key.tab", "key": "tab", "when": "focusedView == spikePanelKeys.board" },
       { "command": "spikePanelKeys.key.ctrlShiftL", "key": "ctrl+shift+l", "when": "focusedView == spikePanelKeys.board" },
-      { "command": "spikePanelKeys.key.guardProbe", "key": "ctrl+alt+f9", "when": "focusedView == spikePanelKeys.board" }
+      { "command": "spikePanelKeys.key.guardProbe", "key": "ctrl+alt+f9", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.guard.ctrlJ", "key": "ctrl+j", "when": "spikePanelKeys.boardFocused" },
+      { "command": "spikePanelKeys.guard.ctrlP", "key": "ctrl+p", "when": "spikePanelKeys.boardFocused" },
+      { "command": "spikePanelKeys.guard.ctrlR", "key": "ctrl+r", "when": "spikePanelKeys.boardFocused" },
+      { "command": "spikePanelKeys.guard.ctrlAltF9", "key": "ctrl+alt+f9", "when": "spikePanelKeys.boardFocused" }
     ]
   }
 }

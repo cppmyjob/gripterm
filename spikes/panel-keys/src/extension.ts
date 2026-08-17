@@ -121,6 +121,39 @@ interface RawEvent {
   readonly matched: string | null;
 }
 
+/**
+ * The second half of A31: can a key the workbench owns be TAKEN BACK.
+ *
+ * Measured 2026-08-17: `Ctrl+J` reaches the page AND still toggles the panel,
+ * while our keybinding guarded by `focusedView == <view id>` never fired once --
+ * so a focused webview view apparently does not set that context key. This
+ * table repeats the same chords behind a context key WE set ourselves, from the
+ * page's own focus. If `Ctrl+J` stops hiding the panel, keys are curable and
+ * M3.8 has its mechanism; if it still hides, the product cannot take them back
+ * and the honest answer for those keys is "lost".
+ */
+interface GuardSpec {
+  readonly id: string;
+  readonly chord: string;
+  readonly command: string;
+  readonly why: string;
+}
+
+const GUARDS: readonly GuardSpec[] = [
+  { id: 'ctrlJ', chord: 'Ctrl+J', command: 'spikePanelKeys.guard.ctrlJ', why: 'proven above to be taken by the workbench' },
+  { id: 'ctrlP', chord: 'Ctrl+P', command: 'spikePanelKeys.guard.ctrlP', why: 'Quick Open' },
+  { id: 'ctrlR', chord: 'Ctrl+R', command: 'spikePanelKeys.guard.ctrlR', why: 'never reached the page at all' },
+  { id: 'ctrlAltF9', chord: 'Ctrl+Alt+F9', command: 'spikePanelKeys.guard.ctrlAltF9', why: 'belongs to nobody' },
+];
+
+interface GuardState {
+  readonly id: string;
+  readonly chord: string;
+  readonly why: string;
+  fired: boolean;
+  firedAt: string | null;
+}
+
 /** One activation of the stand. A window reload starts a new one. */
 interface SessionRecord {
   readonly startedAt: string;
@@ -147,6 +180,9 @@ interface Protocol {
   readonly previousSessions: SessionRecord[];
   metrics: Metrics | null;
   readonly rows: RowState[];
+  readonly guards: GuardState[];
+  /** Every time we told the editor whether our page has focus. */
+  contextSwitches: { readonly focused: boolean; readonly at: string }[];
   rawEvents: RawEvent[];
 }
 
@@ -193,16 +229,16 @@ function sanitize(name: string): string {
  * came back empty. A stand whose own key list wipes its results makes the owner
  * repeat the whole pass, so the file is not just written but READ BACK.
  */
-function restoreRows(filePath: string, rows: RowState[]): SessionRecord[] {
+function restorePrevious(filePath: string, rows: RowState[], guards: GuardState[]): SessionRecord[] {
   let parsed: Protocol;
   try {
     parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as Protocol;
   } catch {
     return [];
   }
-  const previous = new Map((parsed.rows ?? []).map((row) => [row.id, row]));
+  const previousRows = new Map((parsed.rows ?? []).map((row) => [row.id, row]));
   for (const row of rows) {
-    const before = previous.get(row.id);
+    const before = previousRows.get(row.id);
     if (before === undefined) {
       continue;
     }
@@ -211,6 +247,15 @@ function restoreRows(filePath: string, rows: RowState[]): SessionRecord[] {
     row.blocked = before.blocked;
     row.note = before.note;
     row.focusAtCommand = before.focusAtCommand;
+  }
+  const previousGuards = new Map((parsed.guards ?? []).map((guard) => [guard.id, guard]));
+  for (const guard of guards) {
+    const before = previousGuards.get(guard.id);
+    if (before === undefined) {
+      continue;
+    }
+    guard.fired = before.fired;
+    guard.firedAt = before.firedAt;
   }
   return [...(parsed.previousSessions ?? []), ...(parsed.view === undefined ? [] : [parsed.view])];
 }
@@ -255,6 +300,7 @@ class ProtocolFile {
 
 class ProbeBoard implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
+  private boardFocused = false;
 
   public constructor(
     private readonly extensionUri: vscode.Uri,
@@ -281,9 +327,27 @@ class ProbeBoard implements vscode.WebviewViewProvider {
         at: new Date().toISOString(),
       });
       this.log.appendLine(`visibility -> ${String(view.visible)}`);
+      // An invisible page cannot hold focus, and a context key left true would
+      // keep our bindings swallowing keys across the whole window.
+      if (!view.visible) {
+        this.setBoardFocused(false);
+      }
       this.file.scheduleWrite(this.protocol);
     });
 
+    this.file.scheduleWrite(this.protocol);
+  }
+
+  /** Called when a keybinding guarded by OUR context key fires. */
+  public onGuard(id: string): void {
+    const guard = this.protocol.guards.find((candidate) => candidate.id === id);
+    if (guard === undefined) {
+      return;
+    }
+    guard.fired = true;
+    guard.firedAt ??= new Date().toISOString();
+    this.log.appendLine(`guard fired: ${id}`);
+    void this.view?.webview.postMessage({ type: 'guardFired', id });
     this.file.scheduleWrite(this.protocol);
   }
 
@@ -344,6 +408,9 @@ class ProbeBoard implements vscode.WebviewViewProvider {
         }
         break;
       }
+      case 'pageFocus':
+        this.setBoardFocused(payload['focused'] === true);
+        break;
       case 'metrics':
         this.protocol.metrics = payload['metrics'] as Metrics;
         break;
@@ -371,6 +438,21 @@ class ProbeBoard implements vscode.WebviewViewProvider {
         return;
     }
     this.file.scheduleWrite(this.protocol);
+  }
+
+  /**
+   * Tell the editor whether our page holds focus. This is the mechanism M3.8
+   * plans to use, tried here for real: a key we set ourselves, not
+   * `focusedView`, which a focused webview view does not seem to set.
+   */
+  private setBoardFocused(focused: boolean): void {
+    if (this.boardFocused === focused) {
+      return;
+    }
+    this.boardFocused = focused;
+    this.protocol.contextSwitches.push({ focused, at: new Date().toISOString() });
+    void vscode.commands.executeCommand('setContext', 'spikePanelKeys.boardFocused', focused);
+    this.log.appendLine(`context spikePanelKeys.boardFocused = ${String(focused)}`);
   }
 
   private rowOf(id: unknown): RowState | undefined {
@@ -438,6 +520,13 @@ class ProbeBoard implements vscode.WebviewViewProvider {
         <thead><tr><th>Key</th><th>What it is for</th><th>Webview</th><th>Command</th><th>Verdict</th><th></th><th>What the editor did</th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
+      <p class="hint"><strong>Second question: can a key be taken back?</strong> These chords are bound behind a
+      context key we set ourselves from this page's focus. Press them: if <code>Ctrl+J</code> stops hiding the
+      panel and turns green here, the editor's keys are curable.</p>
+      <table>
+        <thead><tr><th>Chord</th><th>Why this one</th><th>Our guard fired</th></tr></thead>
+        <tbody id="guards"></tbody>
+      </table>
     </div>
   </div>
   <div class="right">
@@ -454,6 +543,7 @@ class ProbeBoard implements vscode.WebviewViewProvider {
   const fontFamily = ${JSON.stringify(fontFamily)};
   const fontSize = ${JSON.stringify(fontSize)};
   let rows = [];
+  let guards = [];
 
   const post = (message) => { vscodeApi.postMessage(message); };
 
@@ -514,6 +604,20 @@ class ProbeBoard implements vscode.WebviewViewProvider {
     }
   };
 
+  const renderGuards = () => {
+    const body = document.getElementById('guards');
+    body.textContent = '';
+    for (const guard of guards) {
+      const tr = document.createElement('tr');
+      const cell = (text) => { const td = document.createElement('td'); td.textContent = text; tr.appendChild(td); return td; };
+      cell(guard.chord);
+      cell(guard.why);
+      const verdict = cell(guard.fired ? 'yes -- key is curable' : 'not yet');
+      verdict.className = guard.fired ? 'ok' : '';
+      body.appendChild(tr);
+    }
+  };
+
   const measure = () => {
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
@@ -558,8 +662,13 @@ class ProbeBoard implements vscode.WebviewViewProvider {
     const data = message.data;
     if (data.type === 'init') {
       rows = data.protocol.rows;
+      guards = data.protocol.guards;
       render();
+      renderGuards();
       measure();
+    } else if (data.type === 'guardFired') {
+      const guard = guards.find((candidate) => candidate.id === data.id);
+      if (guard) { guard.fired = true; renderGuards(); }
     } else if (data.type === 'commandFired') {
       const row = rows.find((candidate) => candidate.id === data.id);
       if (row) {
@@ -578,7 +687,15 @@ class ProbeBoard implements vscode.WebviewViewProvider {
     post({ type: 'reset' });
     render();
   });
+  // The context key that guards our second table follows THIS page's focus.
+  // window focus/blur is the honest signal: it is false the moment anything
+  // else in the window takes focus, which is exactly when our bindings must
+  // stop swallowing keys (O6).
+  window.addEventListener('focus', () => { post({ type: 'pageFocus', focused: true }); });
+  window.addEventListener('blur', () => { post({ type: 'pageFocus', focused: false }); });
+
   document.getElementById('board').focus();
+  post({ type: 'pageFocus', focused: document.hasFocus() });
   post({ type: 'ready' });
 })();
 </script>
@@ -617,6 +734,9 @@ export function activate(context: vscode.ExtensionContext): void {
       bound.delete(row.command);
     }
   }
+  for (const guard of GUARDS) {
+    bound.delete(guard.command);
+  }
   for (const orphan of bound) {
     log.appendLine(`WARNING: manifest binds ${orphan}, which no row claims`);
   }
@@ -634,7 +754,16 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   context.subscriptions.push({ dispose: () => { file.dispose(); } });
 
-  const previousSessions = fs.existsSync(file.filePath) ? restoreRows(file.filePath, rows) : [];
+  const guards: GuardState[] = GUARDS.map((guard) => ({
+    id: guard.id,
+    chord: guard.chord,
+    why: guard.why,
+    fired: false,
+    firedAt: null,
+  }));
+  const previousSessions = fs.existsSync(file.filePath)
+    ? restorePrevious(file.filePath, rows, guards)
+    : [];
   const restored = rows.filter((row) => row.webviewSaw || row.commandFired || row.blocked).length;
   if (previousSessions.length > 0) {
     log.appendLine(`restored ${String(restored)} answered rows from ${String(previousSessions.length)} earlier session(s)`);
@@ -671,6 +800,8 @@ export function activate(context: vscode.ExtensionContext): void {
     previousSessions,
     metrics: null,
     rows,
+    guards,
+    contextSwitches: [],
     rawEvents: [],
   };
 
@@ -689,6 +820,15 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
       vscode.commands.registerCommand(row.command, () => {
         board.onCommand(id);
+      }),
+    );
+  }
+
+  for (const guard of GUARDS) {
+    const id = guard.id;
+    context.subscriptions.push(
+      vscode.commands.registerCommand(guard.command, () => {
+        board.onGuard(id);
       }),
     );
   }
