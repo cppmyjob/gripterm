@@ -71,6 +71,7 @@ import type {
   OwnerPresence,
   RestoreInputs,
   StoragePreparation,
+  TerminalGateway,
   TerminalRepository,
   WatchReport,
 } from '@gripterm/core';
@@ -196,7 +197,15 @@ export type RestoreSummary =
  */
 export interface GriptermApi {
   readonly registry: SessionRegistry;
-  readonly gateway: VsCodeTerminalGateway;
+  /**
+   * The port, not the editor's implementation of it (M3.4).
+   *
+   * The acceptance suites reach a terminal through `handleFor`, which is now the
+   * port's own method: a field typed to the concrete class would make every one
+   * of them a test of the `editor` engine, and the same run has to be able to
+   * exercise the other one.
+   */
+  readonly gateway: TerminalGateway;
   readonly lifecycle: TerminalLifecycleService;
   /**
    * The five things a person changes about their own record.

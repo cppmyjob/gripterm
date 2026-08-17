@@ -352,3 +352,52 @@ describe('the aggregate stays the only definition of valid', () => {
     expect(decode.kind).toBe('broken');
   });
 });
+
+/**
+ * The engine field, whose absence has to mean something specific.
+ *
+ * This is the one field in the record that decides whether a process may be
+ * killed, so both directions of the rollback were thought about rather than one:
+ *
+ *  * A record written by a build that had no engine field, read by this one:
+ *    absence means `editor`, and the reconciler kills nothing. Bumping
+ *    `STORAGE_SCHEMA_VERSION` for it was rejected -- prior builds would then
+ *    refuse the whole base (`storage-migrator.ts:122`).
+ *  * A record written by a LATER build, read by this one: a value we cannot read
+ *    makes the record broken, which loses one row from the list and logs why
+ *    (`file-terminal-repository.ts:270`), and leaves the file itself untouched
+ *    so that rolling forward reads it again. Calling an unreadable engine
+ *    `editor` would be this build asserting knowledge it does not have about a
+ *    decision that ends a process.
+ */
+describe('the engine that made the terminal', () => {
+  const good = JSON.parse(JSON.stringify(encodeRecord(makeEntry()))) as Record<string, unknown>;
+
+  it('writes the engine into the document', () => {
+    expect(encodeRecord(makeEntry({ engine: 'own' })).engine).toBe('own');
+  });
+
+  it('survives a round trip', () => {
+    const decode = loaded(JSON.parse(JSON.stringify(encodeRecord(makeEntry({ engine: 'own' })))));
+
+    expect(decode.kind).toBe('ok');
+    expect(decode.kind === 'ok' ? decode.entry.engine : null).toBe('own');
+  });
+
+  it('reads a record written before the field existed as the editor engine', () => {
+    const older = Object.fromEntries(Object.entries(good).filter(([key]) => key !== 'engine'));
+
+    const decode = loaded(older);
+
+    expect(decode.kind).toBe('ok');
+    expect(decode.kind === 'ok' ? decode.entry.engine : null).toBe('editor');
+  });
+
+  it.each(['pty', 'own-v2', '', 'Own'])('refuses the engine %p, which this build cannot act on', (engine) => {
+    expect(reasonOf(loaded({ ...good, engine }))).toContain('engine');
+  });
+
+  it('refuses an engine that is not even a string', () => {
+    expect(loaded({ ...good, engine: 7 }).kind).toBe('broken');
+  });
+});

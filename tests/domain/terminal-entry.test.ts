@@ -404,3 +404,56 @@ describe('the aggregate as a whole', () => {
     expect(restored.matchesSession(SessionId.fromString(SESSION_UUID))).toBe(true);
   });
 });
+
+/**
+ * Which engine made the terminal this record is about.
+ *
+ * Stored because reconciliation is allowed to KILL a process, and it is allowed
+ * to kill only the processes of the `own` engine: under `editor` a `claude`
+ * outlives the extension host by design (measured M2.16, 102 s of observation)
+ * and taking it down would be this build destroying a conversation nobody asked
+ * it to touch (O1).
+ *
+ * The default is `editor` and the direction is deliberate. Every record written
+ * before this field existed says nothing, and reading nothing as `own` would
+ * point the killer at terminals it must not touch. The safe answer to "which
+ * engine was it" is the one that kills nothing.
+ */
+describe('TerminalEntry: the engine that made it', () => {
+  it('says editor when nobody said otherwise', () => {
+    expect(makeEntry().engine).toBe('editor');
+  });
+
+  it('keeps the engine it was created with', () => {
+    expect(makeEntry({ engine: 'own' }).engine).toBe('own');
+  });
+
+  it('takes a new engine without touching anything else', () => {
+    const entry = makeEntry();
+
+    const stamped = entry.withEngine('own');
+
+    expect(stamped.engine).toBe('own');
+    expect(stamped.revision).toBe(entry.revision);
+    expect(stamped.terminalId.equals(entry.terminalId)).toBe(true);
+    expect(stamped.launch).toBe(entry.launch);
+    expect(stamped.observed).toBe(entry.observed);
+  });
+
+  it('returns itself when the engine has not moved', () => {
+    // The identity comparison the UI redraws on: stamping the same engine on
+    // every start would otherwise make every row look changed.
+    const entry = makeEntry({ engine: 'own' });
+
+    expect(entry.withEngine('own')).toBe(entry);
+  });
+
+  it('carries the engine through every other change', () => {
+    const evolved = makeEntry({ engine: 'own' })
+      .withObserved(makeObserved())
+      .withSessionId(SessionId.fromString(NEXT_SESSION_UUID))
+      .adoptedBy(makeOwnerRef('window-activation-2'));
+
+    expect(evolved.engine).toBe('own');
+  });
+});

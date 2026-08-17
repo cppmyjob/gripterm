@@ -1,8 +1,7 @@
 import * as vscode from 'vscode';
 import { FOCUS_TERMINAL_COMMAND, terminalTargetOf } from '@gripterm/core';
 import { say } from '../ui/say';
-import type { Logger } from '@gripterm/core';
-import type { VsCodeTerminalGateway } from '../adapters/vscode-terminal-gateway';
+import type { Logger, TerminalGateway } from '@gripterm/core';
 
 /**
  * `gripterm.focusTerminal` -- brings a terminal to the front.
@@ -13,7 +12,7 @@ import type { VsCodeTerminalGateway } from '../adapters/vscode-terminal-gateway'
  * interruption to report something the person can already see.
  */
 export function registerFocusTerminal(
-  gateway: VsCodeTerminalGateway,
+  gateway: TerminalGateway,
   logger: Logger
 ): vscode.Disposable {
   return vscode.commands.registerCommand(FOCUS_TERMINAL_COMMAND, (target: unknown) => {

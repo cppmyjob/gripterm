@@ -128,6 +128,13 @@ export {
   type ScreenReplay,
 } from './domain/services/screen-buffer';
 export {
+  EDITOR_INTERNAL_NAMES,
+  terminalEnvironment,
+  type EditorIdentity,
+  type TerminalEnvironmentParams,
+} from './domain/services/terminal-environment';
+export { chooseEngine, type EngineChoice } from './domain/services/engine-selection';
+export {
   FRESH_HEARTBEAT_MS,
   HEARTBEAT_INTERVAL_MS,
   type OwnerIdentity,
@@ -329,6 +336,11 @@ export {
   type PersistedTerminalState,
   type TerminalState,
 } from './domain/entities/terminal-state';
+export {
+  TERMINAL_ENGINES,
+  isTerminalEngine,
+  type TerminalEngine,
+} from './domain/entities/terminal-engine';
 
 export {
   asArray,

@@ -66,5 +66,22 @@ module.exports = {
       lines: 100,
       statements: 100,
     },
+    // The two pure rules of M3.4 stage A, held at the same number and for the
+    // same reason. `terminal-environment.ts` earns it twice over: every branch of
+    // it stands for a measured difference between the extension host's
+    // environment and a terminal's, and a branch nobody exercises here is a
+    // variable reaching an agent -- or not reaching it -- with nothing to say so.
+    'packages/core/src/domain/services/terminal-environment.ts': {
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100,
+    },
+    'packages/core/src/domain/services/engine-selection.ts': {
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100,
+    },
   },
 };

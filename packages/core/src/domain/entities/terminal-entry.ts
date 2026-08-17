@@ -4,6 +4,7 @@ import type { LaunchRecipe } from './launch-recipe';
 import type { ObservedState } from './observed-state';
 import type { OwnerRef } from './owner-ref';
 import type { SessionId } from './session-id';
+import type { TerminalEngine } from './terminal-engine';
 import type { TerminalId } from './terminal-id';
 
 const INITIAL_REVISION = 0;
@@ -17,6 +18,7 @@ interface TerminalEntryState {
   readonly metadata: HumanMetadata;
   readonly launch: LaunchRecipe;
   readonly observed: ObservedState;
+  readonly engine: TerminalEngine;
   readonly createdAtMs: number;
   readonly closedAtMs: number | null;
   readonly revision: number;
@@ -33,6 +35,17 @@ export interface CreateTerminalEntryParams {
   readonly sessionIdHistory?: readonly SessionId[];
   readonly closedAt?: Date | null;
   readonly revision?: number;
+  /**
+   * Which engine made the terminal, defaulting to `editor`.
+   *
+   * Optional because it has one honest default and the default is the safe
+   * direction: every record written before this field existed says nothing about
+   * the engine, and reconciliation may kill the processes of `own` and only
+   * those. Reading silence as `own` would point it at a `claude` that outlives
+   * the extension host by design (M2.16). Reading it as `editor` costs a process
+   * that is not cleaned up; reading it the other way costs a conversation.
+   */
+  readonly engine?: TerminalEngine;
 }
 
 /**
@@ -79,6 +92,16 @@ export class TerminalEntry {
 
   public get launch(): LaunchRecipe {
     return this._state.launch;
+  }
+
+  /**
+   * The engine that MADE this terminal, which is not the same thing as the engine
+   * the settings ask for: they part company on every fallback (see
+   * `TerminalEngine`). Only `own` processes may be killed by reconciliation, so
+   * this field is read before anything ends a process.
+   */
+  public get engine(): TerminalEngine {
+    return this._state.engine;
   }
 
   public get observed(): ObservedState {
@@ -151,6 +174,7 @@ export class TerminalEntry {
       metadata: params.metadata,
       launch: params.launch,
       observed: params.observed,
+      engine: params.engine ?? 'editor',
       createdAtMs: params.createdAt.getTime(),
       closedAtMs: closedAt === null ? null : closedAt.getTime(),
       revision,
@@ -179,6 +203,22 @@ export class TerminalEntry {
 
   public withMetadata(next: HumanMetadata): TerminalEntry {
     return this._withState({ metadata: next });
+  }
+
+  /**
+   * Records which engine made the terminal that is running now.
+   *
+   * Called by the lifecycle service with the engine of the gateway that just
+   * created it -- once, immediately after the create -- so a record restored by a
+   * window running the other engine stops claiming the one it was stored with.
+   *
+   * Deliberately does NOT touch `revision`, like `withObserved`: this is us
+   * writing down what we just did, not a change another window has to lose a
+   * compare-and-swap over. Returns `this` when the engine has not moved, which is
+   * the ordinary case and keeps the identity comparison the UI redraws on.
+   */
+  public withEngine(next: TerminalEngine): TerminalEntry {
+    return this._state.engine === next ? this : this._withState({ engine: next });
   }
 
   /**

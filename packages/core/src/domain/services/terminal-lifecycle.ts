@@ -233,11 +233,18 @@ export class TerminalLifecycleService implements Disposable {
     // leaves no row stuck in `launching` for the life of the window, and the
     // person who pressed the button is told by the caller instead.
     const handle = await this._options.gateway.create(plan.spec);
+    // The engine goes in from the gateway that just answered, not from the
+    // setting that was read at activation, and not before the create either: a
+    // record saying `own` for a terminal the editor made would hand
+    // reconciliation a live conversation to end (M3.4(4)). A restore stamps it
+    // too, which is what stops a record stored by an `own` window claiming that
+    // engine in a window that fell back.
+    const running = starting.withEngine(this._options.gateway.engine);
 
     // No `await` between these two. The editor cannot deliver a close event in
     // the middle of synchronous code, so there is no window in which the
     // terminal exists, is registered, and is unwatched.
-    this._options.registry.register(starting);
+    this._options.registry.register(running);
     this._watch(handle, intent);
 
     // Not awaited, and that is the decision: the editor settles this promise
@@ -264,12 +271,13 @@ export class TerminalLifecycleService implements Disposable {
 
     this._options.logger.info('a terminal was started', {
       terminalId: terminalId.value,
-      sessionId: starting.sessionId.value,
+      sessionId: running.sessionId.value,
       intent,
       visibility,
       mode: this._options.strategy.mode,
+      engine: running.engine,
     });
-    return starting;
+    return running;
   }
 
   /**

@@ -6,6 +6,7 @@ import type {
   Logger,
   Scheduler,
   ScreenExit,
+  TerminalEngine,
   TerminalExit,
   TerminalExitReason,
   TerminalGateway,
@@ -216,6 +217,11 @@ export class InMemoryTerminalGateway implements TerminalGateway {
   public readonly specs: TerminalSpec[] = [];
   /** The pid every terminal this gateway creates will report. */
   public pid: number | null = null;
+  /**
+   * Which engine this gateway claims to be. Settable, because the whole point of
+   * the field on the port is that the record repeats THIS and not a setting.
+   */
+  public engine: TerminalEngine = 'editor';
 
   private readonly _handles = new Map<string, FakeTerminalHandle>();
   private _holdPids = false;

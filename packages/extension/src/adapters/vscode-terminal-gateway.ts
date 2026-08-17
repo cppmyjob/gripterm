@@ -114,6 +114,17 @@ function exitOf(terminal: vscode.Terminal): TerminalExit {
  * terminal that lives in the panel has no beside.
  */
 export class VsCodeTerminalGateway implements TerminalGateway, Disposable {
+  /**
+   * This gateway IS the editor engine, and it says so rather than being asked.
+   *
+   * The record is stamped from here (M3.4(4)), so after a fallback -- the setting
+   * said `own`, the native addon did not load, this object was constructed
+   * instead -- the record says `editor` because the object that made the terminal
+   * does. Reconciliation reads that field before it ends a process, and under
+   * this engine a `claude` outlives the extension host on purpose (M2.16, O1).
+   */
+  public readonly engine = 'editor';
+
   private readonly _handles = new Map<string, VsCodeTerminalHandle>();
   private readonly _closeSubscription: vscode.Disposable;
   private readonly _activeSubscription: vscode.Disposable;

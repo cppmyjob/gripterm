@@ -1,3 +1,4 @@
+import type { TerminalEngine } from '../entities/terminal-engine';
 import type { TerminalId } from '../entities/terminal-id';
 import type { Disposable } from './disposable';
 import type { TerminalScreen } from './terminal-screen';
@@ -140,7 +141,32 @@ export interface TerminalHandle {
 }
 
 export interface TerminalGateway {
+  /**
+   * Which engine this gateway IS.
+   *
+   * On the port rather than beside it, and that is the whole mechanism by which
+   * a record cannot lie about its engine (M3.4). The setting says what was asked
+   * for; this says what answered. They part company on every fallback -- `own`
+   * asked for, the native addon absent, the editor's gateway constructed instead
+   * -- and the lifecycle service stamps the record from HERE, so there is no
+   * second value for a wiring mistake to disagree with. What that buys is
+   * specific: reconciliation may end the processes of `own` and only those, and
+   * under `editor` a `claude` outlives the extension host on purpose (M2.16).
+   */
+  readonly engine: TerminalEngine;
   create: (spec: TerminalSpec) => Promise<TerminalHandle>;
   /** The terminals this gateway created and has not seen close. */
   listKnown: () => readonly TerminalHandle[];
+  /**
+   * The handle for a terminal this gateway created, or `undefined` once it has
+   * closed.
+   *
+   * On the port since M3.4. It was a method of the editor's adapter alone, which
+   * made every caller of it -- the composition root, `/rename`, the focus command
+   * -- hold the concrete class and therefore the editor engine. `listKnown` is not
+   * a substitute: a lookup by id written on top of it is the same code in three
+   * places, and one of the three would find a terminal the gateway had already
+   * forgotten.
+   */
+  handleFor: (terminalId: TerminalId) => TerminalHandle | undefined;
 }

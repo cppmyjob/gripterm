@@ -70,12 +70,19 @@ class StubAgentCommands implements AgentCommandFactory {
 
 /** The editor refusing to open a terminal at all -- a bad cwd, an exhausted handle table. */
 class RefusingGateway implements TerminalGateway {
+  public readonly engine = 'editor';
+
   public async create(_spec: TerminalSpec): Promise<TerminalHandle> {
     throw new Error('the editor refused');
   }
 
   public listKnown(): readonly TerminalHandle[] {
     return [];
+  }
+
+  /** Nothing was ever created, so there is nothing to hand back. */
+  public handleFor(_terminalId: TerminalId): undefined {
+    return undefined;
   }
 }
 
@@ -1165,5 +1172,56 @@ describe('starting a terminal over', () => {
 
     const line = logger.infos.find((entry) => entry.message === 'a terminal was started over');
     expect(line?.details?.leftBehind).toBe(old.sessionId.value);
+  });
+});
+
+/**
+ * The engine goes into the record from the GATEWAY, immediately after the create
+ * that produced the terminal.
+ *
+ * One line, one moment, and both were chosen against a named failure. The plan's
+ * hazard (M3.4(4)) is a record that says `own` for a terminal the editor made:
+ * after a fallback -- the setting says `own`, the native addon did not load, the
+ * `editor` gateway takes over -- a record repeating the SETTING would point
+ * reconciliation at a live `claude` that survives the extension host on purpose
+ * (M2.16), and it would kill it through the door the rollback opened.
+ *
+ * Reading it off the gateway makes that state unreachable rather than merely
+ * unlikely: the object that made the terminal is the object that names the
+ * engine, so there is no second value for a wiring mistake to disagree with.
+ * It is stamped AFTER `create` for the same reason -- a launch that never
+ * produced a terminal publishes no record at all.
+ */
+describe('the engine that made the terminal reaches the record', () => {
+  it('writes what the gateway says, not what a setting said', async () => {
+    const { lifecycle, registry, gateway } = stand();
+    gateway.engine = 'own';
+
+    const entry = await lifecycle.launch(request());
+
+    expect(entry.engine).toBe('own');
+    expect(registry.get(entry.terminalId)?.engine).toBe('own');
+  });
+
+  it('writes editor when the editor engine made it', async () => {
+    const { lifecycle, registry } = stand();
+
+    const entry = await lifecycle.launch(request());
+
+    expect(entry.engine).toBe('editor');
+    expect(registry.get(entry.terminalId)?.engine).toBe('editor');
+  });
+
+  it('restamps a record that was made by the other engine', async () => {
+    // The restore path, where the lie would otherwise live: a record stored by a
+    // window running `own` is started again by a window that fell back to
+    // `editor`, and the stored word is the wrong one from the moment the new
+    // terminal exists.
+    const { lifecycle, registry } = stand();
+
+    const entry = await lifecycle.start(makeEntry({ engine: 'own' }), 'resume');
+
+    expect(entry.engine).toBe('editor');
+    expect(registry.get(entry.terminalId)?.engine).toBe('editor');
   });
 });

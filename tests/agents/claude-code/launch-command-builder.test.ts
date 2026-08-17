@@ -4,6 +4,7 @@ import {
   PERMISSION_MODES,
   TOKEN_ENV_VAR,
   ValidationError,
+  terminalEnvironment,
   type AgentCommand,
   type LaunchCommandParams,
   type LaunchIntent,
@@ -336,5 +337,42 @@ describe('LaunchCommandBuilder: the name the person gave the row', () => {
     const args = build('launch').args;
 
     expect(args[args.length - 1]).toBe(SETTINGS_PATH);
+  });
+});
+
+/**
+ * The removals meeting the engine that has to carry them out.
+ *
+ * Both halves are right on their own and useless apart, which is why the join is
+ * asserted here rather than trusted: the builder says "remove these nine" by
+ * putting `null` in the delta, and an engine that read `null` as a value would
+ * hand the CLI `CLAUDE_CODE_CHILD_SESSION="null"` -- a variable whose PRESENCE,
+ * in any form, stops the CLI writing a transcript or a history line at all (A28).
+ * The editor's own port takes the same `null` and does the same thing with it, so
+ * this rule is what keeps the two engines answering alike.
+ *
+ * The count is asserted because the loop below would pass on an empty list, and
+ * an empty list is exactly what a refactor of the builder's removals would leave
+ * behind.
+ */
+describe('LaunchCommandBuilder: the removals reach the environment', () => {
+  it('leaves none of the nine in a pty environment that inherited every one of them', () => {
+    const { env } = build('launch');
+    const removed = Object.entries(env)
+      .filter(([, value]) => value === null)
+      .map(([name]) => name);
+    const inherited = Object.fromEntries(removed.map((name) => [name, 'from another run']));
+
+    const result = terminalEnvironment({
+      host: inherited,
+      delta: env,
+      editor: { termProgram: 'vscode', termProgramVersion: '1.133.0' },
+      caseInsensitiveNames: true,
+    });
+
+    expect(removed).toHaveLength(9);
+    for (const name of removed) {
+      expect(name in result).toBe(false);
+    }
   });
 });

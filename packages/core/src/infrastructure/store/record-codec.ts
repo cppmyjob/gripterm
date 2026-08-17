@@ -11,7 +11,9 @@ import { TerminalEntry } from '../../domain/entities/terminal-entry';
 import { TerminalId } from '../../domain/entities/terminal-id';
 import { ValidationError } from '../../domain/errors/gripterm-error';
 import { isPermissionMode } from '../../domain/entities/permission-mode';
+import { isTerminalEngine } from '../../domain/entities/terminal-engine';
 import { isPersistedTerminalState } from '../../domain/entities/terminal-state';
+import type { TerminalEngine } from '../../domain/entities/terminal-engine';
 import {
   asArray,
   asFiniteNumber,
@@ -53,6 +55,16 @@ export interface RecordDocument {
     readonly appendSystemPrompt: string | null;
     readonly extraEnv: Readonly<Record<string, string>>;
   };
+  /**
+   * Which engine made the terminal (M3.4).
+   *
+   * Optional in the document and NOT a schema version bump, deliberately: the
+   * directory version is what prior builds refuse a whole base over
+   * (`storage-migrator.ts:122`), and `StorageMigrator` does not rewrite records
+   * (`:36`). So absence is given a meaning instead -- `editor`, the engine that
+   * kills nothing -- and every record ever written stays readable.
+   */
+  readonly engine?: string;
   readonly createdAt: number;
   readonly closedAt: number | null;
   readonly revision: number;
@@ -117,6 +129,7 @@ export function encodeRecord(entry: TerminalEntry): RecordDocument {
       appendSystemPrompt: entry.launch.appendSystemPrompt,
       extraEnv: { ...entry.launch.extraEnv },
     },
+    engine: entry.engine,
     createdAt: entry.createdAt.getTime(),
     closedAt: entry.closedAt === null ? null : entry.closedAt.getTime(),
     revision: entry.revision,
@@ -174,6 +187,7 @@ export function decodeEntry(record: unknown, observed: unknown): EntryDecode {
       metadata: decodeMetadata(document.metadata),
       launch: decodeLaunch(document.launch),
       observed: recovery.state,
+      engine: decodeEngine(document.engine),
       createdAt,
       closedAt: nullableNumberToDate(document.closedAt, 'closedAt'),
       revision: requireNumber(document.revision, 'revision'),
@@ -262,6 +276,31 @@ function decodeObserved(raw: unknown): ObservedState {
           ),
     pid: nullableNumber(document.pid, 'observed.pid'),
   });
+}
+
+/**
+ * The engine, whose two failure directions were chosen separately.
+ *
+ * Absent means `editor`: that is every record written before the field existed,
+ * and the answer costs nothing worse than a process nobody cleans up.
+ *
+ * Present and unreadable means BROKEN -- a whole row lost from the list, logged
+ * with its reason (`file-terminal-repository.ts:270`), the file itself untouched
+ * so that rolling forward reads it again. That is heavier than the usual default,
+ * and it is heavier on purpose: this is the field reconciliation reads before it
+ * kills a process, and a build that called a value it cannot read `editor` would
+ * be asserting knowledge it does not have. One row back is recoverable; one
+ * conversation ended is not.
+ */
+function decodeEngine(raw: unknown): TerminalEngine {
+  if (raw === undefined) {
+    return 'editor';
+  }
+  const engine = requireString(raw, 'engine');
+  if (!isTerminalEngine(engine)) {
+    throw new ValidationError('engine is not an engine this build knows', { details: { engine } });
+  }
+  return engine;
 }
 
 function decodeOwner(raw: unknown): OwnerRef {
