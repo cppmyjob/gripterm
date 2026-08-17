@@ -20,7 +20,18 @@ export const NEW_TERMINAL_COMMAND = 'gripterm.newTerminal';
 export function registerNewTerminal(
   lifecycle: TerminalLifecycleService,
   registry: SessionRegistry,
-  logger: Logger
+  logger: Logger,
+  /**
+   * Asked before anything is started, and answered with a sentence when the
+   * answer is no.
+   *
+   * `null` where nothing has to be up first -- the editor's engine, whose
+   * terminals the editor itself shows. Under our own engine this brings the
+   * panel up and waits for its page, because a page that did not come up leaves
+   * `claude` running where nobody can see it: M2.16 measured what that costs,
+   * and it is a whole conversation answering nothing.
+   */
+  panelIsUp: (() => Promise<string | null>) | null = null
 ): vscode.Disposable {
   return vscode.commands.registerCommand(NEW_TERMINAL_COMMAND, async () => {
     const cwd = firstFolder();
@@ -33,6 +44,15 @@ export function registerNewTerminal(
         'Gripterm: open a folder first — a Claude Code session runs in a project directory.',
         logger
       );
+      return;
+    }
+
+    // Before the launch, deliberately: an agent started and then found to have
+    // nowhere to appear is a conversation already running unseen, and stopping
+    // it would be ending somebody's work to fix our own defect.
+    const refusal = await panelIsUp?.();
+    if (refusal !== undefined && refusal !== null) {
+      say('error', `Gripterm: ${refusal}`, logger);
       return;
     }
 

@@ -123,6 +123,23 @@ module.exports = {
       lines: 100,
       statements: 100,
     },
+    // The two rules of M3.7, and the first of them earns the number the way
+    // M3.5's pair did: `OutputFlow` decides when an agent is told to stop
+    // talking, and a pause with no resume after it leaves that agent blocked
+    // against a full buffer with nothing on any screen to say so. Every branch
+    // of it that nothing exercises is a release nobody has checked.
+    'packages/core/src/domain/services/output-flow.ts': {
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100,
+    },
+    'packages/core/src/domain/services/output-coalescer.ts': {
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100,
+    },
     'packages/webview/src/split-rule.ts': {
       branches: 100,
       functions: 100,

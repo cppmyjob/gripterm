@@ -305,11 +305,25 @@ export class InMemoryTerminalScreen implements TerminalScreen {
   public readonly written: string[] = [];
   /** Every size the screen was told to take, in order. */
   public readonly sizes: { readonly cols: number, readonly rows: number }[] = [];
+  /**
+   * Every flow-control call, in order -- `'pause'` and `'resume'` as they came.
+   *
+   * The order is kept rather than only the current state, because the defect
+   * this whole mechanism can have is a sequence and not a value: a pause with
+   * no resume after it reads as `paused` either way, and a pty told to pause
+   * twice needs to be resumed twice by anybody counting.
+   */
+  public readonly flow: ('pause' | 'resume')[] = [];
   public disposed = false;
 
   private readonly _dataListeners = new Set<(chunk: string) => void>();
   private readonly _exitListeners = new Set<(exit: ScreenExit) => void>();
   private _over = false;
+
+  /** Whether output is being held back right now. */
+  public get paused(): boolean {
+    return this.flow[this.flow.length - 1] === 'pause';
+  }
 
   public write(data: string): void {
     if (this._over) {
@@ -323,6 +337,20 @@ export class InMemoryTerminalScreen implements TerminalScreen {
       return;
     }
     this.sizes.push({ cols, rows });
+  }
+
+  public pause(): void {
+    if (this._over) {
+      return;
+    }
+    this.flow.push('pause');
+  }
+
+  public resume(): void {
+    if (this._over) {
+      return;
+    }
+    this.flow.push('resume');
   }
 
   public onData(listener: (chunk: string) => void): Disposable {

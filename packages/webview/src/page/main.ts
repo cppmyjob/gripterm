@@ -4,20 +4,19 @@ import './page.css';
 import { PageLayout } from './layout';
 import { Screen } from './screen';
 import { parseHostMessage } from '../protocol';
-import type { ViewMessage, ViewReport } from '../protocol';
+import type { ProbeAction, ViewMessage, ViewReport } from '../protocol';
 
 /**
  * The page Gripterm draws in its panel.
  *
- * It does three things and says what it did: it lays out the two halves, it
- * puts a terminal screen in the left one, and it REPORTS -- its own box, its own
- * font, its own policy violations. The reporting is not instrumentation added
- * for a suite; it is how anything here can be checked at all. "The page loaded
- * and nothing was blocked" is otherwise a claim somebody makes by looking at a
- * screen, and this repository does not accept those (§I.1).
- *
- * The bytes of a real terminal arrive in M3.7. Until then the screen says so,
- * in the terminal's own colours, rather than pretending to be one.
+ * It does four things and says what it did: it lays out the two halves, it puts
+ * a terminal screen in the left one, it carries that terminal's bytes in both
+ * directions, and it REPORTS -- its own box, its own font, its own policy
+ * violations, and since M3.7 how much it has written and whether it is
+ * acknowledging what it is sent. The reporting is not instrumentation added for
+ * a suite; it is how anything here can be checked at all. "The agent's output
+ * arrived" is otherwise a claim somebody makes by looking at a screen, and this
+ * repository does not accept those (§I.1).
  */
 
 interface VsCodeApi {
@@ -28,7 +27,18 @@ interface VsCodeApi {
 
 declare function acquireVsCodeApi(): VsCodeApi;
 
-/** How long the page waits after a change before reporting where things ended up. */
+/**
+ * How long the page waits after a change before it re-fits and reports.
+ *
+ * This IS the trailing debounce on resize that M3.7 asks for by number, and it
+ * is one timer rather than two: a drag fires a stream of pointer moves and a
+ * panel resize fires a stream of observations, and every one of them would
+ * otherwise be a fit, a repaint, a message and -- through xterm's own
+ * `onResize` -- a native call on a pty. It matters more than a repaint budget:
+ * a resize under a live stream was measured LOSING output inside xterm (35
+ * lines of 20 000, deterministically, M3.2 stage B §8), so each resize skipped
+ * is a real cost avoided rather than a cycle saved.
+ */
 const SETTLE_MS = 80;
 
 /*
@@ -41,12 +51,17 @@ const SETTLE_MS = 80;
 const DEFAULT_SCROLLBACK = 1000;
 const DEFAULT_FONT_SIZE = 14;
 
-const BANNER = [
-  // Written as escapes rather than as the bytes themselves: a control character
-  // pasted into a source file is invisible in every diff it appears in.
-  '\u001b[1mGripterm\u001b[0m\r\n',
-  'This is the screen your agents will run in.\r\n',
-  'Nothing is wired to it yet — the terminal arrives with the next step.\r\n',
+/*
+ * Written as escapes rather than as the bytes themselves: a control character
+ * pasted into a source file is invisible in every diff it appears in.
+ */
+const BOLD = '\u001b[1m';
+const DIM = '\u001b[2m';
+const PLAIN = '\u001b[0m';
+
+const NOTHING_HERE = [
+  `${BOLD}Gripterm${PLAIN}\r\n`,
+  `No agent on this screen yet. Run ${BOLD}Gripterm: New Terminal${PLAIN} to start one.\r\n`,
 ].join('');
 
 const host = acquireVsCodeApi();
@@ -127,6 +142,11 @@ async function codiconIsThere(): Promise<boolean> {
   }
 }
 
+/** The line that says a replay begins in the middle of the output rather than at its start. */
+function lostLine(droppedChars: number): string {
+  return `${DIM}— ${String(droppedChars)} earlier characters are not kept; this screen begins mid-stream —${PLAIN}\r\n`;
+}
+
 function start(root: HTMLElement): void {
   const generation = nextGeneration();
   const scrollback = attribute(root, 'scrollback', DEFAULT_SCROLLBACK);
@@ -134,6 +154,12 @@ function start(root: HTMLElement): void {
   let fontSize = attribute(root, 'fontSize', DEFAULT_FONT_SIZE);
   let codiconLoaded = false;
   let settling: number | null = null;
+  /** The terminal this screen is showing, or `null` when it is showing nothing. */
+  let attached: string | null = null;
+  /** Whether receipts are being sent. Turned off only by the probe -- see `receipts`. */
+  let acking = true;
+  /** Code units written while receipts were off, owed to the host the moment they resume. */
+  let owed = 0;
 
   // Assigned once the screen exists. The layout is built first because the
   // screen needs a box to live in, and the layout has to be able to report a
@@ -158,12 +184,57 @@ function start(root: HTMLElement): void {
     fontSize: screen.fontSize,
     codiconLoaded,
     unicodeVersion: screen.unicodeVersion,
+    attached,
+    written: screen.written,
+    acking,
+  });
+
+  /** Says what this screen has taken, unless the probe has asked it to go silent. */
+  const acknowledge = (terminalId: string, chars: number): void => {
+    if (!acking) {
+      owed += chars;
+      return;
+    }
+    post({ kind: 'ack', terminalId, chars });
+  };
+
+  /**
+   * Turns receipts off and on, and settles the debt when they come back.
+   *
+   * The debt matters: without it, output written while the page was silent would
+   * never be acknowledged, the host's counter would stay above the pause line
+   * and the terminal would stay paused for good -- the probe would have made an
+   * irreversible change to a running agent (§I.3).
+   */
+  const receipts = (sending: boolean): void => {
+    acking = sending;
+    if (!sending || attached === null) {
+      return;
+    }
+    const settled = owed;
+    owed = 0;
+    if (settled > 0) {
+      post({ kind: 'ack', terminalId: attached, chars: settled });
+    }
+  };
+
+  screen.onInput((data) => {
+    if (attached === null) {
+      // Nothing to type into. Dropped rather than reported: a person leaning on
+      // a key with no agent on the screen would otherwise fill the log.
+      return;
+    }
+    post({ kind: 'input', terminalId: attached, data });
+  });
+
+  screen.onResized((cols, rows) => {
+    if (attached === null) {
+      return;
+    }
+    post({ kind: 'resized', terminalId: attached, cols, rows });
   });
 
   whenLayoutChanged = (because): void => {
-    // Coalesced: a drag fires a stream of pointer moves and a panel resize fires
-    // a stream of observations, and each one of them would otherwise be a fit, a
-    // repaint and a message.
     if (settling !== null) {
       window.clearTimeout(settling);
     }
@@ -172,6 +243,26 @@ function start(root: HTMLElement): void {
       screen.fit();
       post({ kind: 'measured', report: report(), because });
     }, SETTLE_MS);
+  };
+
+  const probed = (action: ProbeAction): void => {
+    switch (action.kind) {
+      case 'drag-splitter':
+        layout.dragBy(action.byPx);
+        return;
+      case 'break-policy':
+        breakThePolicy();
+        return;
+      case 'type':
+        screen.type(action.text);
+        return;
+      case 'receipts':
+        receipts(action.sending);
+        return;
+      default:
+        screen.linger(action.ms);
+        return;
+    }
   };
 
   window.addEventListener('message', (event: MessageEvent<unknown>) => {
@@ -183,35 +274,82 @@ function start(root: HTMLElement): void {
       post({ kind: 'refused', what: `a message the page cannot read: ${JSON.stringify(event.data)}` });
       return;
     }
-    if (message.kind === 'restyle') {
-      fontFamily = message.fontFamily;
-      fontSize = message.fontSize;
-      screen.restyle(fontFamily, fontSize);
-      layout.apply();
-      screen.fit();
-      post({ kind: 'measured', report: report(), because: 'the editor changed how we look' });
-      return;
+    switch (message.kind) {
+      case 'restyle':
+        fontFamily = message.fontFamily;
+        fontSize = message.fontSize;
+        screen.restyle(fontFamily, fontSize);
+        layout.apply();
+        screen.fit();
+        post({ kind: 'measured', report: report(), because: 'the editor changed how we look' });
+        return;
+      case 'measure':
+        post({ kind: 'measured', report: report(), because: message.because });
+        return;
+      case 'attach':
+        // Emptied first, and with `reset` rather than `clear`: whatever the
+        // previous agent left switched on -- bracketed paste, the alternate
+        // buffer, a scroll region -- would otherwise be applied to this one's
+        // output.
+        screen.reset();
+        attached = message.terminalId;
+        owed = 0;
+        if (message.droppedChars > 0) {
+          screen.write(lostLine(message.droppedChars));
+        }
+        screen.write(message.replay);
+        // The size, unprompted. xterm only raises `onResize` when the number
+        // changes, so a terminal attaching to a screen that is already the right
+        // size would never tell its pty how wide it is -- and the pty would stay
+        // at the 80x30 it was spawned with, which is the one thing a TUI reads
+        // before it draws anything.
+        post({ kind: 'resized', terminalId: message.terminalId, cols: screen.cols, rows: screen.rows });
+        post({ kind: 'measured', report: report(), because: 'a terminal was attached' });
+        return;
+      case 'output':
+        if (message.terminalId !== attached) {
+          // Said out loud rather than written: output landing on the wrong
+          // screen is how two agents get mixed into one transcript, and it is
+          // invisible from the outside.
+          post({
+            kind: 'refused',
+            what: `output arrived for ${message.terminalId} while the screen is showing ${attached ?? 'nothing'}`,
+          });
+          return;
+        }
+        screen.write(message.data, () => { acknowledge(message.terminalId, message.data.length); });
+        return;
+      case 'detach':
+        if (message.terminalId !== attached) {
+          return;
+        }
+        attached = null;
+        // NOT cleared: what the agent printed on its way out is the whole of
+        // what a person has to read afterwards. The screen keeps it and says
+        // underneath that it is over.
+        screen.write(`\r\n${DIM}— ${message.because} —${PLAIN}\r\n`);
+        post({ kind: 'measured', report: report(), because: 'a terminal was detached' });
+        return;
+      default:
+        probed(message.action);
+        return;
     }
-    if (message.kind === 'measure') {
-      post({ kind: 'measured', report: report(), because: message.because });
-      return;
-    }
-    if (message.action === 'drag-splitter') {
-      layout.dragBy(message.byPx);
-      return;
-    }
-    breakThePolicy();
   });
 
   layout.apply();
   screen.fit();
-  screen.write(BANNER);
+  screen.write(NOTHING_HERE);
 
   void codiconIsThere().then((loaded) => {
     codiconLoaded = loaded;
     // The first report goes out only once the font question is answered: a
     // `ready` that said "no" because it was asked too early would be a false
     // measurement, and a false measurement is worse than a late one.
+    //
+    // It is also the handshake: the host answers `ready` by attaching whichever
+    // terminal this window is showing, with the tail it is redrawn from. A page
+    // that was thrown away and rebuilt knows nothing else about the agent it
+    // belongs to.
     post({ kind: 'ready', report: report() });
   });
 }

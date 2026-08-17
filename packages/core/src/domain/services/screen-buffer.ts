@@ -37,12 +37,15 @@ const LOW_SURROGATE_LAST = 0xdfff;
 /**
  * The tail of a terminal's output, under a ceiling, in memory.
  *
- * Two consumers, both in M3.7. A view that was DESTROYED (the panel was closed,
- * or the editor decided) comes back with an empty xterm and this is the only
- * thing that can fill it. A view that is merely HIDDEN keeps its xterm but stops
- * acknowledging writes -- Chromium clamps timers in a hidden frame and xterm
- * schedules through `setTimeout` -- so back-pressure is lifted on invisibility
- * and the output goes here instead of freezing the agent against a full pty.
+ * Two consumers, and `TerminalBridge` holds one of each (M3.7). A view that was
+ * DESTROYED (the panel was closed, or the editor decided) comes back with an
+ * empty xterm and this is the only thing that can fill it. A view that is merely
+ * HIDDEN keeps its xterm but stops acknowledging writes -- Chromium clamps
+ * timers in a hidden frame and xterm schedules through `setTimeout` -- so
+ * back-pressure is lifted on invisibility and the output collects in a SECOND
+ * one of these, which is sent as ordinary output when the panel comes back. The
+ * two are the same class because the question they answer is the same one:
+ * what is this screen redrawn from, and how much of it is already gone.
  *
  * **Not a recording** (§7.2). It holds a tail, it is bounded, it never reaches
  * disk, and it says how much it dropped rather than pretending it dropped

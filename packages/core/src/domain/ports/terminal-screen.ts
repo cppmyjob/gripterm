@@ -59,6 +59,29 @@ export interface TerminalScreen {
   onData: (listener: (chunk: string) => void) => Disposable;
   onExit: (listener: (exit: ScreenExit) => void) => Disposable;
   /**
+   * Holds the process's output back, and lets it go again.
+   *
+   * The two halves of back-pressure, and they are on the port rather than in the
+   * adapter because the CONSUMER is the only thing that knows it is falling
+   * behind. Without them a `pnpm install` inside an agent buries the page: the
+   * measurement (M3.2 stage B, §6) put the consumer 560 928 characters behind on
+   * a stream of 1.84 million, and the same stream at 40 columns did not drain in
+   * 94 seconds at all.
+   *
+   * **`pause` is the most dangerous call in this build.** A pause with no resume
+   * after it leaves the agent blocked on a full ConPTY buffer forever, with
+   * nothing on any screen to say so -- irreversible in the sense of §I.3, and
+   * invisible. Which is why the decision of WHEN is not taken here: it is
+   * `OutputFlow`, a total function of two counters held at 100 %, whose one
+   * unconditional answer is that a consumer which stopped being there releases
+   * the process.
+   *
+   * Both are idempotent, and both are ignored after the process has ended --
+   * the same rule, and for the same measured reason, as `write` and `resize`.
+   */
+  pause: () => void;
+  resume: () => void;
+  /**
    * Lets the screen go.
    *
    * For the `own` engine this is the same act as disposing the handle -- there

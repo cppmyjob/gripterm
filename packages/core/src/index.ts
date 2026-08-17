@@ -130,6 +130,7 @@ export {
   type TerminalSpec,
 } from './domain/ports/terminal-gateway';
 export { type ScreenExit, type TerminalScreen } from './domain/ports/terminal-screen';
+export { type TerminalAudience } from './domain/ports/terminal-audience';
 export {
   TERMINAL_EXIT_CAUSES,
   exitVerdict,
@@ -140,6 +141,18 @@ export {
   ScreenBuffer,
   type ScreenReplay,
 } from './domain/services/screen-buffer';
+export {
+  PAUSE_ABOVE_CHARS,
+  RESUME_NOT_ABOVE_CHARS,
+  OutputFlow,
+  type FlowMove,
+  type OutputFlowOptions,
+} from './domain/services/output-flow';
+export {
+  COALESCE_WINDOW_MS,
+  OutputCoalescer,
+  type OutputCoalescerOptions,
+} from './domain/services/output-coalescer';
 export {
   EDITOR_INTERNAL_NAMES,
   terminalEnvironment,

@@ -5,6 +5,7 @@ import type {
   EditorIdentity,
   Logger,
   ScreenExit,
+  TerminalAudience,
   TerminalExit,
   TerminalExitCause,
   TerminalGateway,
@@ -46,6 +47,16 @@ export interface PtyTerminalGatewayOptions {
   /** What the editor calls itself to a program inside one of its terminals. */
   readonly editor: EditorIdentity;
   readonly logger: Logger;
+  /**
+   * Whoever is going to draw these terminals, or `null` when nobody is.
+   *
+   * `null` is not a degenerate case: the contract suite makes gateways with no
+   * view at all, and a window whose panel has not been built yet is the same
+   * shape. A terminal with no audience runs exactly as it did before M3.7 --
+   * unseen -- which is the behaviour the setting's own description promised
+   * while there was nothing to show it in.
+   */
+  readonly audience?: TerminalAudience | null;
 }
 
 /**
@@ -87,11 +98,13 @@ export class PtyTerminalGateway implements TerminalGateway, Disposable {
   private readonly _pty: NodePtyModule;
   private readonly _editor: EditorIdentity;
   private readonly _logger: Logger;
+  private readonly _audience: TerminalAudience | null;
 
   constructor(options: PtyTerminalGatewayOptions) {
     this._pty = options.pty;
     this._editor = options.editor;
     this._logger = options.logger;
+    this._audience = options.audience ?? null;
   }
 
   public async create(spec: TerminalSpec): Promise<TerminalHandle> {
@@ -150,6 +163,7 @@ export class PtyTerminalGateway implements TerminalGateway, Disposable {
       name: spec.name,
       child,
       logger: this._logger,
+      audience: this._audience,
       // Forgotten BEFORE the close listeners run, so that a listener asking
       // `listKnown()` -- which is what the attention notifier does to decide
       // whether there is still a terminal to show -- gets the answer that is true
@@ -159,6 +173,11 @@ export class PtyTerminalGateway implements TerminalGateway, Disposable {
       },
     });
     this._handles.set(key, handle);
+    // After the map, so that whoever starts keeping this terminal's output can
+    // already find it by id; before the return, so that no byte the process
+    // produces reaches nobody. A pty starts talking the instant it is spawned,
+    // and the first thing an agent prints is the reason it is about to fail.
+    this._audience?.opened(handle);
     return await Promise.resolve(handle);
   }
 
@@ -197,6 +216,7 @@ interface PtyTerminalHandleOptions {
   readonly name: string;
   readonly child: IPty;
   readonly logger: Logger;
+  readonly audience: TerminalAudience | null;
   readonly forget: () => void;
 }
 
@@ -215,6 +235,7 @@ export class PtyTerminalHandle implements TerminalHandle {
 
   private readonly _child: IPty;
   private readonly _logger: Logger;
+  private readonly _audience: TerminalAudience | null;
   private readonly _forget: () => void;
   private readonly _closeListeners = new Set<(exit: TerminalExit) => void>();
   private readonly _dataListeners = new Set<(chunk: string) => void>();
@@ -223,16 +244,22 @@ export class PtyTerminalHandle implements TerminalHandle {
   private _shownPreservingFocus: boolean | null = null;
   private _over = false;
   private _cause: TerminalExitCause = 'exited';
+  /** Whether this pty has produced anything yet. See `resize`. */
+  private _spoke = false;
+  /** A size asked for before it did, to be applied when it does. */
+  private _wantedSize: { readonly cols: number, readonly rows: number } | null = null;
 
   constructor(options: PtyTerminalHandleOptions) {
     this.terminalId = options.terminalId;
     this._child = options.child;
     this._logger = options.logger;
+    this._audience = options.audience;
     this._forget = options.forget;
     this._name = options.name;
     this.screen = new PtyTerminalScreen(this);
 
     this._child.onData((chunk) => {
+      this._itSpoke();
       for (const listener of this._dataListeners) {
         listener(chunk);
       }
@@ -313,15 +340,20 @@ export class PtyTerminalHandle implements TerminalHandle {
   }
 
   /**
-   * Remembers that somebody wanted this terminal in front of the person.
+   * Puts this terminal in front of the person -- or remembers that somebody
+   * wanted it there, when there is nobody to tell.
    *
-   * There is nowhere to put it yet: our own view is M3.6 and the strip of tabs
-   * that selects between terminals is M3.9. Kept rather than dropped so that the
-   * view, when it arrives, opens on the terminal that asked for it instead of on
-   * whichever one happens to be first.
+   * `preserveFocus` travels through untouched, and the difference it carries is
+   * П7: a window bringing six terminals back must not take the cursor six times,
+   * while a person who pressed "new terminal" is asking for exactly that.
+   *
+   * Kept as well as passed on. A window whose panel has never been opened has no
+   * audience yet, and the answer to "which terminal should the view show when it
+   * is finally built" is this field.
    */
   public show(preserveFocus: boolean): void {
     this._shownPreservingFocus = preserveFocus;
+    this._audience?.shown(this.terminalId, preserveFocus);
   }
 
   public rename(name: string): void {
@@ -405,6 +437,25 @@ export class PtyTerminalHandle implements TerminalHandle {
       });
       return;
     }
+    if (!this._spoke) {
+      /*
+       * Held until this pty has produced something, and that is a measured
+       * platform fact rather than caution (2026-08-17, node-pty 1.1.0 on
+       * Windows). `WindowsTerminal` queues `write`, `resize` and `kill` until
+       * `_isReady`, and `_isReady` is set by the FIRST DATA EVENT from the pty's
+       * socket -- not by the spawn. A resize queued before that runs whenever
+       * the data finally comes, and if the process has exited by then node-pty
+       * throws `Cannot resize a pty that has already exited` from inside its own
+       * socket callback, where no `try` of ours can reach it: it becomes an
+       * uncaught exception in the extension host. Seen doing exactly that while
+       * this step was being written.
+       *
+       * So the queue is ours instead, under the guard that already exists: a
+       * terminal that ends before it speaks is simply never resized.
+       */
+      this._wantedSize = { cols, rows };
+      return;
+    }
     try {
       this._child.resize(cols, rows);
     } catch (cause: unknown) {
@@ -412,6 +463,61 @@ export class PtyTerminalHandle implements TerminalHandle {
         terminalId: this.terminalId.value,
         cause: String(cause),
       });
+    }
+  }
+
+  /**
+   * Holds the process's output back at the source, and lets it go again.
+   *
+   * node-pty pauses the SOCKET it reads the pty through, so the back-pressure
+   * reaches the process the way an unread pipe does -- there is no buffer of
+   * ours in the middle growing while it does. What that means on Windows is
+   * measured rather than assumed: `tests/integration/terminal-in-view.test.ts`
+   * runs a flood, stops acknowledging it, and asserts that the arrivals STOP.
+   *
+   * Both are guarded by the same rule as `write` and `resize`, and here it
+   * matters most: a pause thrown out of would abandon the flood it was called
+   * to stop, and a resume thrown out of would leave the process held back for
+   * good.
+   */
+  public pause(): void {
+    if (this._over) {
+      return;
+    }
+    try {
+      this._child.pause();
+    } catch (cause: unknown) {
+      this._logger.info('a terminal that had just ended was asked to hold its output back', {
+        terminalId: this.terminalId.value,
+        cause: String(cause),
+      });
+    }
+  }
+
+  public resume(): void {
+    if (this._over) {
+      return;
+    }
+    try {
+      this._child.resume();
+    } catch (cause: unknown) {
+      this._logger.info('a terminal that had just ended was let go of', {
+        terminalId: this.terminalId.value,
+        cause: String(cause),
+      });
+    }
+  }
+
+  /** The first thing this pty ever printed: from here, calls to it are not queued. */
+  private _itSpoke(): void {
+    if (this._spoke) {
+      return;
+    }
+    this._spoke = true;
+    const wanted = this._wantedSize;
+    this._wantedSize = null;
+    if (wanted !== null) {
+      this.resize(wanted.cols, wanted.rows);
     }
   }
 
@@ -486,6 +592,14 @@ class PtyTerminalScreen implements TerminalScreen {
 
   public resize(cols: number, rows: number): void {
     this._handle.resize(cols, rows);
+  }
+
+  public pause(): void {
+    this._handle.pause();
+  }
+
+  public resume(): void {
+    this._handle.resume();
   }
 
   public onData(listener: (chunk: string) => void): Disposable {

@@ -13,6 +13,12 @@ import { parseHostMessage, parseViewMessage } from '../../packages/webview/src/p
  *
  * So the rule is: an unrecognised message is `null`, and `null` is logged rather
  * than acted on.
+ *
+ * Since M3.7 the channel carries a terminal, which raises the cost of a bad
+ * message from a wrong pixel to a wrong process: a size that is not a size
+ * reaches a native `resize`, and a receipt for a negative amount buys a flood an
+ * extra window before back-pressure engages. Both are refused here, at the door,
+ * rather than guarded at each of the places they would arrive.
  */
 
 const REPORT = {
@@ -27,6 +33,9 @@ const REPORT = {
   fontSize: 14,
   codiconLoaded: true,
   unicodeVersion: '11',
+  attached: 'a2f1c8de-0000-4000-8000-000000000001',
+  written: 4096,
+  acking: true,
 };
 
 describe('what the host accepts from the page', () => {
@@ -34,6 +43,16 @@ describe('what the host accepts from the page', () => {
     expect(parseViewMessage({ kind: 'ready', report: REPORT })).toEqual({
       kind: 'ready',
       report: REPORT,
+    });
+  });
+
+  it('takes a report from a screen with no terminal behind it', () => {
+    // `null` is an answer here, not an omission: before the first agent exists
+    // the page really is showing nothing, and a parser that refused it would
+    // make the ordinary case look like a defect.
+    expect(parseViewMessage({ kind: 'ready', report: { ...REPORT, attached: null } })).toEqual({
+      kind: 'ready',
+      report: { ...REPORT, attached: null },
     });
   });
 
@@ -52,10 +71,35 @@ describe('what the host accepts from the page', () => {
     });
   });
 
-  it('takes a policy violation, which is the one message this step exists to hear', () => {
+  it('takes a policy violation, which is the one message M3.6 exists to hear', () => {
     expect(
       parseViewMessage({ kind: 'csp-violation', directive: 'script-src', blockedUri: 'inline' })
     ).toEqual({ kind: 'csp-violation', directive: 'script-src', blockedUri: 'inline' });
+  });
+
+  it('takes a receipt, which is the one message back-pressure is made of', () => {
+    expect(parseViewMessage({ kind: 'ack', terminalId: 'one', chars: 8192 })).toEqual({
+      kind: 'ack',
+      terminalId: 'one',
+      chars: 8192,
+    });
+  });
+
+  it('takes what the person typed', () => {
+    expect(parseViewMessage({ kind: 'input', terminalId: 'one', data: '' })).toEqual({
+      kind: 'input',
+      terminalId: 'one',
+      data: '',
+    });
+  });
+
+  it('takes the size the screen settled at', () => {
+    expect(parseViewMessage({ kind: 'resized', terminalId: 'one', cols: 120, rows: 30 })).toEqual({
+      kind: 'resized',
+      terminalId: 'one',
+      cols: 120,
+      rows: 30,
+    });
   });
 
   it.each([
@@ -71,6 +115,17 @@ describe('what the host accepts from the page', () => {
     ['a refusal with no words', { kind: 'refused' }],
     ['a violation with no directive', { kind: 'csp-violation', blockedUri: 'inline' }],
     ['a violation with no uri', { kind: 'csp-violation', directive: 'font-src' }],
+    ['a receipt from no terminal', { kind: 'ack', chars: 10 }],
+    ['a receipt for nothing countable', { kind: 'ack', terminalId: 'one', chars: '10' }],
+    ['a receipt for a negative amount', { kind: 'ack', terminalId: 'one', chars: -1 }],
+    ['input from no terminal', { kind: 'input', data: 'x' }],
+    ['input that is not text', { kind: 'input', terminalId: 'one', data: 3 }],
+    ['a size from no terminal', { kind: 'resized', cols: 80, rows: 24 }],
+    ['a size with no columns', { kind: 'resized', terminalId: 'one', rows: 24 }],
+    ['a size with no rows', { kind: 'resized', terminalId: 'one', cols: 80 }],
+    ['a terminal of no columns', { kind: 'resized', terminalId: 'one', cols: 0, rows: 24 }],
+    ['a terminal of fractional rows', { kind: 'resized', terminalId: 'one', cols: 80, rows: 24.5 }],
+    ['a size that is not a number at all', { kind: 'resized', terminalId: 'one', cols: Number.NaN, rows: 24 }],
   ])('refuses %s', (_what, value) => {
     expect(parseViewMessage(value)).toBeNull();
   });
@@ -88,6 +143,10 @@ describe('what the host accepts from the page', () => {
     ['no scrollback', { ...REPORT, scrollback: undefined }],
     ['no font family', { ...REPORT, fontFamily: null }],
     ['no font size', { ...REPORT, fontSize: undefined }],
+    ['no word on what is attached, which is not the same as nothing attached', { ...REPORT, attached: undefined }],
+    ['a number where the attached terminal belongs', { ...REPORT, attached: 7 }],
+    ['no count of what was written', { ...REPORT, written: undefined }],
+    ['no word on whether receipts are being sent', { ...REPORT, acking: undefined }],
   ])('refuses a report with %s', (_what, report) => {
     expect(parseViewMessage({ kind: 'ready', report })).toBeNull();
   });
@@ -109,19 +168,78 @@ describe('what the page accepts from the host', () => {
     });
   });
 
-  it('takes the probe, because a suite has no hands', () => {
-    expect(parseHostMessage({ kind: 'probe', action: 'drag-splitter', byPx: -120 })).toEqual({
-      kind: 'probe',
-      action: 'drag-splitter',
-      byPx: -120,
+  it('takes a terminal and the tail it is redrawn from', () => {
+    expect(
+      parseHostMessage({ kind: 'attach', terminalId: 'one', replay: 'hello\r\n', droppedChars: 0 })
+    ).toEqual({ kind: 'attach', terminalId: 'one', replay: 'hello\r\n', droppedChars: 0 });
+  });
+
+  it('takes a replay that begins in the middle, and says how much is missing', () => {
+    expect(
+      parseHostMessage({ kind: 'attach', terminalId: 'one', replay: 'tail', droppedChars: 12_000 })
+    ).toEqual({ kind: 'attach', terminalId: 'one', replay: 'tail', droppedChars: 12_000 });
+  });
+
+  it('takes output', () => {
+    expect(parseHostMessage({ kind: 'output', terminalId: 'one', data: 'line\r\n' })).toEqual({
+      kind: 'output',
+      terminalId: 'one',
+      data: 'line\r\n',
     });
   });
 
-  it('takes the other probe, the one that proves the policy is enforced', () => {
-    expect(parseHostMessage({ kind: 'probe', action: 'break-policy', byPx: 0 })).toEqual({
+  it('takes a detachment and why', () => {
+    expect(parseHostMessage({ kind: 'detach', terminalId: 'one', because: 'the process ended' })).toEqual({
+      kind: 'detach',
+      terminalId: 'one',
+      because: 'the process ended',
+    });
+  });
+
+  it('takes the drag probe, because a suite has no pointer', () => {
+    expect(parseHostMessage({ kind: 'probe', action: { kind: 'drag-splitter', byPx: -120 } })).toEqual({
       kind: 'probe',
-      action: 'break-policy',
-      byPx: 0,
+      action: { kind: 'drag-splitter', byPx: -120 },
+    });
+  });
+
+  it('takes the probe that proves the policy is enforced', () => {
+    expect(parseHostMessage({ kind: 'probe', action: { kind: 'break-policy' } })).toEqual({
+      kind: 'probe',
+      action: { kind: 'break-policy' },
+    });
+  });
+
+  it('takes the typing probe, because a suite has no keyboard', () => {
+    expect(parseHostMessage({ kind: 'probe', action: { kind: 'type', text: '/help\r' } })).toEqual({
+      kind: 'probe',
+      action: { kind: 'type', text: '/help\r' },
+    });
+  });
+
+  it('takes the probe that makes the consumer go silent', () => {
+    // The one that keeps "back-pressure works" from being a vacuum: with no way
+    // to stop the receipts, a build with no pause at all passes every test.
+    expect(parseHostMessage({ kind: 'probe', action: { kind: 'receipts', sending: false } })).toEqual({
+      kind: 'probe',
+      action: { kind: 'receipts', sending: false },
+    });
+  });
+
+  it('takes the probe that makes the screen slow to take a message in', () => {
+    // The one that keeps "a receipt means the screen has it" from being a
+    // vacuum: xterm parses a plain flood faster than a pty produces it, so
+    // without a slow screen an arrival-side receipt is indistinguishable.
+    expect(parseHostMessage({ kind: 'probe', action: { kind: 'linger', ms: 40 } })).toEqual({
+      kind: 'probe',
+      action: { kind: 'linger', ms: 40 },
+    });
+  });
+
+  it('takes a linger of nothing, which is how the probe is switched off', () => {
+    expect(parseHostMessage({ kind: 'probe', action: { kind: 'linger', ms: 0 } })).toEqual({
+      kind: 'probe',
+      action: { kind: 'linger', ms: 0 },
     });
   });
 
@@ -132,8 +250,22 @@ describe('what the page accepts from the host', () => {
     ['a restyle with no font', { kind: 'restyle', fontSize: 13 }],
     ['a restyle with a size that is not a number', { kind: 'restyle', fontFamily: 'Consolas', fontSize: 'big' }],
     ['a measurement order with no reason', { kind: 'measure' }],
-    ['a probe with an action we do not have', { kind: 'probe', action: 'close-the-panel', byPx: 10 }],
-    ['a probe with no distance', { kind: 'probe', action: 'drag-splitter' }],
+    ['an attachment to no terminal', { kind: 'attach', replay: '', droppedChars: 0 }],
+    ['an attachment with no replay', { kind: 'attach', terminalId: 'one', droppedChars: 0 }],
+    ['an attachment that will not say what it lost', { kind: 'attach', terminalId: 'one', replay: '' }],
+    ['output from no terminal', { kind: 'output', data: 'x' }],
+    ['output that is not text', { kind: 'output', terminalId: 'one', data: 12 }],
+    ['a detachment from no terminal', { kind: 'detach', because: 'it ended' }],
+    ['a detachment with no reason', { kind: 'detach', terminalId: 'one' }],
+    ['a probe with no action', { kind: 'probe' }],
+    ['a probe whose action is a bare word', { kind: 'probe', action: 'drag-splitter' }],
+    ['a probe with an action we do not have', { kind: 'probe', action: { kind: 'close-the-panel' } }],
+    ['a drag with no distance', { kind: 'probe', action: { kind: 'drag-splitter' } }],
+    ['typing with nothing to type', { kind: 'probe', action: { kind: 'type' } }],
+    ['a receipts probe that will not say which way', { kind: 'probe', action: { kind: 'receipts' } }],
+    ['a linger with no duration', { kind: 'probe', action: { kind: 'linger' } }],
+    ['a linger that is not a duration', { kind: 'probe', action: { kind: 'linger', ms: Number.NaN } }],
+    ['a linger of less than nothing', { kind: 'probe', action: { kind: 'linger', ms: -1 } }],
   ])('refuses %s', (_what, value) => {
     expect(parseHostMessage(value)).toBeNull();
   });

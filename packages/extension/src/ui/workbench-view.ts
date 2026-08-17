@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { parseViewMessage } from '@gripterm/webview';
-import type { HostMessage, ViewReport } from '@gripterm/webview';
+import type { HostMessage, ViewMessage, ViewReport } from '@gripterm/webview';
 import type { Logger } from '@gripterm/core';
 import { affectsTerminalFont, chooseTerminalFont } from './terminal-font';
 import type { TerminalFont } from './terminal-font';
@@ -72,6 +72,18 @@ interface Waiter {
   readonly resolve: (report: ViewReport) => void;
   readonly reject: (error: Error) => void;
   readonly timer: ReturnType<typeof setTimeout>;
+  /**
+   * The answer this waiter is waiting for, or `null` for whichever comes first.
+   *
+   * It exists because the page measures ITSELF as well as answering: a terminal
+   * attaching, a terminal ending, a panel resizing all produce a `measured` of
+   * their own. Without this, a caller that asked a question would be handed the
+   * first unrelated answer to arrive -- which is a report taken BEFORE its own
+   * question, and every assertion written on it would be about the past. Found
+   * exactly that way on 2026-08-17: a suite read `attached: null` from a report
+   * the page had sent about the terminal that ended a moment earlier.
+   */
+  readonly because: string | null;
 }
 
 /**
@@ -125,6 +137,16 @@ export class WorkbenchView implements vscode.WebviewViewProvider, vscode.Disposa
   private readonly _refusals: string[] = [];
   private readonly _waitingForReady = new Set<Waiter>();
   private readonly _waitingForMeasurement = new Set<Waiter>();
+  /**
+   * Whoever else is listening to this page -- the terminal stage, since M3.7.
+   *
+   * A list rather than one owner: this class is the channel, and what travels
+   * through it belongs to whoever the message is about. Keeping the terminals'
+   * half here instead would put a `ScreenBuffer` in the object whose one job is
+   * to hold a webview.
+   */
+  private readonly _listeners = new Set<(message: ViewMessage) => void>();
+  private readonly _watchers = new Set<(visible: boolean) => void>();
   private _view: vscode.WebviewView | null = null;
   private _resolveCount = 0;
   private _lastReport: ViewReport | null = null;
@@ -176,6 +198,67 @@ export class WorkbenchView implements vscode.WebviewViewProvider, vscode.Disposa
     return this._refusals;
   }
 
+  /** Whether the page is on screen. A page behind a hidden panel is not. */
+  public get visible(): boolean {
+    return this._view?.visible ?? false;
+  }
+
+  /**
+   * Everything the page says, parsed, to whoever else is listening.
+   *
+   * The `ready` of a rebuilt page travels this way too, and that is the whole
+   * rehydration handshake: this class knows a page is up, and the stage knows
+   * which terminal it should be showing.
+   */
+  public onMessage(listener: (message: ViewMessage) => void): vscode.Disposable {
+    this._listeners.add(listener);
+    return { dispose: (): void => { this._listeners.delete(listener); } };
+  }
+
+  /**
+   * When the page stops being on screen, and when it comes back.
+   *
+   * Load-bearing rather than informational: under `retainContextWhenHidden` a
+   * hidden page is alive and silent -- Chromium clamps a hidden frame's timers
+   * and xterm schedules its writes through `setTimeout` -- so this event is the
+   * only thing that can tell a terminal's flow control that its consumer has
+   * stopped answering. Without it a paused agent would stay paused for as long
+   * as the panel stayed shut.
+   */
+  public onVisibility(watcher: (visible: boolean) => void): vscode.Disposable {
+    this._watchers.add(watcher);
+    return { dispose: (): void => { this._watchers.delete(watcher); } };
+  }
+
+  /**
+   * Brings this view up, taking the person's focus only when asked to.
+   *
+   * Two roads, because the platform gives two. A view that EXISTS is shown
+   * through its own object, where `preserveFocus` is the documented argument. A
+   * view that has never been resolved does not exist as an object at all -- a
+   * panel opened on somebody else's tab never instantiates ours -- so the only
+   * way to make it exist is the command the editor contributes for it.
+   *
+   * What is NOT promised, and cannot be checked from a test: whether the command
+   * honours `preserveFocus`. There is no API that says which widget has the
+   * keyboard, so a suite can watch the view appear and nothing more. The cost of
+   * being wrong is the focus taken once, at the moment a window restores its
+   * terminals into a panel that was closed (§7.2).
+   */
+  public reveal(preserveFocus: boolean): void {
+    const view = this._view;
+    if (view !== null) {
+      view.show(preserveFocus);
+      return;
+    }
+    void vscode.commands.executeCommand(`${WORKBENCH_VIEW_ID}.focus`, { preserveFocus });
+  }
+
+  /** Sends the page an order. Nothing happens when there is no page. */
+  public post(message: HostMessage): void {
+    this._post(message);
+  }
+
   public resolveWebviewView(view: vscode.WebviewView): void {
     this._resolveCount += 1;
     this._view = view;
@@ -191,8 +274,17 @@ export class WorkbenchView implements vscode.WebviewViewProvider, vscode.Disposa
     view.onDidDispose(() => {
       if (this._view === view) {
         this._view = null;
+        // Forgotten with it: `whenReady` answers "is there a page up now", and
+        // a report kept from a view that has been destroyed would let a launch
+        // through the gate that exists to stop an agent running unseen.
+        this._lastReport = null;
+        // A destroyed view is an invisible one as far as anything downstream is
+        // concerned, and saying so is what releases the terminals it was
+        // showing. A page that is gone acknowledges nothing ever again.
+        this._sawVisibility(false);
       }
     });
+    view.onDidChangeVisibility(() => { this._sawVisibility(view.visible); });
     view.webview.onDidReceiveMessage((raw: unknown) => { this._heard(raw); });
   }
 
@@ -206,7 +298,16 @@ export class WorkbenchView implements vscode.WebviewViewProvider, vscode.Disposa
 
   /** Asks the page where everything is, and waits for the answer. */
   public async measure(because: string, timeoutMs: number = ANSWER_WITHIN_MS): Promise<ViewReport> {
-    const answer = this._wait(this._waitingForMeasurement, timeoutMs, `the page did not answer: ${because}`);
+    // Waiting for THIS answer by name. The page measures itself as well as
+    // answering -- an attach, an end, a resize each produce one -- and a waiter
+    // that took the first report to arrive would be handed one taken before its
+    // own question.
+    const answer = this._wait(
+      this._waitingForMeasurement,
+      timeoutMs,
+      `the page did not answer: ${because}`,
+      because
+    );
     this._post({ kind: 'measure', because });
     return await answer;
   }
@@ -225,8 +326,50 @@ export class WorkbenchView implements vscode.WebviewViewProvider, vscode.Disposa
    */
   public async dragSplitterBy(byPx: number, timeoutMs: number = ANSWER_WITHIN_MS): Promise<ViewReport> {
     const answer = this._wait(this._waitingForMeasurement, timeoutMs, 'the border did not move');
-    this._post({ kind: 'probe', action: 'drag-splitter', byPx });
+    this._post({ kind: 'probe', action: { kind: 'drag-splitter', byPx } });
     return await answer;
+  }
+
+  /**
+   * Types into the terminal exactly as a person's keyboard does.
+   *
+   * The seam for "input is not lost under a flood", which is an acceptance line
+   * of M3.7 and one a suite has no hands for. The page answers by calling
+   * xterm's own `input`, so what runs is the path a key press takes -- not a
+   * second implementation of it.
+   */
+  public type(text: string): void {
+    this._post({ kind: 'probe', action: { kind: 'type', text } });
+  }
+
+  /**
+   * Makes the page stop -- or start -- acknowledging what it is sent.
+   *
+   * The seam that keeps back-pressure from being unfalsifiable. A healthy
+   * consumer never needs a pause, so a build with no `pause()` at all passes
+   * every test a healthy consumer takes; this is how the suite makes the
+   * consumer unhealthy on purpose. Reversible by construction: the page keeps
+   * count while it is silent and settles the debt the moment it is switched back
+   * on, so the probe cannot leave an agent paused for good.
+   */
+  public receipts(sending: boolean): void {
+    this._post({ kind: 'probe', action: { kind: 'receipts', sending } });
+  }
+
+  /**
+   * Makes the page slow to take a message in, and `0` makes it quick again.
+   *
+   * The other half of the same problem `receipts` solves. A receipt in this
+   * build means "the screen has parsed this", and the difference between that
+   * and "the message reached the page" is what back-pressure is counted in --
+   * but on this machine xterm parses a plain flood FASTER than the pty produces
+   * it, so the two receipts report identical numbers and neither the suite nor
+   * a mutation can tell them apart (M19 of the M3.7 battery, 2026-08-18). Under
+   * this probe the screen falls behind on purpose, and a receipt sent on
+   * arrival becomes a claim the page can be caught in.
+   */
+  public linger(ms: number): void {
+    this._post({ kind: 'probe', action: { kind: 'linger', ms } });
   }
 
   /**
@@ -256,7 +399,7 @@ export class WorkbenchView implements vscode.WebviewViewProvider, vscode.Disposa
       };
       look();
     });
-    this._post({ kind: 'probe', action: 'break-policy', byPx: 0 });
+    this._post({ kind: 'probe', action: { kind: 'break-policy' } });
     return await answer;
   }
 
@@ -265,6 +408,8 @@ export class WorkbenchView implements vscode.WebviewViewProvider, vscode.Disposa
       subscription.dispose();
     }
     this._subscriptions.length = 0;
+    this._listeners.clear();
+    this._watchers.clear();
     for (const set of [this._waitingForReady, this._waitingForMeasurement]) {
       for (const waiter of set) {
         clearTimeout(waiter.timer);
@@ -339,6 +484,12 @@ export class WorkbenchView implements vscode.WebviewViewProvider, vscode.Disposa
     void this._view?.webview.postMessage(message);
   }
 
+  private _sawVisibility(visible: boolean): void {
+    for (const watcher of this._watchers) {
+      watcher(visible);
+    }
+  }
+
   private _heard(raw: unknown): void {
     const message = parseViewMessage(raw);
     if (message === null) {
@@ -350,6 +501,12 @@ export class WorkbenchView implements vscode.WebviewViewProvider, vscode.Disposa
       });
       return;
     }
+    // Before this class acts on it, and unconditionally: the terminals' half of
+    // the channel is somebody else's, and a message this class has no case for
+    // -- a receipt, a keystroke, a size -- must reach them all the same.
+    for (const listener of this._listeners) {
+      listener(message);
+    }
     switch (message.kind) {
       case 'ready':
         this._lastReport = message.report;
@@ -358,7 +515,7 @@ export class WorkbenchView implements vscode.WebviewViewProvider, vscode.Disposa
         return;
       case 'measured':
         this._lastReport = message.report;
-        this._settle(this._waitingForMeasurement, message.report);
+        this._settle(this._waitingForMeasurement, message.report, message.because);
         return;
       case 'refused':
         this._refusals.push(message.what);
@@ -378,11 +535,17 @@ export class WorkbenchView implements vscode.WebviewViewProvider, vscode.Disposa
     }
   }
 
-  private async _wait(set: Set<Waiter>, timeoutMs: number, complaint: string): Promise<ViewReport> {
+  private async _wait(
+    set: Set<Waiter>,
+    timeoutMs: number,
+    complaint: string,
+    because: string | null = null
+  ): Promise<ViewReport> {
     return await new Promise<ViewReport>((resolve, reject) => {
       const waiter: Waiter = {
         resolve,
         reject,
+        because,
         timer: setTimeout(() => {
           set.delete(waiter);
           reject(new Error(`${complaint} (waited ${String(timeoutMs)} ms)`));
@@ -392,11 +555,15 @@ export class WorkbenchView implements vscode.WebviewViewProvider, vscode.Disposa
     });
   }
 
-  private _settle(set: Set<Waiter>, report: ViewReport): void {
+  /** Hands a report to everyone who was waiting for THIS answer, and to nobody else. */
+  private _settle(set: Set<Waiter>, report: ViewReport, because: string | null = null): void {
     for (const waiter of set) {
+      if (waiter.because !== null && waiter.because !== because) {
+        continue;
+      }
       clearTimeout(waiter.timer);
       waiter.resolve(report);
+      set.delete(waiter);
     }
-    set.clear();
   }
 }

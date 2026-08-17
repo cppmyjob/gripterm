@@ -335,7 +335,7 @@
           ],
           "enumDescriptions": [
             "The editor makes the terminal. Everything you can see and do with a terminal today comes from this: the tab, the scrollback, the selection, the search.",
-            "Gripterm makes the terminal itself, so it can see the bytes going through it. NOT FINISHED: Gripterm now has a panel of its own, but no terminal is wired into it yet, so an agent started this way still runs unseen — it is here for the milestones that put its bytes on that screen. Not available with gripterm.launch.mode: shell, which falls back to the editor and says so in the log."
+            "Gripterm makes the terminal itself, so it can see the bytes going through it. The agent runs in the Gripterm panel: its output, your typing and the size of the panel all reach it. NOT FINISHED: one terminal is on screen at a time (switching between several arrives with the strip), and the keys the editor takes for itself are not yet handed to the terminal. Not available with gripterm.launch.mode: shell, which falls back to the editor and says so in the log."
           ],
           "default": "editor",
           "markdownDescription": "Which engine opens a Gripterm terminal. Takes effect when the window reloads."

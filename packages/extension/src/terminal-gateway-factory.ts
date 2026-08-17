@@ -8,6 +8,7 @@ import type {
   LaunchLocation,
   LaunchMode,
   Logger,
+  TerminalAudience,
   TerminalEngine,
   TerminalGateway,
 } from '@gripterm/core';
@@ -34,6 +35,16 @@ export interface TerminalGatewayParams {
   readonly extensionPath: string;
   readonly editor: EditorIdentity;
   readonly logger: Logger;
+  /**
+   * Whoever will draw the terminals this gateway makes, or nobody.
+   *
+   * Optional because the editor's engine has no use for it -- its terminals are
+   * the editor's own and it is the editor that shows them -- and because the
+   * contract suite builds gateways with no view at all. Passed through untouched
+   * rather than interpreted here: this function's whole job is which engine, and
+   * an audience is neither an engine nor a reason to choose one.
+   */
+  readonly audience?: TerminalAudience | null;
 }
 
 export function terminalGatewayFor(params: TerminalGatewayParams): TerminalGateway & Disposable {
@@ -63,17 +74,20 @@ export function terminalGatewayFor(params: TerminalGatewayParams): TerminalGatew
     return new VsCodeTerminalGateway(params.location, params.logger);
   }
 
-  // Said at every activation that chooses this engine, because it is the whole of
-  // what a person notices today: the agent runs, and there is nothing on the
-  // screen. Our own view is M3.6 and the strip that switches between terminals is
-  // M3.9. The setting's own description says the same thing where it is chosen.
-  params.logger.warn(
-    'terminals are opened by Gripterm itself, and Gripterm has no view to show them in yet -- an agent started now runs unseen',
-    { setting: 'gripterm.terminal.engine', engine: 'own' }
-  );
+  const audience = params.audience ?? null;
+  if (audience === null) {
+    // Said out loud, because it is the difference between an agent on a screen
+    // and an agent nobody can see. It is the ordinary shape for a gateway built
+    // by the contract suite, and a defect for one built by a window.
+    params.logger.warn(
+      'terminals are opened by Gripterm itself and nothing is set up to draw them -- an agent started now runs unseen',
+      { setting: 'gripterm.terminal.engine', engine: 'own' }
+    );
+  }
   return new PtyTerminalGateway({
     pty,
     editor: params.editor,
     logger: params.logger,
+    audience,
   });
 }

@@ -108,6 +108,7 @@ import { VsCodeAttentionPresenter } from './ui/vscode-attention-presenter';
 import { TerminalDecorationProvider } from './ui/terminal-decorations';
 import { TERMINALS_VIEW_ID, TerminalTreeDataProvider } from './ui/terminal-tree';
 import { WORKBENCH_VIEW_ID, WorkbenchView } from './ui/workbench-view';
+import { TerminalStage } from './ui/terminal-stage';
 import type { TerminalTreeNode } from './ui/terminal-tree';
 
 /** The agent this build knows how to start, by the name it goes by on a PATH. */
@@ -274,6 +275,16 @@ export interface GriptermApi {
    */
   readonly workbench: WorkbenchView;
   /**
+   * The owner of "which terminal the panel is showing" (M3.7).
+   *
+   * Exposed for the same reason as the gateway and for one more: it is the
+   * object that holds every terminal's bridge, and the bridges are where the
+   * numbers live -- how much was sent, how much is unacknowledged, whether the
+   * process is being held back. A suite that could not read those would be
+   * asserting on a picture.
+   */
+  readonly stage: TerminalStage;
+  /**
    * The data provider, for the one question only a real host answers about the
    * grouping (M2.14): what the ROOT of the contributed view actually contains.
    * How rows group is decided in `groupTerminals` and covered there.
@@ -366,6 +377,35 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     logger,
   });
 
+  /*
+   * The panel tab, the page inside it, and the one object that knows which
+   * terminal that page is showing (M3.6, M3.7).
+   *
+   * Built HERE, before the gateway, and that order is the design: a terminal of
+   * our own starts talking the instant it is spawned, and the audience has to
+   * exist before the first one can be made or its first bytes -- which are the
+   * ones that say why a launch failed -- would reach nobody.
+   *
+   * `retainContextWhenHidden: true` is the owner's decision of 2026-08-17, taken
+   * on the M3.1 measurement: with it, ten hide-and-shows over five sessions
+   * never rebuilt the page. The panel is hidden and shown many times a day --
+   * `Ctrl+J`, and every switch to TERMINAL -- and a rebuilt page would cost the
+   * person their scrollback, their selection and the position of their cursor
+   * each time. What it costs instead is the memory of every hidden terminal,
+   * which was NOT measured and is named unmeasured in the plan; and what it
+   * requires is in `TerminalBridge`: a hidden webview has its timers throttled
+   * by Chromium, so invisibility lifts back-pressure unconditionally.
+   */
+  const workbench = new WorkbenchView({ extensionUri: context.extensionUri, logger });
+  context.subscriptions.push(workbench);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(WORKBENCH_VIEW_ID, workbench, {
+      webviewOptions: { retainContextWhenHidden: true },
+    })
+  );
+  const stage = new TerminalStage({ view: workbench, scheduler: new SystemScheduler(), logger });
+  context.subscriptions.push(stage);
+
   const location = readLaunchLocation(logger);
   // Read here rather than where it used to be read, further down: the engine is
   // chosen from BOTH settings, because a terminal of our own has no shell to type
@@ -378,6 +418,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     extensionPath: context.extensionPath,
     editor: editorIdentity(),
     logger,
+    audience: stage,
   });
   // Still a subscription as well, and deliberately: `deactivate` covers the
   // ordinary way out, this covers the extension being disabled under a window
@@ -497,27 +538,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   // and a data provider alone cannot select anything (M2.13).
   const view = vscode.window.createTreeView(TERMINALS_VIEW_ID, { treeDataProvider: tree });
   context.subscriptions.push(view);
-  /*
-   * The panel tab and the page inside it (M3.6).
-   *
-   * `retainContextWhenHidden: true` is the owner's decision of 2026-08-17, taken
-   * on the M3.1 measurement: with it, ten hide-and-shows over five sessions
-   * never rebuilt the page. The panel is hidden and shown many times a day --
-   * `Ctrl+J`, and every switch to TERMINAL -- and a rebuilt page would cost the
-   * person their scrollback, their selection and the position of their cursor
-   * each time. What it costs instead is the memory of every hidden terminal,
-   * which was NOT measured and is named unmeasured in the plan; and it puts a
-   * requirement on M3.7, which is written there: a hidden webview has its timers
-   * throttled by Chromium, so acknowledgements stop arriving and invisibility
-   * must lift back-pressure unconditionally.
-   */
-  const workbench = new WorkbenchView({ extensionUri: context.extensionUri, logger });
-  context.subscriptions.push(workbench);
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(WORKBENCH_VIEW_ID, workbench, {
-      webviewOptions: { retainContextWhenHidden: true },
-    })
-  );
   // The person's own colour, on the row's label. The icon's colour belongs to
   // the state, and the two must not be confusable (M2.7).
   const decorations = new TerminalDecorationProvider(registry);
@@ -642,7 +662,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
           logger,
         });
 
-  context.subscriptions.push(registerNewTerminal(lifecycle, registry, logger));
+  context.subscriptions.push(
+    registerNewTerminal(
+      lifecycle,
+      registry,
+      logger,
+      // Only where a panel of ours is what the person would be looking at. Under
+      // the editor's engine the editor shows the terminal itself, so there is
+      // nothing to wait for and waiting would be a delay bought with nothing.
+      gateway.engine === 'own' ? async (): Promise<string | null> => await stage.whenPageIsUp() : null
+    )
+  );
   context.subscriptions.push(registerFocusTerminal(gateway, logger));
   context.subscriptions.push(registerCloseTerminal(lifecycle, registry, logger));
   context.subscriptions.push(
@@ -794,6 +824,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     view,
     tree,
     workbench,
+    stage,
     readiness: {
       cliPath: cli.path,
       cliVersion: cli.version,

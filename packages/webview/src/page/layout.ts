@@ -3,10 +3,10 @@ import { resolveSplit } from '../split-rule';
 /**
  * The two halves of the panel and the border between them.
  *
- * The left half is where an agent's terminal goes (M3.7); the right half is
- * where what Gripterm knows about it goes (M3.11). Both exist now, because a
- * border can only be dragged between two things, and because a half that
- * appears late tends to appear at the cost of the one that was there first.
+ * The left half is where the agent's terminal runs; the right half is where what
+ * Gripterm knows about it goes (M3.11). Both existed before either was filled,
+ * because a border can only be dragged between two things, and because a half
+ * that appears late tends to appear at the cost of the one that was there first.
  *
  * The numbers below are decisions, and each is here rather than in the
  * stylesheet so that the rule they feed can be tested:

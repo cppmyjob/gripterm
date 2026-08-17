@@ -63,6 +63,19 @@ describe('TerminalScreen delivers what the process produced', () => {
     expect(screen.written).toStrictEqual(['ls\r']);
     expect(screen.sizes).toStrictEqual([{ cols: 120, rows: 30 }]);
   });
+
+  it('holds the process back and lets it go, in the order it was told to', () => {
+    // The order is the promise, not the state: a pause with no resume after it
+    // is the one failure of this port that leaves an agent blocked forever with
+    // nothing on any screen to say so (§I.3).
+    const screen = new InMemoryTerminalScreen();
+
+    screen.pause();
+    screen.resume();
+
+    expect(screen.flow).toStrictEqual(['pause', 'resume']);
+    expect(screen.paused).toBe(false);
+  });
 });
 
 describe('TerminalScreen reports the end of the process once', () => {
@@ -118,6 +131,18 @@ describe('TerminalScreen survives being used after it is over', () => {
 
     expect(() => { screen.resize(80, 24); }).not.toThrow();
     expect(screen.sizes).toStrictEqual([]);
+  });
+
+  it('ignores flow control on a process that has ended', () => {
+    // The same race as `resize`, on the call where it matters most: a pause
+    // aimed at a pty that has just gone must not throw out of the listener that
+    // was reporting the flood.
+    const screen = new InMemoryTerminalScreen();
+    screen.end(EXIT);
+
+    expect(() => { screen.pause(); }).not.toThrow();
+    expect(() => { screen.resume(); }).not.toThrow();
+    expect(screen.flow).toStrictEqual([]);
   });
 
   it('can be disposed twice', () => {
