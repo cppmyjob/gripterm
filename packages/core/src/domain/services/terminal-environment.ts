@@ -125,11 +125,14 @@ export function terminalEnvironment(params: TerminalEnvironmentParams): Record<s
  * A blank one is not written: `TERM_PROGRAM=""` tells the CLI it is running
  * inside a program called nothing, which is a worse answer than not answering.
  *
- * `TERM` is deliberately absent. It is not in the measured delta on win32 -- the
- * editor does not set it there either -- and the live `claude` of M3.2(4) came up
- * under ConPTY without one. A value invented here would be a claim about a
- * platform nobody measured. Where the platform does set it, it is already in the
- * host environment and passes through untouched.
+ * `TERM` is deliberately absent FROM THIS RULE, which is not the same as absent
+ * from the process (found 2026-08-17, M3.4-B): node-pty writes it into every
+ * child regardless -- `env.TERM = opt.name || env.TERM || 'xterm'` in both its
+ * terminals -- so the adapter names the value there, where the fact about the
+ * library is. What this rule would be doing by naming one is claiming to know
+ * what an editor sets, and it is not in the measured delta on win32. Where the
+ * platform does set it, it is in the host environment and passes through here
+ * untouched.
  */
 function identityOf(editor: EditorIdentity): Record<string, string> {
   return {

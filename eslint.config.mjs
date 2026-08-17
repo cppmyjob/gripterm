@@ -78,6 +78,11 @@ export default tseslint.config(
       // have put spike code under the product's rules -- including the M3.3 ban
       // on importing `node-pty` outside adapters, which spikes exist to break.
       'spikes/**',
+      // The copy of `node-pty` that `pnpm build:extension` puts beside the bundle
+      // (M3.4). Somebody else's compiled JavaScript, recreated by every build:
+      // linting it would report their style as our warnings and take
+      // `--max-warnings 0` down with it.
+      'packages/extension/assets/node-pty/**',
     ],
   },
 

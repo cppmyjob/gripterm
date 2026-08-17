@@ -310,6 +310,19 @@
           "default": "group",
           "markdownDescription": "Where a Gripterm terminal is opened."
         },
+        "gripterm.terminal.engine": {
+          "type": "string",
+          "enum": [
+            "editor",
+            "own"
+          ],
+          "enumDescriptions": [
+            "The editor makes the terminal. Everything you can see and do with a terminal today comes from this: the tab, the scrollback, the selection, the search.",
+            "Gripterm makes the terminal itself, so it can see the bytes going through it. NOT FINISHED: Gripterm has no view of its own yet, so an agent started this way runs unseen — it is here for the milestones that add the view. Not available with gripterm.launch.mode: shell, which falls back to the editor and says so in the log."
+          ],
+          "default": "editor",
+          "markdownDescription": "Which engine opens a Gripterm terminal. Takes effect when the window reloads."
+        },
         "gripterm.journal.includeContent": {
           "type": "boolean",
           "default": false,
@@ -339,6 +352,7 @@
     "package": "vsce package --no-dependencies --allow-missing-repository"
   },
   "dependencies": {
-    "@gripterm/core": "workspace:*"
+    "@gripterm/core": "workspace:*",
+    "node-pty": "1.1.0"
   }
 }

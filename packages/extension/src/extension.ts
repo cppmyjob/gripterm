@@ -59,6 +59,7 @@ import {
 } from '@gripterm/core';
 import type {
   AgentCommandFactory,
+  EditorIdentity,
   ExecutableSearch,
   ForwarderScript,
   JournalPolicy,
@@ -71,6 +72,7 @@ import type {
   OwnerPresence,
   RestoreInputs,
   StoragePreparation,
+  TerminalEngine,
   TerminalGateway,
   TerminalRepository,
   WatchReport,
@@ -90,11 +92,12 @@ import {
   readLaunchLocation,
   readLaunchMode,
   readStorageDir,
+  readTerminalEngine,
   readToastSignals,
 } from './settings';
+import { terminalGatewayFor } from './terminal-gateway-factory';
 import { UnavailableAgentCommandFactory } from './adapters/unavailable-agent-command-factory';
 import { VsCodeLogger } from './adapters/vscode-logger';
-import { VsCodeTerminalGateway } from './adapters/vscode-terminal-gateway';
 import { windowIdentity } from './adapters/vscode-window-identity';
 import { say } from './ui/say';
 import { StatusBarPresenter } from './ui/status-bar-presenter';
@@ -149,6 +152,16 @@ export interface Readiness {
   readonly address: ListeningAddress | null;
   readonly mode: LaunchMode;
   readonly location: LaunchLocation;
+  /**
+   * The engine that ANSWERED, which is not always the one that was asked for.
+   *
+   * `gripterm.terminal.engine` can say `own` and be refused twice over -- by the
+   * shell launch mode, and by a native addon that would not load -- and both
+   * refusals end in the editor's gateway. Reported here because a suite that
+   * could not tell the two apart would report a green run for an engine it never
+   * touched (M1.5, M2.11).
+   */
+  readonly engine: TerminalEngine;
   /** Why a launch would be refused, or `null` when it would not. */
   readonly refusal: string | null;
   /** What the store turned out to be: its schema version, or why it is unusable. */
@@ -206,6 +219,17 @@ export interface GriptermApi {
    * exercise the other one.
    */
   readonly gateway: TerminalGateway;
+  /**
+   * The composition's own engine choice, handed out so that it can be exercised.
+   *
+   * Both engines and both refusals live behind one function, and the only place
+   * any of it can be run is a real Extension Host -- one of the engines IS the
+   * editor. Exposed rather than imported by the suite, and that difference is the
+   * point: a test that imported the module would be loading a SECOND compiled
+   * copy of it beside the bundle the editor is running, and would be checking
+   * that copy. This is the object the person's window uses.
+   */
+  readonly makeGateway: typeof terminalGatewayFor;
   readonly lifecycle: TerminalLifecycleService;
   /**
    * The five things a person changes about their own record.
@@ -305,7 +329,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   });
 
   const location = readLaunchLocation(logger);
-  const gateway = new VsCodeTerminalGateway(location, logger);
+  // Read here rather than where it used to be read, further down: the engine is
+  // chosen from BOTH settings, because a terminal of our own has no shell to type
+  // a launch line into (`chooseEngine`).
+  const mode = readLaunchMode(logger);
+  const gateway = terminalGatewayFor({
+    setting: readTerminalEngine(logger),
+    mode,
+    location,
+    extensionPath: context.extensionPath,
+    editor: editorIdentity(),
+    logger,
+  });
   context.subscriptions.push({ dispose: () => { gateway.dispose(); } });
 
   const storage = new StorageLayout(readStorageDir(logger));
@@ -344,7 +379,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   const forwarder = await findForwarder(context, logger);
 
   const readiness = launchReadiness({ cliName: CLAUDE_CLI, cliPath: cli.path, address });
-  const mode = readLaunchMode(logger);
 
   const lifecycle = new TerminalLifecycleService({
     registry,
@@ -678,6 +712,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   return {
     registry,
     gateway,
+    makeGateway: terminalGatewayFor,
     lifecycle,
     metadata,
     identity,
@@ -690,6 +725,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
       address,
       mode,
       location,
+      engine: gateway.engine,
       refusal: readiness.kind === 'refused' ? readiness.reason : null,
       storage: store,
       storageDir: storage.baseDir,
@@ -1129,6 +1165,28 @@ async function findForwarder(
  * add to it -- and that difference is exactly what `gripterm.launch.mode:
  * shell` exists for.
  */
+/**
+ * What this editor calls itself to a program running inside one of its terminals.
+ *
+ * `TERM_PROGRAM` is the literal `vscode`, and it is one of the three variables
+ * (of the editor's ten) that a terminal of our own can reproduce at all -- the
+ * other seven are set by OTHER extensions through `environmentVariableCollection`,
+ * which the stable API gives no way to read (§7.2). The CLI reads this one to
+ * know it is inside an editor.
+ *
+ * The VERSION is `vscode.version`, with a difference named rather than hidden: in
+ * a fork, that is the version of the VS Code it is built on, while the fork's own
+ * terminals carry the fork's version (measured 2026-08-17 in Cursor 3.13.25 --
+ * `TERM_PROGRAM=vscode`, `TERM_PROGRAM_VERSION=3.13.25`). There is no API for the
+ * application's own version, and what it costs to be wrong is a version string in
+ * somebody's diagnostics.
+ */
+const EDITOR_TERM_PROGRAM = 'vscode';
+
+function editorIdentity(): EditorIdentity {
+  return { termProgram: EDITOR_TERM_PROGRAM, termProgramVersion: vscode.version };
+}
+
 function systemSearch(): ExecutableSearch {
   return {
     path: process.env.PATH,

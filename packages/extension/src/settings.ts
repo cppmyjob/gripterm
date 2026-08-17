@@ -7,6 +7,7 @@ import {
   chooseStorageDir,
   isAttentionSignal,
   isLaunchLocation,
+  isTerminalEngine,
 } from '@gripterm/core';
 import type {
   AttentionSignal,
@@ -14,6 +15,7 @@ import type {
   LaunchLocation,
   LaunchMode,
   Logger,
+  TerminalEngine,
 } from '@gripterm/core';
 
 const SECTION = 'gripterm';
@@ -21,6 +23,7 @@ const STORAGE_PATH = 'storage.path';
 const TOAST_STATES = 'notify.toastStates';
 const LAUNCH_MODE = 'launch.mode';
 const LAUNCH_LOCATION = 'launch.location';
+const TERMINAL_ENGINE = 'terminal.engine';
 const JOURNAL_RETENTION_DAYS = 'journal.retentionDays';
 const JOURNAL_MAX_SIZE_MB = 'journal.maxSizeMb';
 const JOURNAL_INCLUDE_CONTENT = 'journal.includeContent';
@@ -36,6 +39,16 @@ const DEFAULT_LAUNCH_MODE: LaunchMode = 'process';
 
 /** A group of the editor area that is ours -- see `LaunchLocation` for why that is the default. */
 const DEFAULT_LAUNCH_LOCATION: LaunchLocation = 'group';
+
+/**
+ * `editor`, and it stays that way until the measurements say otherwise (M3.13).
+ *
+ * The other engine exists and works, but everything a person sees of a terminal
+ * -- the view, the tabs, the switching -- is still the editor's until M3.6 and
+ * M3.9. A default that changed before those would hand somebody a working agent
+ * with nothing to watch it in.
+ */
+const DEFAULT_TERMINAL_ENGINE: TerminalEngine = 'editor';
 
 /**
  * Which states get a notification, as the person configured them.
@@ -115,6 +128,38 @@ export function readLaunchLocation(logger: Logger): LaunchLocation {
     using: DEFAULT_LAUNCH_LOCATION,
   });
   return DEFAULT_LAUNCH_LOCATION;
+}
+
+/**
+ * Which engine opens a terminal, as the person configured it.
+ *
+ * Same rule as the two above -- an unreadable value falls back AND says so -- and
+ * it matters more here than anywhere else in this file: this setting decides
+ * whether a conversation runs inside the editor's own terminal or inside a
+ * process of ours, and the two are ended by different machinery. A typo that
+ * silently meant `editor` would be discovered by a person wondering why the
+ * screen they configured never appeared.
+ *
+ * What is asked for is not necessarily what answers: `own` with
+ * `gripterm.launch.mode: shell` is refused, and `own` on a build whose native
+ * addon will not load falls back. Both happen in `terminalGatewayFor`, out loud,
+ * and the record is stamped from the gateway that answered rather than from here.
+ */
+export function readTerminalEngine(logger: Logger): TerminalEngine {
+  const configured = vscode.workspace.getConfiguration(SECTION).get<string>(TERMINAL_ENGINE);
+  if (configured === undefined) {
+    return DEFAULT_TERMINAL_ENGINE;
+  }
+  if (isTerminalEngine(configured)) {
+    return configured;
+  }
+
+  logger.warn('the configured terminal engine is not one this build knows', {
+    setting: `${SECTION}.${TERMINAL_ENGINE}`,
+    configured,
+    using: DEFAULT_TERMINAL_ENGINE,
+  });
+  return DEFAULT_TERMINAL_ENGINE;
 }
 
 /**

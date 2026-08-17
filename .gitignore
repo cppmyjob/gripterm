@@ -11,3 +11,8 @@ spikes/*/results/
 # Third-party bundles copied in by `pnpm build` of a stand. They are a copy of
 # what is already in node_modules and they are recreated on every build.
 spikes/*/media/vendor/
+# The native pty, copied in by `pnpm build:extension` (M3.4). Some 3 MB of
+# prebuilt binaries that already exist in node_modules and are recreated by every
+# build -- this line stands BEFORE the copy does, because a `git add -A` on a
+# clean tree would otherwise commit them into the published repository.
+packages/extension/assets/node-pty/

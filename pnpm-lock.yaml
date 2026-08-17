@@ -79,6 +79,9 @@ importers:
       '@gripterm/core':
         specifier: workspace:*
         version: link:../core
+      node-pty:
+        specifier: 1.1.0
+        version: 1.1.0
 
   spikes/panel-keys: {}
 
