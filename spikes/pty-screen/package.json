@@ -10,7 +10,7 @@
   },
   "main": "./out/extension.js",
   "scripts": {
-    "build": "tsc -p ."
+    "build": "node scripts/copy-vendor.js && tsc -p ."
   },
   "dependencies": {
     "node-pty": "1.1.0"
@@ -28,7 +28,29 @@
       {
         "command": "spikePtyScreen.measure",
         "title": "Spike: measure pty"
+      },
+      {
+        "command": "spikePtyScreen.liveClaude",
+        "title": "Spike: put a live claude on the screen"
       }
-    ]
+    ],
+    "viewsContainers": {
+      "panel": [
+        {
+          "id": "spikePtyScreen",
+          "title": "Spike: screen",
+          "icon": "media/panel.svg"
+        }
+      ]
+    },
+    "views": {
+      "spikePtyScreen": [
+        {
+          "id": "spikePtyScreen.screen",
+          "name": "Screen",
+          "type": "webview"
+        }
+      ]
+    }
   }
 }

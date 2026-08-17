@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      The CSP is written under what xterm actually does, not under what would be
+      tidy. @xterm/xterm 6.0.0 calls createElement("style") four times and sets no
+      nonce on any of them, so 'unsafe-inline' in style-src is the price of using
+      it at all. In the product this is C5's workaround and it carries a date;
+      here it is only recorded so the product does not discover it late.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src __CSP_SOURCE__ data:; style-src __CSP_SOURCE__ 'unsafe-inline'; script-src 'nonce-__NONCE__'; font-src __CSP_SOURCE__;"
+    />
+    <link rel="stylesheet" href="__VENDOR__/xterm.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--vscode-panel-background, #1e1e1e);
+        color: var(--vscode-foreground, #ccc);
+        font-family: var(--vscode-font-family, sans-serif);
+      }
+      #wrap {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+      #status {
+        flex: 0 0 auto;
+        padding: 2px 6px;
+        font-size: 11px;
+        opacity: 0.8;
+        white-space: pre;
+        overflow-x: auto;
+      }
+      #screen {
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+      /* Off-screen twins for the unicode-width comparison: they must have real
+         geometry, so they are moved out of sight rather than display:none --
+         FitAddon.proposeDimensions() returns NaN on a hidden element
+         (xterm.js#3029) and that is the very trap M3.9 has to avoid. */
+      #twins {
+        position: absolute;
+        left: -10000px;
+        top: 0;
+        width: 800px;
+        height: 300px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="wrap">
+      <div id="status">spike: waiting for the extension…</div>
+      <div id="screen"></div>
+    </div>
+    <div id="twins"><div id="twin6"></div><div id="twin11"></div></div>
+    <script nonce="__NONCE__" src="__VENDOR__/xterm.js"></script>
+    <script nonce="__NONCE__" src="__VENDOR__/addon-fit.js"></script>
+    <script nonce="__NONCE__" src="__VENDOR__/addon-unicode11.js"></script>
+    <script nonce="__NONCE__" src="__MEDIA__/screen.js"></script>
+  </body>
+</html>
