@@ -69,6 +69,14 @@ const PROBES: readonly ProbeSpec[] = [
   { id: 'tab', label: 'Tab', purpose: 'completion in Claude Code', column: 'cursor', command: 'spikePanelKeys.key.tab' },
   { id: 'ctrlShiftL', label: 'Ctrl+Shift+L', purpose: 'Cursor: add to chat', column: 'cursor', command: 'spikePanelKeys.key.ctrlShiftL' },
   { id: 'cyrillic', label: 'Cyrillic letter', purpose: 'non-latin input; deliberately not bound', column: 'both', command: null },
+  // Not a P6 key at all: a discriminator. The first run showed every key
+  // reaching the page while our contributed command never fired once, and that
+  // has two possible causes -- the webview consumes the event before the
+  // workbench sees it, or `focusedView` simply never equals our view id, in
+  // which case the whole M3.8 guard is built on sand. This chord belongs to
+  // nobody, so if it fires the command, the guard works and the silence above
+  // was consumption; if it does not, the guard is the problem.
+  { id: 'guardProbe', label: 'Ctrl+Alt+F9 (guard probe)', purpose: 'does our focusedView guard fire at all', column: 'both', command: 'spikePanelKeys.key.guardProbe' },
 ];
 
 /** One row of the protocol, as it stands at any moment. */
@@ -113,23 +121,30 @@ interface RawEvent {
   readonly matched: string | null;
 }
 
+/** One activation of the stand. A window reload starts a new one. */
+interface SessionRecord {
+  readonly startedAt: string;
+  readonly retainContextWhenHidden: boolean;
+  resolveCount: number;
+  /**
+   * When the page itself spoke. This is the answer to question zero (A40) and
+   * it is deliberately separate from `resolveCount`: the Cursor symptom is a
+   * provider that resolves while the body stays empty, so "we were asked for
+   * html" and "the html came alive" must be two different facts.
+   */
+  readyAt: string | null;
+  visibilityChanges: { readonly visible: boolean; readonly at: string }[];
+}
+
 /** Everything the protocol file holds. */
 interface Protocol {
   readonly writtenAt: string;
   readonly editor: Record<string, string | boolean | undefined>;
   readonly runtime: Record<string, string | undefined>;
-  readonly view: {
-    readonly retainContextWhenHidden: boolean;
-    resolveCount: number;
-    /**
-     * When the page itself spoke. This is the answer to question zero (A40) and
-     * it is deliberately separate from `resolveCount`: the Cursor symptom is a
-     * provider that resolves while the body stays empty, so "we were asked for
-     * html" and "the html came alive" must be two different facts.
-     */
-    readyAt: string | null;
-    visibilityChanges: { readonly visible: boolean; readonly at: string }[];
-  };
+  /** The activation that is running now. */
+  readonly view: SessionRecord;
+  /** Activations before this one, oldest first. Reloads land here. */
+  readonly previousSessions: SessionRecord[];
   metrics: Metrics | null;
   readonly rows: RowState[];
   rawEvents: RawEvent[];
@@ -167,6 +182,37 @@ function nonce(): string {
 
 function sanitize(name: string): string {
   return name.replace(/[^A-Za-z0-9._-]+/gu, '-');
+}
+
+/**
+ * The rows of a protocol written by an earlier activation, by row id.
+ *
+ * Saving after every change was not enough. Two of the probed keys destroy the
+ * board: Ctrl+W closes the window, and Ctrl+R reloads it in an Extension
+ * Development Host -- measured 2026-08-17, the owner pressed it and the board
+ * came back empty. A stand whose own key list wipes its results makes the owner
+ * repeat the whole pass, so the file is not just written but READ BACK.
+ */
+function restoreRows(filePath: string, rows: RowState[]): SessionRecord[] {
+  let parsed: Protocol;
+  try {
+    parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as Protocol;
+  } catch {
+    return [];
+  }
+  const previous = new Map((parsed.rows ?? []).map((row) => [row.id, row]));
+  for (const row of rows) {
+    const before = previous.get(row.id);
+    if (before === undefined) {
+      continue;
+    }
+    row.webviewSaw = before.webviewSaw;
+    row.commandFired = before.commandFired;
+    row.blocked = before.blocked;
+    row.note = before.note;
+    row.focusAtCommand = before.focusAtCommand;
+  }
+  return [...(parsed.previousSessions ?? []), ...(parsed.view === undefined ? [] : [parsed.view])];
 }
 
 /**
@@ -580,12 +626,19 @@ export function activate(context: vscode.ExtensionContext): void {
     .get<boolean>('retainContextWhenHidden', true);
   const configuredDir = vscode.workspace.getConfiguration('spikePanelKeys').get<string>('resultsDir', '');
   const directory = configuredDir.length > 0 ? configuredDir : path.join(context.extensionPath, 'results');
-  const stamp = new Date().toISOString().replace(/[:.]/gu, '-');
+  // One file per editor, NOT one per activation: a reload has to continue the
+  // same protocol, not start a second one the owner would have to fill again.
   const file = new ProtocolFile(
     directory,
-    `${sanitize(vscode.env.appName)}-${sanitize(vscode.version)}-${stamp}.json`,
+    `${sanitize(vscode.env.appName)}-${sanitize(vscode.version)}.json`,
   );
   context.subscriptions.push({ dispose: () => { file.dispose(); } });
+
+  const previousSessions = fs.existsSync(file.filePath) ? restoreRows(file.filePath, rows) : [];
+  const restored = rows.filter((row) => row.webviewSaw || row.commandFired || row.blocked).length;
+  if (previousSessions.length > 0) {
+    log.appendLine(`restored ${String(restored)} answered rows from ${String(previousSessions.length)} earlier session(s)`);
+  }
 
   const protocol: Protocol = {
     writtenAt: new Date().toISOString(),
@@ -608,7 +661,14 @@ export function activate(context: vscode.ExtensionContext): void {
       arch: process.arch,
       osRelease: os.release(),
     },
-    view: { retainContextWhenHidden: retain, resolveCount: 0, readyAt: null, visibilityChanges: [] },
+    view: {
+      startedAt: new Date().toISOString(),
+      retainContextWhenHidden: retain,
+      resolveCount: 0,
+      readyAt: null,
+      visibilityChanges: [],
+    },
+    previousSessions,
     metrics: null,
     rows,
     rawEvents: [],
