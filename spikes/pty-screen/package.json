@@ -1,0 +1,34 @@
+{
+  "name": "spike-pty-screen",
+  "displayName": "Spike: pty and screen (throwaway)",
+  "description": "Measurement stand for 14-m3-plan.md M3.2. Not a product. Nothing here moves into packages/.",
+  "private": true,
+  "version": "0.0.0",
+  "publisher": "gripterm-spike",
+  "engines": {
+    "vscode": "^1.94.0"
+  },
+  "main": "./out/extension.js",
+  "scripts": {
+    "build": "tsc -p ."
+  },
+  "dependencies": {
+    "node-pty": "1.1.0"
+  },
+  "devDependencies": {
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/addon-unicode11": "0.9.0",
+    "@xterm/xterm": "6.0.0"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "spikePtyScreen.measure",
+        "title": "Spike: measure pty"
+      }
+    ]
+  }
+}
