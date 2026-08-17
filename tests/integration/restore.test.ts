@@ -214,11 +214,19 @@ suite('bringing conversations back', () => {
        *
        * **What that costs, stated rather than left green:** `resume_failed` is
        * the state M2.13 turns into an offer to start the conversation over, and
-       * this path no longer reaches it. The row says the terminal ended -- true,
-       * and not the whole truth. It is A45 in the register, unfixed on purpose:
-       * the fix is a decision about which piece of first-hand evidence outranks
+       * this path does not reach it. The row says the terminal ended -- true, and
+       * not the whole truth. It is A45 in the register, unfixed on purpose: the
+       * fix is a decision about which piece of first-hand evidence outranks
        * which, and that belongs to a step of its own rather than to the one that
        * happened to find it.
+       *
+       * **It is not a regression, and writing that down is the point.** This path
+       * did not reach `resume_failed` yesterday either -- the process did not
+       * exit at all, and the row read `degraded`, which is "running, phase
+       * unknown" about a CLI that had already refused. `ended` is the truer of
+       * the two. And `resume_failed` itself is alive and covered:
+       * `resume-failed.test.ts` reaches it with a real `claude` refused by a
+       * `--mcp-config` whose file is gone (A27).
        */
       assert.equal(await stateWithin(gripterm, 'ended'), 'ended');
 
