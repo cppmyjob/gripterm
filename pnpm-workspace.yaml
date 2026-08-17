@@ -1,2 +1,7 @@
 packages:
   - 'packages/*'
+  # Throwaway measurement stands (14-m3-plan.md §2). A directory outside the
+  # workspace gets no install of its own: `pnpm install` run inside it installs
+  # the workspace instead, and `pnpm --filter <spike>` matches nothing and still
+  # exits 0 -- a silent no-op. Nothing under spikes/ ever ships.
+  - 'spikes/*'

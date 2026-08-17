@@ -5,3 +5,6 @@ out/
 *.vsix
 *.tsbuildinfo
 .vscode-test/
+# Measurement output of the throwaway stands. The protocol that matters is
+# transcribed into docs/experiments/; the raw JSON is per-machine.
+spikes/*/results/

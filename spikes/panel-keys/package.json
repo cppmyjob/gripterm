@@ -1,0 +1,104 @@
+{
+  "name": "spike-panel-keys",
+  "displayName": "Spike: panel keys (throwaway)",
+  "description": "Measurement stand for 14-m3-plan.md M3.1. Not a product. Nothing here moves into packages/.",
+  "private": true,
+  "version": "0.0.0",
+  "publisher": "gripterm-spike",
+  "engines": {
+    "vscode": "^1.94.0"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "scripts": {
+    "build": "tsc -p ."
+  },
+  "contributes": {
+    "viewsContainers": {
+      "panel": [
+        {
+          "id": "spikePanelKeys",
+          "title": "Spike keys",
+          "icon": "media/panel.svg"
+        }
+      ]
+    },
+    "views": {
+      "spikePanelKeys": [
+        {
+          "id": "spikePanelKeys.board",
+          "name": "Keyboard probe",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Spike: panel keys",
+      "properties": {
+        "spikePanelKeys.retainContextWhenHidden": {
+          "type": "boolean",
+          "default": true,
+          "description": "Register the view with retainContextWhenHidden. Reload the window after changing: the option is read once, when the provider is registered."
+        },
+        "spikePanelKeys.resultsDir": {
+          "type": "string",
+          "default": "",
+          "description": "Where the protocol JSON is written. Empty means <extension>/results."
+        }
+      }
+    },
+    "commands": [
+      { "command": "spikePanelKeys.key.slash", "title": "Spike key: /" },
+      { "command": "spikePanelKeys.key.escape", "title": "Spike key: Escape" },
+      { "command": "spikePanelKeys.key.shiftTab", "title": "Spike key: Shift+Tab" },
+      { "command": "spikePanelKeys.key.ctrlC", "title": "Spike key: Ctrl+C" },
+      { "command": "spikePanelKeys.key.up", "title": "Spike key: Up" },
+      { "command": "spikePanelKeys.key.down", "title": "Spike key: Down" },
+      { "command": "spikePanelKeys.key.left", "title": "Spike key: Left" },
+      { "command": "spikePanelKeys.key.right", "title": "Spike key: Right" },
+      { "command": "spikePanelKeys.key.home", "title": "Spike key: Home" },
+      { "command": "spikePanelKeys.key.end", "title": "Spike key: End" },
+      { "command": "spikePanelKeys.key.ctrlV", "title": "Spike key: Ctrl+V" },
+      { "command": "spikePanelKeys.key.shiftInsert", "title": "Spike key: Shift+Insert" },
+      { "command": "spikePanelKeys.key.ctrlP", "title": "Spike key: Ctrl+P" },
+      { "command": "spikePanelKeys.key.ctrlB", "title": "Spike key: Ctrl+B" },
+      { "command": "spikePanelKeys.key.ctrlJ", "title": "Spike key: Ctrl+J" },
+      { "command": "spikePanelKeys.key.ctrlR", "title": "Spike key: Ctrl+R" },
+      { "command": "spikePanelKeys.key.ctrlZ", "title": "Spike key: Ctrl+Z" },
+      { "command": "spikePanelKeys.key.ctrlW", "title": "Spike key: Ctrl+W" },
+      { "command": "spikePanelKeys.key.ctrlK", "title": "Spike key: Ctrl+K" },
+      { "command": "spikePanelKeys.key.ctrlL", "title": "Spike key: Ctrl+L" },
+      { "command": "spikePanelKeys.key.ctrlI", "title": "Spike key: Ctrl+I" },
+      { "command": "spikePanelKeys.key.tab", "title": "Spike key: Tab" },
+      { "command": "spikePanelKeys.key.ctrlShiftL", "title": "Spike key: Ctrl+Shift+L" },
+      { "command": "spikePanelKeys.saveProtocol", "title": "Spike: save protocol" }
+    ],
+    "keybindings": [
+      { "command": "spikePanelKeys.key.slash", "key": "/", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.escape", "key": "escape", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.shiftTab", "key": "shift+tab", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.ctrlC", "key": "ctrl+c", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.up", "key": "up", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.down", "key": "down", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.left", "key": "left", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.right", "key": "right", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.home", "key": "home", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.end", "key": "end", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.ctrlV", "key": "ctrl+v", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.shiftInsert", "key": "shift+insert", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.ctrlP", "key": "ctrl+p", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.ctrlB", "key": "ctrl+b", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.ctrlJ", "key": "ctrl+j", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.ctrlR", "key": "ctrl+r", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.ctrlZ", "key": "ctrl+z", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.ctrlW", "key": "ctrl+w", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.ctrlK", "key": "ctrl+k", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.ctrlL", "key": "ctrl+l", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.ctrlI", "key": "ctrl+i", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.tab", "key": "tab", "when": "focusedView == spikePanelKeys.board" },
+      { "command": "spikePanelKeys.key.ctrlShiftL", "key": "ctrl+shift+l", "when": "focusedView == spikePanelKeys.board" }
+    ]
+  }
+}

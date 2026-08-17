@@ -48,6 +48,13 @@ export default tseslint.config(
       // Jest coverage and the downloaded VS Code used by the integration run.
       '.test-output/**',
       '.vscode-test/**',
+      // Throwaway measurement stands (14-m3-plan.md §2). They are outside
+      // `tsconfig.eslint.json`, so a type-aware parser cannot read them at all:
+      // any .ts here fails with `"parserOptions.project" ... file was not found`
+      // and takes `pnpm lint` down with it. Widening that tsconfig instead would
+      // have put spike code under the product's rules -- including the M3.3 ban
+      // on importing `node-pty` outside adapters, which spikes exist to break.
+      'spikes/**',
     ],
   },
 
