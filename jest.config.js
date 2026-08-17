@@ -83,5 +83,22 @@ module.exports = {
       lines: 100,
       statements: 100,
     },
+    // The two rules of M3.5, and they are here for a reason the others are not:
+    // between them they decide whether a process is ENDED, which is the only act
+    // in this build that no undo of ours reaches (§I.3). A branch of either that
+    // nothing exercises is a refusal nobody has checked, and every one of those
+    // refusals is standing in front of somebody's running work.
+    'packages/core/src/domain/services/orphan-processes.ts': {
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100,
+    },
+    'packages/core/src/domain/services/window-shutdown.ts': {
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100,
+    },
   },
 };

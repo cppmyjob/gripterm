@@ -23,10 +23,23 @@ export { precedesBoot } from './domain/services/boot-window';
 export {
   DEFAULT_RECONCILE_INTERVAL_MS,
   Reconciler,
+  type OrphanEndReport,
   type ReconcileListener,
   type ReconcileReport,
   type ReconcilerOptions,
 } from './domain/services/reconciler';
+export {
+  confirmOrphans,
+  orphanCandidates,
+  type OrphanCandidate,
+  type OrphanConfirmation,
+  type OrphanEvidence,
+} from './domain/services/orphan-processes';
+export {
+  endOwnTerminals,
+  type WindowShutdownParams,
+  type WindowShutdownReport,
+} from './domain/services/window-shutdown';
 
 export {
   withGroupShare,
@@ -194,7 +207,9 @@ export { runCli, type CliRun, type CliRunOptions } from './infrastructure/cli-ru
 export {
   isProcessThere,
   pidsEstablishedGone,
+  sendKillSignal,
   sendSignalZero,
+  type ProcessEnder,
   type SignalProbe,
 } from './infrastructure/process-liveness';
 export {

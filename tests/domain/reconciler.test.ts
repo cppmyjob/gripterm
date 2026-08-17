@@ -226,6 +226,10 @@ interface Parts {
   /** Pids that answer nothing. Everything else is taken to be running. */
   readonly gone: Set<number>;
   readonly agents: { value: AgentListing, asked: number };
+  /** Pids this window signalled, in the order it signalled them (M3.5). */
+  readonly signalled: number[];
+  /** Pids the platform will refuse to signal, as one already gone does. */
+  readonly unsignallable: Set<number>;
 }
 
 function build(): Parts {
@@ -242,6 +246,8 @@ function build(): Parts {
   });
   const gone = new Set<number>();
   const agents = { value: NOTHING_RUNNING, asked: 0 };
+  const signalled: number[] = [];
+  const unsignallable = new Set<number>();
 
   const reconciler = new Reconciler({
     repository: base,
@@ -263,13 +269,28 @@ function build(): Parts {
       }
       return !gone.has(pid);
     },
+    endProcess: (pid) => {
+      // Refuses a number that is not a pid rather than shrugging at it, for the
+      // reason `isRunning` above does -- and here the cost is larger than a
+      // wrong answer: `process.kill(0, ...)` signals the CALLER's own group.
+      if (!Number.isSafeInteger(pid) || pid <= 0) {
+        throw new Error(`the reconciler tried to end ${String(pid)}, which is not a pid`);
+      }
+      if (unsignallable.has(pid)) {
+        throw Object.assign(new Error('no such process'), { code: 'ESRCH' });
+      }
+      signalled.push(pid);
+    },
     clock,
     scheduler,
     logger,
     uptimeSeconds: () => BOOTED_HOURS_AGO_S,
   });
 
-  return { reconciler, base, presence, registry, scheduler, logger, clock, gone, agents };
+  return {
+    reconciler, base, presence, registry, scheduler, logger, clock, gone, agents,
+    signalled, unsignallable,
+  };
 }
 
 function ours(overrides: {
@@ -849,6 +870,9 @@ describe('the sweep as a repeating thing', () => {
       self: OwnerId.fromString(US),
       readAgents: async () => NOTHING_RUNNING,
       isRunning: () => true,
+      endProcess: () => {
+        throw new Error('this reconciler exists to check an interval and ends nothing');
+      },
       clock: new FixedClock(NOW),
       scheduler,
       logger: new RecordingLogger(),
@@ -946,6 +970,180 @@ describe('the sweep as a repeating thing', () => {
 
     expect(scheduler.live).toHaveLength(1);
     reconciler.dispose();
+  });
+});
+
+/**
+ * The pass that ENDS a process, which is the only thing in this project no undo
+ * of ours reaches (M3.5, O4).
+ *
+ * It runs once, at activation, before anything reads the machine -- so a record
+ * whose process it took away is a record the restore of the same activation may
+ * bring back. The four guards it is written from are here one test each: the
+ * engine, the owner, the boot, and the machine's own word that the pid and the
+ * conversation belong together.
+ */
+describe('the processes of windows that are gone', () => {
+  /** A record of the window that died: `own`, with a pid, heard from after the boot. */
+  function theirs(overrides: {
+    readonly engine?: 'own' | 'editor';
+    readonly pid?: number | null;
+  } = {}): TerminalEntry {
+    return makeEntry({
+      terminalId: TerminalId.fromString(TERMINAL_UUID),
+      sessionId: SessionId.fromString(SESSION_UUID),
+      owner: makeOwnerRef(GONE),
+      engine: overrides.engine ?? 'own',
+      observed: observedAs('idle', overrides.pid === undefined ? CLAUDE_PID : overrides.pid),
+    });
+  }
+
+  /** The CLI's own answer: this conversation is running, as this process. */
+  function running(sessionId: string, pid: number | null): AgentListing {
+    return {
+      kind: 'listed',
+      agents: [{
+        sessionId: SessionId.fromString(sessionId),
+        pid,
+        cwd: null,
+        kind: 'interactive',
+        startedAt: null,
+        name: null,
+        status: 'idle',
+      }],
+      skipped: 0,
+    };
+  }
+
+  function corroborated(): Parts {
+    const parts = build();
+    parts.base.hold(theirs());
+    parts.presence.show(decodable(GONE, 'dead'));
+    parts.agents.value = running(SESSION_UUID, CLAUDE_PID);
+    return parts;
+  }
+
+  it('ends a process the machine confirms is that record\'s conversation', async () => {
+    const parts = corroborated();
+    parts.gone.add(CLAUDE_PID);
+
+    const report = await parts.reconciler.endOrphanedProcesses();
+
+    expect(parts.signalled).toStrictEqual([CLAUDE_PID]);
+    expect(report.ended).toStrictEqual([TERMINAL_UUID]);
+  });
+
+  it('does not ask the CLI at all when nothing could qualify', async () => {
+    // Every pass costs `claude agents --json`, 0.56-0.70 s (A24), at the moment
+    // a person is waiting for their window. The free evidence goes first.
+    const parts = build();
+    parts.base.hold(theirs({ engine: 'editor' }));
+    parts.presence.show(decodable(GONE, 'dead'));
+
+    const report = await parts.reconciler.endOrphanedProcesses();
+
+    expect(parts.agents.asked).toBe(0);
+    expect(report.ended).toStrictEqual([]);
+    expect(parts.signalled).toStrictEqual([]);
+  });
+
+  it('leaves the terminals the editor made, whatever the CLI says about them', async () => {
+    const parts = corroborated();
+    parts.base.hold(theirs({ engine: 'editor' }));
+
+    await parts.reconciler.endOrphanedProcesses();
+
+    expect(parts.signalled).toStrictEqual([]);
+  });
+
+  it('leaves a record whose window is merely quiet', async () => {
+    const parts = corroborated();
+    parts.presence.show(decodable(GONE, 'unknown'));
+
+    await parts.reconciler.endOrphanedProcesses();
+
+    expect(parts.signalled).toStrictEqual([]);
+  });
+
+  it('ends nothing when the CLI could not be asked, and says so', async () => {
+    const parts = corroborated();
+    parts.agents.value = { kind: 'unavailable', reason: 'no claude on the PATH' };
+
+    const report = await parts.reconciler.endOrphanedProcesses();
+
+    expect(parts.signalled).toStrictEqual([]);
+    expect(report.unconfirmed).toStrictEqual([TERMINAL_UUID]);
+    expect(parts.logger.infos.map((line) => line.message)).toContainEqual(
+      expect.stringContaining('could not be confirmed')
+    );
+  });
+
+  it('ends nothing when the CLI names another conversation at that pid', async () => {
+    // The whole point of asking twice: a stranger's `claude` on a reused pid
+    // passes every rule this window can apply by itself.
+    const parts = corroborated();
+    parts.agents.value = running(OUTSIDE_SESSION, CLAUDE_PID);
+
+    const report = await parts.reconciler.endOrphanedProcesses();
+
+    expect(parts.signalled).toStrictEqual([]);
+    expect(report.unconfirmed).toStrictEqual([TERMINAL_UUID]);
+  });
+
+  it('waits for the pid to stop answering before it reports the record ended', async () => {
+    // `TerminateProcess` is asynchronous, and both gates of the restore read the
+    // machine straight afterwards (`deadPids` by signal 0, `session-listed` by
+    // the CLI). Without this wait the acceptance of the whole step floats.
+    const parts = corroborated();
+    const pass = parts.reconciler.endOrphanedProcesses();
+    await settled();
+
+    expect(parts.scheduler.live).toHaveLength(1);
+    parts.gone.add(CLAUDE_PID);
+    parts.scheduler.elapse();
+
+    expect((await pass).ended).toStrictEqual([TERMINAL_UUID]);
+  });
+
+  it('says out loud when a process it ended is still answering after the ceiling', async () => {
+    const parts = corroborated();
+    const pass = parts.reconciler.endOrphanedProcesses();
+
+    for (let step = 0; step < 200; step += 1) {
+      await settled();
+      if (parts.scheduler.live.length === 0) {
+        break;
+      }
+      parts.scheduler.elapse();
+    }
+
+    const report = await pass;
+    expect(report.survived).toStrictEqual([CLAUDE_PID]);
+    expect(report.ended).toStrictEqual([]);
+    expect(parts.logger.warnings.map((line) => line.message)).toContainEqual(
+      expect.stringContaining('did not stop')
+    );
+  });
+
+  it('changes nothing when the base could not be read', async () => {
+    const parts = corroborated();
+    parts.base.failure = new Error('the storage directory is gone');
+
+    const report = await parts.reconciler.endOrphanedProcesses();
+
+    expect(parts.signalled).toStrictEqual([]);
+    expect(report.ended).toStrictEqual([]);
+  });
+
+  it('carries on when the platform refuses the pid, because a process already gone is the ordinary case', async () => {
+    const parts = corroborated();
+    parts.unsignallable.add(CLAUDE_PID);
+    parts.gone.add(CLAUDE_PID);
+
+    const report = await parts.reconciler.endOrphanedProcesses();
+
+    expect(report.ended).toStrictEqual([TERMINAL_UUID]);
+    expect(parts.signalled).toStrictEqual([]);
   });
 });
 

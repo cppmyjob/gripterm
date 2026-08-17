@@ -17,9 +17,9 @@
     "test": "tsc -p tsconfig.eslint.json && jest",
     "test:coverage": "tsc -p tsconfig.eslint.json && jest --coverage",
     "build:integration": "tsc -p tsconfig.integration.json",
-    "test:integration": "pnpm run build:extension && pnpm run build:integration && vscode-test",
+    "test:integration": "pnpm run build && pnpm run build:extension && pnpm run build:integration && vscode-test",
     "package": "pnpm run build && pnpm run build:extension && pnpm --filter gripterm run package",
-    "test:acceptance": "pnpm run build:extension && tsc -p tsconfig.acceptance.json && node tests/acceptance/run.mjs"
+    "test:acceptance": "pnpm run build && pnpm run build:extension && tsc -p tsconfig.acceptance.json && node tests/acceptance/run.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

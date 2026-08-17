@@ -213,10 +213,12 @@ export class FakeTerminalHandle implements TerminalHandle {
   }
 }
 
-export class InMemoryTerminalGateway implements TerminalGateway {
+export class InMemoryTerminalGateway implements TerminalGateway, Disposable {
   public readonly specs: TerminalSpec[] = [];
   /** The pid every terminal this gateway creates will report. */
   public pid: number | null = null;
+  /** Whether this gateway has been let go of. See `dispose`. */
+  public disposed = false;
   /**
    * Which engine this gateway claims to be. Settable, because the whole point of
    * the field on the port is that the record repeats THIS and not a setting.
@@ -265,6 +267,18 @@ export class InMemoryTerminalGateway implements TerminalGateway {
   /** Forgets a terminal, as the editor does once it is gone. */
   public forget(terminalId: TerminalId): void {
     this._handles.delete(terminalId.value);
+  }
+
+  /**
+   * Lets go of every terminal, as `PtyTerminalGateway.dispose` does.
+   *
+   * The forgetting is the part that matters to a test rather than the flag: a
+   * rule that has to read the running terminals BEFORE ending them (M3.5) can
+   * only be shown to by a double that has nothing left to read afterwards.
+   */
+  public dispose(): void {
+    this.disposed = true;
+    this._handles.clear();
   }
 }
 

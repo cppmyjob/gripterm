@@ -415,6 +415,40 @@ suite('the own engine: what it keeps until there is somewhere to put it', () => 
       gateway.dispose();
     }
   });
+
+  test('ends its terminals as a window leaving, not as a disposal, when the whole gateway goes', async () => {
+    /*
+     * The difference П7 stands on (M3.5). The two are one act to a pty and
+     * opposite acts to a record: `extension` is a terminal that was ended, while
+     * `shutdown` is a window that left -- and only the second leaves the record
+     * restorable, because our terminals are transient and every reload closes
+     * all of them. Flattened, a reload would stamp `closedAt` on everything and
+     * bring nothing back.
+     *
+     * Asserted here rather than trusted from `exitVerdict`'s own table: what
+     * that table cannot say is which CAUSE this path feeds it.
+     */
+    const log = new CollectedLog();
+    const gateway = await ownGateway(log);
+    const handle = await gateway.create({
+      terminalId: idFor('0007'),
+      name: 'gripterm-own-shutdown',
+      cwd: os.tmpdir(),
+      env: {},
+      shellPath: nodePath(),
+      shellArgs: ['-e', 'setInterval(() => {}, 1000);'],
+    });
+    const exits: { readonly code: number | undefined, readonly reason: string }[] = [];
+    handle.onDidClose((exit) => {
+      exits.push(exit);
+    });
+
+    gateway.dispose();
+    await waitFor('the terminal to report its end', () => exits.length > 0);
+
+    assert.deepEqual(exits, [{ code: undefined, reason: 'shutdown' }]);
+    assert.deepEqual(gateway.listKnown(), [], 'a gateway that let go still lists its terminals');
+  });
 });
 
 suite('the own engine: the fallback a person has to be able to hear', () => {

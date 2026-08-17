@@ -40,6 +40,7 @@ import {
   claudeSettingsLocations,
   claudeTranscriptsDirectory,
   describeCliVersion,
+  endOwnTerminals,
   findExecutable,
   gatherRestoreInputs,
   isProcessThere,
@@ -48,6 +49,7 @@ import {
   ownerRefFor,
   planRestore,
   planUnaskedCleanup,
+  sendKillSignal,
   sendSignalZero,
   probeVersionOutput,
   readAgentListing,
@@ -76,6 +78,7 @@ import type {
   TerminalGateway,
   TerminalRepository,
   WatchReport,
+  WindowShutdownReport,
 } from '@gripterm/core';
 import { registerAdoptTerminal } from './commands/adopt-terminal';
 import { registerCleanUpStorage } from './commands/clean-up-storage';
@@ -230,6 +233,15 @@ export interface GriptermApi {
    * that copy. This is the object the person's window uses.
    */
   readonly makeGateway: typeof terminalGatewayFor;
+  /**
+   * What `deactivate` does to this window's own processes (M3.5).
+   *
+   * Exposed so that a suite can run the composed thing rather than a copy of it:
+   * the rule, the gateway this window is really using and the records it really
+   * holds. Safe to call in a test host BECAUSE of the rule -- under the editor's
+   * engine it ends nothing and disposes nothing, which is itself the assertion.
+   */
+  readonly endOwnProcesses: () => WindowShutdownReport;
   readonly lifecycle: TerminalLifecycleService;
   /**
    * The five things a person changes about their own record.
@@ -296,6 +308,21 @@ let presence: OwnerHeartbeat | null = null;
 let scribe: BaseWriter | null = null;
 
 /**
+ * What this window does to its own processes on the way out (M3.5, O4).
+ *
+ * Held here rather than left to `context.subscriptions` for two reasons, and
+ * both are about the moment it happens. The subscriptions are disposed AFTER
+ * `deactivate` resolves, so a flush that took its time would spend the shutdown
+ * budget before anything killed anything; and the second half of the act -- a
+ * synchronous `process.kill` on the pid we wrote down -- has to run while this
+ * host is still there to run it.
+ *
+ * `null` under the editor's engine is not what stops it: the rule itself refuses
+ * that engine (O5). This is `null` only before activation has got that far.
+ */
+let farewell: (() => WindowShutdownReport) | null = null;
+
+/**
  * Entry point and composition root.
  *
  * Everything with behaviour lives in `adapters/` (the editor as seen by the
@@ -341,7 +368,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     editor: editorIdentity(),
     logger,
   });
+  // Still a subscription as well, and deliberately: `deactivate` covers the
+  // ordinary way out, this covers the extension being disabled under a window
+  // that stays open. Both ends are idempotent -- a gateway that has let go of
+  // its terminals has none to let go of twice.
   context.subscriptions.push({ dispose: () => { gateway.dispose(); } });
+  const endOwnProcesses = (): WindowShutdownReport =>
+    endOwnTerminals({ gateway, entries: registry.own(), endProcess: sendKillSignal, logger });
+  farewell = endOwnProcesses;
 
   const storage = new StorageLayout(readStorageDir(logger));
   const store = await prepareStorage(storage, logger);
@@ -417,6 +451,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
           ? { kind: 'unavailable', reason: readiness.reason }
           : await readAgentListing(readiness.cliPath, AGENT_LISTING_TIMEOUT_MS),
       isRunning: (pid) => isProcessThere(pid, sendSignalZero),
+      endProcess: sendKillSignal,
       clock,
       scheduler: new SystemScheduler(),
       logger,
@@ -641,6 +676,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     })
   );
 
+  // BEFORE the machine is read, not merely before the restore (M3.5). The world
+  // below is gathered once and every gate of the restore is answered from it, so
+  // a process ended after that gathering would still be counted as running --
+  // and the records of the window that left it behind would be refused while
+  // nothing was running them at all.
+  await endTheirProcesses({ context, reconciler, logger });
+
   // One reading for both of the decisions below -- see `surveyTheMachine`.
   const world = await surveyTheMachine({ context, gather, logger });
   const restore = await bringTerminalsBack({ world, orchestrator, readiness, logger });
@@ -713,6 +755,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     registry,
     gateway,
     makeGateway: terminalGatewayFor,
+    endOwnProcesses,
     lifecycle,
     metadata,
     identity,
@@ -806,6 +849,48 @@ async function bringTerminalsBack(parts: {
 type MachineSurvey =
   | { readonly kind: 'read', readonly inputs: RestoreInputs }
   | { readonly kind: 'unread', readonly reason: string };
+
+/**
+ * Ends the processes of windows that are gone, before anything else looks at the
+ * machine (M3.5, O4).
+ *
+ * **Refused in a test host, for a sharper version of `surveyTheMachine`'s
+ * reason.** That one would start somebody's conversations as a side effect of a
+ * test run; this one would END them, and nothing takes that back. The
+ * integration suite drives the pass explicitly instead, over a record and a
+ * process it made itself.
+ *
+ * A window with no shared base has no other window's records to read, so there
+ * is nothing for it to do here.
+ *
+ * Nothing it does stops an activation. A failure is already a sentence in the
+ * log (`endOrphanedProcesses` catches its own), and a window that could not tidy
+ * the machine is a window with somebody's process still running -- which is what
+ * it had a moment ago.
+ */
+async function endTheirProcesses(parts: {
+  readonly context: vscode.ExtensionContext;
+  readonly reconciler: Reconciler | null;
+  readonly logger: Logger;
+}): Promise<void> {
+  if (parts.context.extensionMode === vscode.ExtensionMode.Test) {
+    parts.logger.info('this window ended nobody\'s processes', {
+      reason: 'this is a test host, and a test run must not end anybody\'s conversations',
+    });
+    return;
+  }
+  if (parts.reconciler === null) {
+    return;
+  }
+
+  const report = await parts.reconciler.endOrphanedProcesses();
+  if (report.ended.length > 0 || report.survived.length > 0) {
+    parts.logger.info('processes left behind by windows that are gone were ended', {
+      ended: report.ended.length,
+      survived: report.survived.length,
+    });
+  }
+}
 
 async function surveyTheMachine(parts: {
   readonly context: vscode.ExtensionContext;
@@ -1049,6 +1134,23 @@ async function prepareStorage(layout: StorageLayout, logger: Logger): Promise<St
 }
 
 export async function deactivate(): Promise<void> {
+  /*
+   * FIRST, and before anything is awaited (M3.5, O4).
+   *
+   * Everything else in this function writes down what has already happened, and
+   * can be caught up with; this is the one act that has to happen while the
+   * processes and this host are both still there. A window whose flush took its
+   * time would otherwise spend the platform's shutdown budget before a single
+   * `claude` of ours was ended.
+   *
+   * Under the editor's engine it does nothing at all, by its own rule: those
+   * terminals are the editor's and a `claude` in one of them outlives the host
+   * on purpose (O5).
+   */
+  const ending = farewell;
+  farewell = null;
+  ending?.();
+
   // Everything else is owned by the context. These three are awaited, and their
   // order is the design rather than the order they were written in: stop taking
   // events, write down what we have, and only then say we are gone. Reversed, a

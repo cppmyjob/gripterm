@@ -1,6 +1,9 @@
+import { once } from 'node:events';
+import { spawn } from 'node:child_process';
 import {
   isProcessThere,
   pidsEstablishedGone,
+  sendKillSignal,
   sendSignalZero,
 } from '../../packages/core/src/infrastructure/process-liveness';
 import type { SignalProbe } from '../../packages/core/src/infrastructure/process-liveness';
@@ -89,4 +92,40 @@ describe('collecting the pids established to be gone', () => {
   it('answers an empty set for an empty question', () => {
     expect(pidsEstablishedGone([], answering).size).toBe(0);
   });
+});
+
+describe('the signal that ends a process', () => {
+  /*
+   * The one act in this build that nothing takes back, so it is tested against a
+   * real process rather than against a double -- of this suite's own making, and
+   * ended by the function under test. A stub here would assert that we call what
+   * we call.
+   *
+   * The guard in front of it is not a formality either. `process.kill(0, ...)`
+   * does not signal "process zero": it signals the CALLER's own process group,
+   * so a stray zero would be this extension killing the editor that loaded it.
+   */
+  it('ends a process of its own making, and the machine agrees it is gone', async () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => undefined, 1000);'], {
+      stdio: 'ignore',
+    });
+    await once(child, 'spawn');
+    const { pid } = child;
+    expect(pid).toBeDefined();
+    expect(isProcessThere(pid ?? 0, sendSignalZero)).toBe(true);
+
+    sendKillSignal(pid ?? 0);
+    await once(child, 'exit');
+
+    expect(isProcessThere(pid ?? 0, sendSignalZero)).toBe(false);
+  });
+
+  it.each([0, -1, -4242, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    'refuses %p, because it is not a pid',
+    (notAPid) => {
+      expect(() => {
+        sendKillSignal(notAPid);
+      }).toThrow(RangeError);
+    }
+  );
 });

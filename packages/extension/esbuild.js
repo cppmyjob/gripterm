@@ -138,7 +138,56 @@ function copyNodePty() {
   console.log(`node-pty: ${String(copied.files)} files, ${megabytes} MB copied from ${packageDir}`);
 }
 
+/**
+ * Refuses to bundle a core that is older than its own source (found 2026-08-17,
+ * M3.5).
+ *
+ * `@gripterm/core` resolves through its `main` to `dist/index.js`, so what this
+ * bundle contains is the COMPILED core -- and nothing in `build:extension`
+ * compiles it. Until this check existed, an integration run after a change to
+ * the core tested the previous build of it and said nothing: the suite was green
+ * about code that was not in the bundle. It was found by a mutation that
+ * survived, which is exactly the shape of defect this repository keeps meeting
+ * (M1.5, M2.11) -- a run that measures something other than what it names.
+ *
+ * The scripts now build first, and this is the second lock: it is what a person
+ * running `node esbuild.js` by hand, or a script written next year, meets
+ * instead of a silent stale bundle.
+ */
+function refuseAStaleCore() {
+  const core = path.join(__dirname, '..', 'core');
+  const source = newestUnder(path.join(core, 'src'));
+  const built = newestUnder(path.join(core, 'dist'));
+  if (source === null || (built !== null && built >= source)) {
+    return;
+  }
+  throw new Error(
+    'the compiled @gripterm/core is older than its source, and this bundle would carry the old one. ' +
+    'Run `pnpm run build` first -- `build:extension` bundles `packages/core/dist`, it does not compile it.'
+  );
+}
+
+/** The newest modification time under a directory, or `null` when there is nothing to read. */
+function newestUnder(directory) {
+  let entries;
+  try {
+    entries = fs.readdirSync(directory, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  let newest = null;
+  for (const entry of entries) {
+    const full = path.join(directory, entry.name);
+    const at = entry.isDirectory() ? newestUnder(full) : fs.statSync(full).mtimeMs;
+    if (at !== null && (newest === null || at > newest)) {
+      newest = at;
+    }
+  }
+  return newest;
+}
+
 async function main() {
+  refuseAStaleCore();
   copyNodePty();
   if (watch) {
     const ctx = await esbuild.context(options);

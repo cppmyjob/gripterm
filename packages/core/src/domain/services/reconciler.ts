@@ -1,7 +1,9 @@
+import { confirmOrphans, orphanCandidates } from './orphan-processes';
 import { isWitnessedEnd } from './terminal-state-machine';
 import { precedesBoot } from './boot-window';
 import { processGone } from '../events/terminal-event';
 import type { AgentListing } from '../entities/agent-record';
+import type { OrphanCandidate, OrphanEvidence } from './orphan-processes';
 import type { Clock } from '../ports/clock';
 import type { Disposable } from '../ports/disposable';
 import type { Logger } from '../ports/logger';
@@ -23,6 +25,25 @@ import type { TerminalRepository } from '../repositories/terminal-repository';
  */
 export const DEFAULT_RECONCILE_INTERVAL_MS = 30_000;
 
+/**
+ * How long a process we ended is given to stop answering, and how often it is
+ * asked. [П]
+ *
+ * The wait exists because `TerminateProcess` is asynchronous while both gates of
+ * the restore read the machine immediately afterwards -- `deadPids` by signal 0
+ * (`gatherRestoreInputs`) and `session-listed` by the CLI's own listing. Without
+ * it, whether a window brings its terminals back would depend on which of two
+ * things the operating system finished first.
+ *
+ * Measured 2026-08-17 (A43) on this machine: a `claude` sent `SIGKILL` stopped
+ * answering signal 0 in **1 ms**. Two seconds is therefore a ceiling for a
+ * machine under load rather than an expectation, and it is a ceiling rather than
+ * a promise: a process still answering when it runs out is reported, not waited
+ * for again.
+ */
+const PROCESS_END_STEP_MS = 50;
+const PROCESS_END_ATTEMPTS = 40;
+
 /** What one sweep found. Everything in it is a thing that changed, not a total. */
 export interface ReconcileReport {
   /** `TerminalId.value` of the records that moved to `orphaned` in this sweep. */
@@ -37,6 +58,22 @@ const NOTHING_FOUND: ReconcileReport = Object.freeze({
   orphaned: Object.freeze([]),
   collected: Object.freeze([]),
   unknownSessions: Object.freeze([]),
+});
+
+/** What the pass over other windows' leftovers ended, and what it would not. */
+export interface OrphanEndReport {
+  /** `TerminalId.value` of the records that have no process any more. */
+  readonly ended: readonly string[];
+  /** Pids that were signalled and were still answering when the patience ran out. */
+  readonly survived: readonly number[];
+  /** `TerminalId.value` of records naming a process the machine would not vouch for. */
+  readonly unconfirmed: readonly string[];
+}
+
+const NOTHING_ENDED: OrphanEndReport = Object.freeze({
+  ended: Object.freeze([]),
+  survived: Object.freeze([]),
+  unconfirmed: Object.freeze([]),
 });
 
 /** The liveness of the windows on this machine moved. Redraw. */
@@ -67,6 +104,14 @@ export interface ReconcilerOptions {
    * would disagree with the first exactly where nobody looks.
    */
   readonly isRunning: (pid: number) => boolean;
+  /**
+   * Ends a process by pid, or throws the way `process.kill` does.
+   *
+   * Separate from `isRunning` and named for the act rather than for the shape:
+   * these two have the same signature and opposite consequences, and the whole
+   * of `endOrphanedProcesses` stands between them.
+   */
+  readonly endProcess: (pid: number) => void;
   readonly clock: Clock;
   readonly scheduler: Scheduler;
   readonly logger: Logger;
@@ -212,6 +257,66 @@ export class Reconciler implements Disposable {
     return await this.sweep();
   }
 
+  /**
+   * Ends the processes left behind by windows that are gone (M3.5, O4).
+   *
+   * **Its own pass, and not an extension of `_orphans`.** That one walks
+   * `registry.own()` -- the records of THIS window -- and an orphan is by
+   * definition somebody else's. This one reads the base whole.
+   *
+   * **It runs before the machine is surveyed for a restore, not merely before
+   * the restore.** `deadPids` is gathered once, and a process ended after that
+   * gathering does not change the answer `mayBeRunning` gives in the same
+   * activation: the records of the window that died would be refused while their
+   * processes were already gone. That is why the wait below exists as well --
+   * `TerminateProcess` is asynchronous, and both gates of the restore read the
+   * machine straight after this returns.
+   *
+   * **Called once, at activation, and deliberately not from the sweep.** The
+   * periodic pass would close a real gap -- a window that dies while this one is
+   * open leaves its process until somebody's next activation -- at the price of
+   * running the one irreversible rule in this build every thirty seconds in
+   * every open window. The owner chose the narrow door (2026-08-17); the gap is
+   * named in the plan's register rather than left to be discovered.
+   *
+   * Every failure changes nothing, like every other pass here: a machine that
+   * could not be read has not said that anything is missing.
+   */
+  public async endOrphanedProcesses(): Promise<OrphanEndReport> {
+    const evidence = await this._lookForOrphans();
+    if (evidence === null) {
+      return NOTHING_ENDED;
+    }
+
+    const candidates = orphanCandidates(evidence);
+    if (candidates.length === 0) {
+      // The ordinary machine, where no window has died: the CLI is never asked,
+      // and the whole pass costs one directory read that the activation was
+      // going to do anyway. Asking would cost 0.56-0.70 s (A24) at the moment a
+      // person is waiting for their list.
+      return NOTHING_ENDED;
+    }
+
+    const { confirmed, unconfirmed } = confirmOrphans(candidates, await this._options.readAgents());
+    for (const candidate of unconfirmed) {
+      this._options.logger.info(
+        'a record names a process of ours that the machine could not be confirmed to be running, so nothing was ended',
+        this._describe(candidate)
+      );
+    }
+
+    const ended: string[] = [];
+    const survived: number[] = [];
+    for (const candidate of confirmed) {
+      if (await this._end(candidate)) {
+        ended.push(candidate.entry.terminalId.value);
+      } else {
+        survived.push(candidate.pid);
+      }
+    }
+    return { ended, survived, unconfirmed: unconfirmed.map((one) => one.entry.terminalId.value) };
+  }
+
   /** The whole map, in the shape the restore planner takes it (M2.10). */
   public liveness(): ReadonlyMap<string, OwnerLiveness> {
     return this._liveness;
@@ -315,6 +420,99 @@ export class Reconciler implements Disposable {
       });
       return null;
     }
+  }
+
+  /**
+   * The base and the owners, in the shape the ending rule reads them.
+   *
+   * The liveness it builds is NOT kept. `_liveness` is the map the list is drawn
+   * from, and filling it here would have this window answering `dead` about
+   * other windows before it has drawn anything -- a change to what M2 shows,
+   * made by a pass that exists to end processes. The map here is a means to one
+   * decision and ends with it.
+   */
+  private async _lookForOrphans(): Promise<OrphanEvidence | null> {
+    try {
+      const entries = await this._options.repository.readAll();
+      const ownerLiveness = new Map<string, OwnerLiveness>();
+      for (const row of await this._options.presence.survey()) {
+        ownerLiveness.set(row.name, row.liveness);
+      }
+      // Last and unconditionally, as in `_remember`: this window is the process
+      // asking, and its own records must never be candidates.
+      ownerLiveness.set(this._options.self.value, 'live');
+      return {
+        entries,
+        ownerLiveness,
+        // Both terms of the boot rule from one instant.
+        nowMs: this._options.clock.now().getTime(),
+        uptimeSeconds: this._options.uptimeSeconds(),
+      };
+    } catch (cause: unknown) {
+      this._options.logger.warn(
+        'the machine could not be read, so no process of a window that is gone was ended',
+        { reason: String(cause) }
+      );
+      return null;
+    }
+  }
+
+  /** Ends one process and waits for the machine to agree that it is gone. */
+  private async _end(candidate: OrphanCandidate): Promise<boolean> {
+    // At `warn` rather than at `info`, and it is the only line in this build that
+    // earns it for something that is not a fault: this is the one act nothing
+    // takes back, so it has to survive whatever a person filters their log by.
+    this._options.logger.warn(
+      'a process left running by a window that is gone is being ended',
+      this._describe(candidate)
+    );
+    try {
+      this._options.endProcess(candidate.pid);
+    } catch (cause: unknown) {
+      // Ordinary rather than exceptional: between the CLI's answer and this call
+      // the process may simply have finished. The wait below is what decides.
+      this._options.logger.info('a process being ended did not take the signal', {
+        pid: candidate.pid,
+        cause: String(cause),
+      });
+    }
+
+    // One question per turn and no second copy of it after the loop: the machine
+    // is asked, and only then is the patience spent. A trailing re-check would
+    // be the same question asked in a place no test reaches.
+    for (let attempt = 0; ; attempt += 1) {
+      if (!this._options.isRunning(candidate.pid)) {
+        return true;
+      }
+      if (attempt >= PROCESS_END_ATTEMPTS) {
+        break;
+      }
+      await this._pause(PROCESS_END_STEP_MS);
+    }
+    this._options.logger.warn(
+      'a process this window ended did not stop within the time it is given, so a restore of that record will be refused',
+      this._describe(candidate)
+    );
+    return false;
+  }
+
+  private async _pause(ms: number): Promise<void> {
+    await new Promise<void>((resolve) => {
+      this._options.scheduler.after(ms, () => {
+        resolve();
+      });
+    });
+  }
+
+  private _describe(candidate: OrphanCandidate): Record<string, string | number> {
+    return {
+      terminalId: candidate.entry.terminalId.value,
+      pid: candidate.pid,
+      // The conversation, because after this the record is the only thing that
+      // names it and `claude --resume <id>` is what reaches it.
+      sessionId: candidate.entry.sessionId.value,
+      owner: candidate.entry.owner.ownerId.value,
+    };
   }
 
   /** Replaces the map, and says whether anything in it moved. */
