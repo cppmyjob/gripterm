@@ -44,5 +44,27 @@ module.exports = {
       lines: 80,
       statements: 80,
     },
+    // The pure rules of M3.3, at the number the plan promises for them. A
+    // promise that lives only in a document is a promise nobody checks, and
+    // these two are small enough that the global average would hide a whole
+    // branch of either. Both are total functions of their arguments -- no
+    // clock, no store, no editor -- so there is nothing here that 100% would
+    // be dishonest about.
+    //
+    // `domain/ports/terminal-screen.ts` is deliberately NOT here: it is types
+    // and doc comments, so it has no executable line for a threshold to be
+    // about, and Istanbul reports nothing for it at all.
+    'packages/core/src/domain/services/terminal-exit-verdict.ts': {
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100,
+    },
+    'packages/core/src/domain/services/screen-buffer.ts': {
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100,
+    },
   },
 };

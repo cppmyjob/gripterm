@@ -5,11 +5,13 @@ import type {
   IdGenerator,
   Logger,
   Scheduler,
+  ScreenExit,
   TerminalExit,
   TerminalExitReason,
   TerminalGateway,
   TerminalHandle,
   TerminalId,
+  TerminalScreen,
   TerminalSpec,
 } from '../../packages/core/src/index';
 
@@ -257,6 +259,96 @@ export class InMemoryTerminalGateway implements TerminalGateway {
   /** Forgets a terminal, as the editor does once it is gone. */
   public forget(terminalId: TerminalId): void {
     this._handles.delete(terminalId.value);
+  }
+}
+
+/**
+ * A terminal's byte channel with no pty behind it: a test writes into it, makes
+ * it produce output, and ends it.
+ *
+ * Here rather than in `packages/core/src` on purpose, and the reason is the one
+ * already stated at the top of this file: the core index is consumed as
+ * CommonJS and esbuild cannot tree-shake it, so anything exported from there
+ * ships inside the extension bundle. `InMemoryTerminalRepository` earns its
+ * place there by being what the product actually runs on; a screen with no
+ * process behind it never is, and would travel to every user as dead weight.
+ *
+ * It answers `over` the way a real one does rather than the way a fake finds
+ * convenient: after the process has ended, `write` and `resize` are IGNORED and
+ * not thrown out of. That is not politeness -- measured 2026-08-17 (M3.2 stage
+ * B, §8), node-pty throws `Cannot resize a pty that has already exited`, and a
+ * pty exits on its own schedule, so every caller that had to check first would
+ * be checking in a race it cannot win.
+ */
+export class InMemoryTerminalScreen implements TerminalScreen {
+  /** Everything written towards the process, in order. */
+  public readonly written: string[] = [];
+  /** Every size the screen was told to take, in order. */
+  public readonly sizes: { readonly cols: number, readonly rows: number }[] = [];
+  public disposed = false;
+
+  private readonly _dataListeners = new Set<(chunk: string) => void>();
+  private readonly _exitListeners = new Set<(exit: ScreenExit) => void>();
+  private _over = false;
+
+  public write(data: string): void {
+    if (this._over) {
+      return;
+    }
+    this.written.push(data);
+  }
+
+  public resize(cols: number, rows: number): void {
+    if (this._over) {
+      return;
+    }
+    this.sizes.push({ cols, rows });
+  }
+
+  public onData(listener: (chunk: string) => void): Disposable {
+    this._dataListeners.add(listener);
+    return {
+      dispose: (): void => {
+        this._dataListeners.delete(listener);
+      },
+    };
+  }
+
+  public onExit(listener: (exit: ScreenExit) => void): Disposable {
+    this._exitListeners.add(listener);
+    return {
+      dispose: (): void => {
+        this._exitListeners.delete(listener);
+      },
+    };
+  }
+
+  public dispose(): void {
+    this.disposed = true;
+    this._over = true;
+    this._dataListeners.clear();
+    this._exitListeners.clear();
+  }
+
+  /** Drives output, as the process behind a real screen would. */
+  public emit(chunk: string): void {
+    if (this._over) {
+      return;
+    }
+    for (const listener of this._dataListeners) {
+      listener(chunk);
+    }
+  }
+
+  /** Ends the process behind the screen. Reports once however often it is called. */
+  public end(exit: ScreenExit): void {
+    if (this._over) {
+      return;
+    }
+    this._over = true;
+    for (const listener of this._exitListeners) {
+      listener(exit);
+    }
   }
 }
 

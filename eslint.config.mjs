@@ -37,6 +37,29 @@ import { createTypeScriptImportResolver } from 'eslint-import-resolver-typescrip
  * nobody can review later, and this file is exactly where such decisions hide.
  */
 
+/**
+ * The three one-way boundaries, as `no-restricted-imports` patterns.
+ *
+ * Named here rather than written out where they are used, because they have to be
+ * written out MORE THAN ONCE: a later config object replaces the options of a
+ * rule instead of merging with them, so every object that touches this rule has
+ * to restate every pattern that should still apply to the files it matches. A
+ * shared constant makes a forgotten pattern a missing name in a list rather than
+ * a boundary that silently stops existing. `tests/boundaries.test.ts` asks the
+ * linter whether it worked.
+ */
+const NO_EDITOR_API = { group: ['vscode'], message: 'core must not depend on the editor API' };
+
+const NO_NATIVE_PTY = {
+  group: ['node-pty', 'node-pty/*'],
+  message: 'node-pty belongs to packages/extension/src/adapters and nowhere else',
+};
+
+const NO_AGENT_CLI = {
+  group: ['**/agents/**'],
+  message: 'the neutral domain must not know which agent CLI it is observing',
+};
+
 export default tseslint.config(
   {
     ignores: [
@@ -345,6 +368,26 @@ export default tseslint.config(
 
   // --- the architectural boundary ---------------------------------------------
   {
+    // The native boundary (M3.3, §4.2), and it is the widest of the three: ONE
+    // directory in the whole repository may know that a native pty addon exists.
+    // Everything else -- the core, the composition root, the webview host, the
+    // suites -- reaches a terminal through `TerminalScreen`, so the domain stays
+    // buildable and testable by plain `jest` with no native build anywhere.
+    //
+    // What it CANNOT catch, said here rather than discovered later: it reads
+    // imports. The adapter loads the addon through a lazy `require` with a
+    // computed path -- on purpose, because a static import would turn a missing
+    // addon into the failure of the whole extension instead of a fallback to the
+    // `editor` engine (O5) -- and a computed `require` anywhere else would pass
+    // this rule in silence. Review is the only thing that sees that.
+    files: ['**/*.ts'],
+    ignores: ['packages/extension/src/adapters/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': ['error', { patterns: [NO_NATIVE_PTY] }],
+    },
+  },
+
+  {
     files: ['packages/core/**/*.ts'],
     rules: {
       // The domain must not know the editor exists. This is the central
@@ -357,7 +400,11 @@ export default tseslint.config(
       '@typescript-eslint/no-restricted-imports': [
         'error',
         {
-          patterns: [{ group: ['vscode'], message: 'core must not depend on the editor API' }],
+          // `NO_NATIVE_PTY` is repeated from the block above for the reason
+          // stated at the constants: this object REPLACES the options of that
+          // one for every file it matches, and leaving it out would exempt the
+          // core -- the package the native boundary exists for -- from it.
+          patterns: [NO_EDITOR_API, NO_NATIVE_PTY],
         },
       ],
     },
@@ -385,20 +432,14 @@ export default tseslint.config(
     files: ['packages/core/src/domain/**/*.ts'],
     ignores: ['packages/core/src/domain/agents/**/*.ts'],
     rules: {
-      // Both patterns are repeated here on purpose. A later config object
+      // All three patterns are repeated here on purpose. A later config object
       // REPLACES the options of the same rule rather than merging with them, so
-      // omitting the `vscode` entry would quietly switch the first boundary off
-      // for exactly the files it matters most for.
+      // omitting the `vscode` or the `node-pty` entry would quietly switch that
+      // boundary off for exactly the files it matters most for.
       '@typescript-eslint/no-restricted-imports': [
         'error',
         {
-          patterns: [
-            { group: ['vscode'], message: 'core must not depend on the editor API' },
-            {
-              group: ['**/agents/**'],
-              message: 'the neutral domain must not know which agent CLI it is observing',
-            },
-          ],
+          patterns: [NO_EDITOR_API, NO_NATIVE_PTY, NO_AGENT_CLI],
         },
       ],
     },

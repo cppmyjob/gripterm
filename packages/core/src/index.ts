@@ -116,6 +116,17 @@ export {
   type TerminalHandle,
   type TerminalSpec,
 } from './domain/ports/terminal-gateway';
+export { type ScreenExit, type TerminalScreen } from './domain/ports/terminal-screen';
+export {
+  TERMINAL_EXIT_CAUSES,
+  exitVerdict,
+  type TerminalExitCause,
+} from './domain/services/terminal-exit-verdict';
+export {
+  SCREEN_BUFFER_CEILING_CHARS,
+  ScreenBuffer,
+  type ScreenReplay,
+} from './domain/services/screen-buffer';
 export {
   FRESH_HEARTBEAT_MS,
   HEARTBEAT_INTERVAL_MS,

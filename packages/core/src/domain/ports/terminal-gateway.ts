@@ -1,5 +1,6 @@
 import type { TerminalId } from '../entities/terminal-id';
 import type { Disposable } from './disposable';
+import type { TerminalScreen } from './terminal-screen';
 
 /**
  * Everything the editor needs in order to create the terminal.
@@ -120,6 +121,22 @@ export interface TerminalHandle {
   rename: (name: string) => void;
   dispose: () => void;
   onDidClose: (listener: (exit: TerminalExit) => void) => Disposable;
+  /**
+   * This terminal's bytes, in both directions -- when there are any to be had.
+   *
+   * **Absent from `editor` and present on `own`, and that is a line of the
+   * contract rather than something a caller finds out** (§4.1). The reason it
+   * cannot be a promise of the port is a fact about the platform:
+   * `onDidWriteTerminalData` does not exist in the stable API, so a gateway that
+   * declared bytes would force `VsCodeTerminalGateway` to throw "not supported"
+   * from a method its own port advertises. Optional means every reader begins by
+   * handling the terminal it cannot see inside.
+   *
+   * Per terminal, never shared: each one has its own live screen (owner's
+   * decision 2026-08-14), which is what makes switching between two agents lose
+   * nothing and redraw nothing.
+   */
+  readonly screen?: TerminalScreen;
 }
 
 export interface TerminalGateway {

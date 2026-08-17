@@ -8,6 +8,7 @@ import {
   TerminalId,
   TerminalLifecycleService,
   TerminalStateMachine,
+  exitVerdict,
   type AgentCommand,
   type AgentCommandFactory,
   type LaunchIntent,
@@ -45,6 +46,10 @@ const STARTED_AT = new Date('2026-08-11T12:00:00.000Z');
 /** A terminal id no stand ever produces. */
 const ABSENT = '11111111-2222-4333-8444-555555555555';
 const EXECUTABLE = 'C:/Users/x/.local/bin/claude.exe';
+
+/** Both measured under `IPty.kill()` on 2026-08-17 (M3.2 stage B, §2). */
+const CLAUDE_UNDER_KILL = 1;
+const SHELL_UNDER_KILL = -1073741510;
 
 class StubAgentCommands implements AgentCommandFactory {
   public readonly asked: { readonly terminalId: string, readonly intent: LaunchIntent }[] = [];
@@ -762,6 +767,49 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
     // this build is a thing that happens; a build that read its unknown answer
     // as consent is a build that throws conversations away on an upgrade.
     expect(await closing(undefined, 'launch', 'unknown')).toMatchObject({
+      restorable: true,
+      closedAt: null,
+    });
+  });
+
+  /*
+   * The two rows the `own` engine adds, fed through the rule that produces them
+   * rather than through a pair written out by hand (M3.3).
+   *
+   * They are here, in the consumer's own suite, because that is where the claim
+   * lives: `exitVerdict` dropping the code is not a preference about tidiness,
+   * it is the only thing standing between the measurement and a false event.
+   * Written against `exitVerdict` itself the assertion would say "the rule does
+   * what the rule says"; written here it says what the rule is FOR, and it goes
+   * red if either side changes.
+   */
+  it('does not call our own disposal of a launching terminal a failed launch', async () => {
+    // Measured 2026-08-17 (M3.2 stage B, §2): `claude` under `kill()` exits with
+    // 1, and `powershell` with -1073741510 -- the code is a property of the
+    // program, not of the killing. Passing it through would report a failed
+    // launch for every terminal ended while it was still starting, and under
+    // `own` ending a terminal IS disposing it.
+    const verdict = exitVerdict(CLAUDE_UNDER_KILL, undefined, 'we-disposed');
+
+    expect(await closing(verdict.code, 'launch', verdict.reason)).toMatchObject({
+      state: 'ended',
+      signals: ['ended'],
+      event: 'TerminalClosed',
+      restorable: true,
+      closedAt: null,
+    });
+  });
+
+  it('does not call a window reload a failed launch, nor a deliberate close', async () => {
+    // Why `deactivate` kills with its own cause (M3.5): a reload that stamped
+    // `closedAt` would bring nothing back, and П7 is the promise that everything
+    // the person did not close themselves does come back.
+    const verdict = exitVerdict(SHELL_UNDER_KILL, undefined, 'we-are-shutting-down');
+
+    expect(await closing(verdict.code, 'launch', verdict.reason)).toMatchObject({
+      state: 'ended',
+      signals: ['ended'],
+      event: 'TerminalClosed',
       restorable: true,
       closedAt: null,
     });
