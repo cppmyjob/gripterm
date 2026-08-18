@@ -190,6 +190,23 @@ suite('bringing conversations back', () => {
         gripterm.registry.get(entry.terminalId)?.owner.ownerId.value,
         gripterm.identity.ownerId.value
       );
+      /*
+       * And stamped with the engine that ANSWERED, which is where the second run
+       * of M3.10 gets its teeth on the restore path. The engine goes into the
+       * record from the gateway that just made the terminal (M3.4) rather than
+       * from the setting, so this line says the same true thing under both runs
+       * -- and fails the moment a run under `own` is quietly the editor's run,
+       * because then every record it writes says `editor`.
+       *
+       * It is not bookkeeping: reconciliation reads this field to decide whose
+       * processes it may end. A record saying `own` for a terminal the editor
+       * made hands a live conversation to the sweep (M2.16).
+       */
+      assert.equal(
+        gripterm.registry.get(entry.terminalId)?.engine,
+        gripterm.readiness.engine,
+        'the record was stamped with an engine this window is not on'
+      );
 
       /*
        * **A26 IS REOPENED, and this test is the place it was found** (2026-08-17,

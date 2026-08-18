@@ -1,7 +1,7 @@
 import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
 import { execFileSync } from 'node:child_process';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir, uptime } from 'node:os';
 import type { GriptermApi } from '../../packages/extension/src/extension';
@@ -42,6 +42,9 @@ const DEAD_WINDOW_FILE = `${DEAD_WINDOW}.json`;
 const ORPHAN_TERMINAL = '3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f';
 /** The conversation this test's own `claude` is started with, so the listing can be matched. */
 const ORPHAN_SESSION = 'd5e6f7a8-9b0c-4d1e-8f2a-3b4c5d6e7f80';
+/** The scaffold record the farewell test reads a launch recipe out of, and removes again. */
+const RECIPE_TERMINAL = '6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d';
+const RECIPE_SESSION = '7b8c9d0e-1f2a-4b3c-8d4e-5f6a7b8c9d0e';
 
 type MadeGateway = ReturnType<GriptermApi['makeGateway']>;
 type Spec = Parameters<MadeGateway['create']>[0];
@@ -130,6 +133,19 @@ function recordJson(now: number, engine: 'own' | 'editor'): string {
   });
 }
 
+/** The same shape with nothing running: what a record that has never been started looks like. */
+function noProcessJson(now: number): string {
+  return JSON.stringify({
+    state: 'idle',
+    lastEventAt: now,
+    currentTool: null,
+    lastAssistantMessage: null,
+    cost: null,
+    contextWindow: null,
+    pid: null,
+  });
+}
+
 function observedJson(now: number, pid: number): string {
   return JSON.stringify({
     state: 'idle',
@@ -162,6 +178,109 @@ async function pause(ms: number): Promise<void> {
   await new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+/** Waits for something to become true, and says what it was still waiting for when it gave up. */
+async function waitFor(what: string, answer: () => boolean, withinMs = 30_000): Promise<void> {
+  const deadline = Date.now() + withinMs;
+  while (!answer()) {
+    if (Date.now() > deadline) {
+      throw new Error(`waited ${String(withinMs)} ms for ${what}`);
+    }
+    await pause(100);
+  }
+}
+
+/** Waits until there is something to be had, and hands it back. */
+async function waitUntil<T>(what: string, answer: () => T | null, withinMs = 30_000): Promise<T> {
+  const deadline = Date.now() + withinMs;
+  for (;;) {
+    const found = answer();
+    if (found !== null) {
+      return found;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`waited ${String(withinMs)} ms for ${what}`);
+    }
+    await pause(100);
+  }
+}
+
+type Entry = Awaited<ReturnType<GriptermApi['lifecycle']['launch']>>;
+
+/** A record for the recipe below: no process, and an owner nothing is going to hear from. */
+function recipeJson(now: number): string {
+  return JSON.stringify({
+    terminalId: RECIPE_TERMINAL,
+    sessionId: RECIPE_SESSION,
+    sessionIdHistory: [],
+    owner: {
+      kind: 'window',
+      ownerId: 'integration-window-that-lent-a-recipe',
+      editorKind: 'vscode',
+      workspaceFolder: null,
+    },
+    metadata: { displayName: 'a record lent for its recipe', task: null, notes: [], tags: [], color: null },
+    launch: {
+      cwd: tmpdir(),
+      addDirs: [],
+      permissionMode: null,
+      agent: null,
+      model: null,
+      worktree: null,
+      mcpConfigPaths: [],
+      appendSystemPrompt: null,
+      extraEnv: {},
+    },
+    engine: 'editor',
+    createdAt: now,
+    closedAt: null,
+    revision: 1,
+  });
+}
+
+/**
+ * A launch recipe, read out of the store rather than built.
+ *
+ * `LaunchRecipe` is a class of the core, and a compiled integration suite cannot
+ * reach the core's constructors: it resolves `@gripterm/core` through
+ * `node_modules`, which an installed extension has none of. What it CAN do is
+ * read one back through the repository this window is using -- the same object
+ * that will read the record the launch below writes.
+ *
+ * The scaffold is removed before the launch returns it, so that nothing of this
+ * test's making is in the store while a real terminal of its own is running. It
+ * says `engine: editor` and carries no pid on purpose: for the second it exists
+ * it must be something no sweep would act on.
+ */
+async function recipeFromStore(gripterm: GriptermApi): Promise<Entry['launch']> {
+  const { repository, readiness } = gripterm;
+  assert.ok(repository, 'this window is not reading the shared store');
+  const directory = join(readiness.storageDir, 'terminals', RECIPE_TERMINAL);
+  try {
+    const now = Date.now();
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, 'record.json'), recipeJson(now), 'utf8');
+    await writeFile(join(directory, 'observed.json'), noProcessJson(now), 'utf8');
+    const entry = (await repository.readAll()).find((one) => one.terminalId.value === RECIPE_TERMINAL);
+    assert.ok(entry, 'the scaffold record this test wrote is not readable');
+    return entry.launch;
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+/** Everything a launch of this test's own left in the person's store, trash included. */
+async function cleanStore(storageDir: string, terminalId: string): Promise<void> {
+  await rm(join(storageDir, 'terminals', terminalId), { recursive: true, force: true });
+  const trash = join(storageDir, 'trash');
+  for (const stamp of await readdir(trash).catch(() => [])) {
+    await rm(join(trash, stamp, terminalId), { recursive: true, force: true });
+    const left = await readdir(join(trash, stamp)).catch(() => ['keep']);
+    if (left.length === 0) {
+      await rm(join(trash, stamp), { recursive: true, force: true });
+    }
+  }
 }
 
 suite('the processes of windows that are gone', () => {
@@ -294,23 +413,100 @@ suite('the processes of windows that are gone', () => {
     }
   });
 
-  test('a window on the editor\'s engine ends nothing of its own on the way out', async () => {
+  test('a window leaving ends the processes it made itself, and only those', async () => {
     /*
      * The composed farewell, run rather than read: this is the function
      * `deactivate` calls, holding the gateway this window is really using and the
      * records it really holds.
      *
-     * Safe to call here BECAUSE of the rule it carries -- under `editor` it ends
-     * nothing and disposes nothing, since those terminals are the editor's and a
-     * `claude` in one of them outlives the extension host on purpose (O5). That
-     * refusal is the assertion.
+     * **It is the one act the two engines answer OPPOSITELY**, which is why the
+     * suite is run twice under M3.10 and why both halves are said here. Under
+     * `editor` it ends nothing and disposes nothing: those terminals are the
+     * editor's, and a `claude` in one of them outlives the extension host on
+     * purpose (O5, M2.16). Under `own` the pty belongs to this window and goes
+     * with it -- as a WINDOW LEAVING (`we-are-shutting-down`) and not as a
+     * terminal being closed, because every reload would otherwise stamp
+     * `closedAt` on every conversation and bring none of them back (P7).
+     *
+     * **Written with a terminal of its own rather than with an empty window.**
+     * The shape this replaced asserted "ended nothing" under `editor` with
+     * nothing running at all, which is equally true of a build that ends
+     * everything -- the vacuum test M1.5 and M2.11 both met. So it starts a real
+     * agent through the composed lifecycle, the path the button takes, and ends
+     * it before returning whichever engine ran it. It is never spoken to: it
+     * costs a conversation in the CLI's own store and no tokens.
      */
     const gripterm = await api();
-    assert.equal(gripterm.readiness.engine, 'editor', 'this host is not on the engine this test is about');
+    const { readiness, registry, lifecycle } = gripterm;
+    assert.notEqual(readiness.cliPath, null, 'claude was not found on PATH, and this test starts a real one');
 
-    const report = gripterm.endOwnProcesses();
+    const started = await lifecycle.launch({
+      displayName: 'a terminal its own window made',
+      recipe: await recipeFromStore(gripterm),
+    });
+    const { terminalId } = started;
+    let startedPid: number | null = null;
+    try {
+      const running = await waitUntil(
+        'the record to name the process it started',
+        () => registry.get(terminalId)?.observed.pid ?? null
+      );
+      startedPid = running;
+      assert.equal(stillThere(running), true, 'the agent this test started was not running');
 
-    assert.deepEqual(report.ended, []);
-    assert.deepEqual(report.refused, []);
+      const report = gripterm.endOwnProcesses();
+
+      if (readiness.engine === 'editor') {
+        assert.deepEqual(report.ended, [], 'a window ended a process that was not its to end');
+        assert.deepEqual(report.refused, []);
+        assert.equal(stillThere(running), true, 'a terminal of the editor was ended by a window leaving');
+      } else {
+        assert.deepEqual(
+          report.ended,
+          [running],
+          `the window left without ending the process it started: ${JSON.stringify(report)}`
+        );
+        await waitFor('the process to go', () => !stillThere(running));
+        /*
+         * Waited for by the RECORD hearing about it, not by the process being
+         * gone. The two are a tenth of a second apart -- the pty reports its exit
+         * after it has happened -- and asserting in that gap is asserting on a
+         * record nothing has told yet: the first version of this test read
+         * `closedAt` there and passed against a build that stamped it (L3b of the
+         * battery, 2026-08-18).
+         */
+        await waitFor(
+          'the record to hear that its terminal ended',
+          () => registry.get(terminalId)?.observed.state === 'ended'
+        );
+        // And it is left where a restore can find it, which is the half P7
+        // stands on: a window leaving is not a person closing anything.
+        const left = registry.get(terminalId);
+        assert.ok(left, 'the record went away with the window that was leaving');
+        assert.equal(left.closedAt, null, 'a window leaving closed a conversation it is expected to bring back');
+        assert.equal(left.isRestorable(), true);
+      }
+    } finally {
+      if (readiness.engine === 'own') {
+        // Off the strip, as the cross on its tab does: a tab left behind stays
+        // on the panel for the rest of the run, and the suites after this one
+        // count it (M3.9).
+        gripterm.stage.removed(terminalId.value);
+      } else if (registry.knows(terminalId)) {
+        lifecycle.close(terminalId);
+      }
+      await waitFor(
+        'this window to let go of the terminal',
+        () => !gripterm.gateway.listKnown().some((one) => one.terminalId.value === terminalId.value)
+      ).catch(() => null);
+      if (startedPid !== null && stillThere(startedPid)) {
+        process.kill(startedPid, 'SIGKILL');
+      }
+      lifecycle.discard(terminalId);
+      // Long enough for the writer's own deletion to have gone through, so this
+      // and it are not racing over the same directory.
+      await pause(1000);
+      await cleanStore(readiness.storageDir, terminalId.value);
+    }
   });
 });

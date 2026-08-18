@@ -508,16 +508,49 @@ suite('the own engine: the fallback a person has to be able to hear', () => {
 
   test('reports the engine that answered, which is what a suite has to be able to read', async () => {
     /*
-     * The default is `editor` and this host does not change it, so the assertion
-     * is about the CHANNEL rather than about the value: a window that asked for
-     * `own` and fell back looks exactly like a window that asked for `editor`,
-     * and without this field a suite claiming to have exercised both engines
-     * could not tell which one it got. The record is stamped from the same
-     * object, one line of `TerminalLifecycleService`.
+     * The CHANNEL first: a window that asked for `own` and fell back looks
+     * exactly like a window that asked for `editor`, and without this field a
+     * suite claiming to have exercised both engines could not tell which one it
+     * got. The record is stamped from the same object, one line of
+     * `TerminalLifecycleService`.
+     *
+     * The VALUE is then read against the setting THIS WINDOW was given, not
+     * against a constant, and that is the whole guard of the second run (M3.10).
+     * The suite is run twice, once under each engine (`.vscode-test.mjs`), and
+     * the run under `own` is worth nothing unless the window really is on `own`:
+     * a missing addon and a `shell` launch mode each send the engine back to the
+     * editor, and half the suite would then be the editor's run wearing a second
+     * label. Both refusals are audible -- see the two tests above -- and this is
+     * where a run notices that one of them happened to it.
      */
     const { readiness, gateway } = await api();
+    const settings = vscode.workspace.getConfiguration('gripterm');
     assert.equal(readiness.engine, gateway.engine);
-    assert.equal(readiness.engine, 'editor', 'the default engine moved without the manifest saying so');
+    assert.equal(
+      readiness.engine,
+      settings.get<string>('terminal.engine'),
+      `this window is not on the engine it was asked for, and the launch mode it read is '${String(settings.get<string>('launch.mode'))}'`
+    );
+  });
+
+  test('leaves the editor as what a window with no setting of its own gets', () => {
+    /*
+     * The manifest's own default, asserted from the manifest. It used to be
+     * asserted from the window above, which was the same sentence for as long as
+     * there was one run; the second run of M3.10 sets the setting, and a default
+     * is a promise about the windows that do NOT.
+     */
+    const extension = vscode.extensions.getExtension('gripterm-placeholder.gripterm');
+    assert.ok(extension, 'extension not found in the host');
+    const manifest = extension.packageJSON as {
+      contributes: { configuration: { properties: Record<string, { default?: unknown }> } };
+    };
+
+    assert.equal(
+      manifest.contributes.configuration.properties['gripterm.terminal.engine']?.default,
+      'editor',
+      'the default engine moved without the manifest saying so'
+    );
   });
 
   test('leaves the editor engine alone in both launch modes', async () => {

@@ -663,6 +663,51 @@ suite('a terminal of ours, on our own screen', () => {
     }
   });
 
+  test('a terminal revealed brings the panel back up, which is what a restore rests on', async () => {
+    /*
+     * The last three links of "a restore reveals OUR tab" (M3.10), and the ones
+     * no unit test can reach: `lifecycle.reveal` -> `handle.show(true)` -> the
+     * audience -> a panel that is not there any more. The decision itself --
+     * reveal a restored terminal once it has said something, and not if it died
+     * first -- is a rule of the core and is covered there
+     * (`restore-orchestrator.test.ts`).
+     *
+     * Under the editor's engine there is nothing to do: the pane is the editor's
+     * own and the editor brings it up. Under ours the terminal lives in a webview
+     * that may be shut, on another tab, or not built at all -- and an agent
+     * restored where nobody can see it is precisely what M2.16 measured the cost
+     * of and what the launch gate of M3.7 exists to prevent.
+     *
+     * `preserveFocus` is the other half, and it is the reason this is `show(true)`
+     * rather than the command a person presses: a window coming back with five
+     * terminals reveals five times, and a reveal that took the cursor would leave
+     * it wherever the race ended.
+     */
+    const { workbench, stage } = await api();
+    const stand = await Stand.start('10');
+    try {
+      await attach(stand);
+
+      await vscode.commands.executeCommand('workbench.action.closePanel');
+      await until('the panel to go away', () => !workbench.visible, SETTLES_WITHIN_MS);
+
+      // The call the orchestrator makes on a restore that spoke, made its way.
+      stand.handle.show(true);
+
+      await until('the panel to come back on its own', () => workbench.visible, SETTLES_WITHIN_MS);
+      await until(
+        'the revealed terminal to be the one on screen',
+        () => stage.attachedTerminal === stand.terminalId,
+        SETTLES_WITHIN_MS
+      );
+      const report = await workbench.measure('after a reveal brought the panel up', SETTLES_WITHIN_MS);
+
+      assert.equal(report.attached, stand.terminalId);
+    } finally {
+      await stand.end();
+    }
+  });
+
   test('the host is never told more has landed than the screen has taken in', async () => {
     /*
      * The honesty of the receipt, sampled WHILE the flood is running -- which is
