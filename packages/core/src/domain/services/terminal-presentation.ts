@@ -165,6 +165,18 @@ const APPEARANCE: Readonly<Record<TerminalState, StateAppearance>> = {
   },
 };
 
+/**
+ * What a state is called in front of a person.
+ *
+ * Exported so that the details half of the panel (M3.11) can say the state in
+ * the same words the tree says it, without a second copy of the table and
+ * without the tool and the window that `description` adds to it -- the half
+ * shows those as lines of their own.
+ */
+export function stateWords(state: TerminalState): string {
+  return APPEARANCE[state].words;
+}
+
 /** Long enough to recognise the answer, short enough not to become the row. */
 const MESSAGE_LIMIT = 160;
 

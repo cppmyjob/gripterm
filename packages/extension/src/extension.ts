@@ -3,6 +3,7 @@ import { homedir, uptime } from 'node:os';
 import { join } from 'node:path';
 import { stat } from 'node:fs/promises';
 import {
+  AnnouncingJournal,
   AttentionNotifier,
   BaseProjection,
   BaseWriter,
@@ -62,9 +63,9 @@ import {
 import type {
   AgentCommandFactory,
   EditorIdentity,
+  EventJournal,
   ExecutableSearch,
   ForwarderScript,
-  JournalPolicy,
   LaunchLocation,
   LaunchMode,
   LaunchStrategy,
@@ -110,6 +111,7 @@ import { TERMINALS_VIEW_ID, TerminalTreeDataProvider } from './ui/terminal-tree'
 import { WORKBENCH_VIEW_ID, WorkbenchView } from './ui/workbench-view';
 import { TerminalStage } from './ui/terminal-stage';
 import { TERMINAL_FOCUSED_KEY, TerminalKeyboard } from './ui/terminal-keyboard';
+import { TerminalDetails } from './ui/terminal-details';
 import { TerminalStrip } from './ui/terminal-strip';
 import { registerTerminalKey } from './commands/terminal-key';
 import type { TerminalTreeNode } from './ui/terminal-tree';
@@ -304,6 +306,22 @@ export interface GriptermApi {
    * agrees with itself.
    */
   readonly strip: TerminalStrip;
+  /** The details half, and its own count of how often it has read the journal (M3.11). */
+  readonly details: TerminalDetails;
+  /**
+   * This activation's hook token.
+   *
+   * Handed out so that the suite can deliver an event the way an agent does --
+   * a POST to the loopback endpoint -- rather than by calling the registry
+   * directly. That difference is the whole of what M3.11 needs to check: only
+   * the real path writes the JOURNAL, and the history in the panel comes from
+   * the journal and from nowhere else.
+   *
+   * It discloses nothing: the token lives in memory for one activation, it is
+   * already in the environment of every agent this window starts, and this suite
+   * runs inside the window that issued it.
+   */
+  readonly hookToken: string;
   /**
    * The data provider, for the one question only a real host answers about the
    * grouping (M2.14): what the ROOT of the contributed view actually contains.
@@ -512,7 +530,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   if (cleaner !== null) {
     context.subscriptions.push(cleaner);
   }
-  const address = await listen({ token, storage, registry, logger, journal });
+  /*
+   * The journal, wrapped in the one thing the panel needs from it: a word after
+   * each write has landed (M3.11). The wrapper is here rather than inside
+   * `listen` because two consumers now share the object -- the receiver writes
+   * to it, the details half listens to it -- and a composition root is where
+   * that is visible.
+   */
+  const events = new AnnouncingJournal(
+    new FileEventJournal({ layout: storage, logger, policy: journal })
+  );
+  const details = new TerminalDetails({
+    view: workbench,
+    stage,
+    registry,
+    storage,
+    journal: events,
+    logger,
+  });
+  context.subscriptions.push(details);
+  const address = await listen({ token, registry, logger, journal: events });
   const cli = await findCli(logger);
   const forwarder = await findForwarder(context, logger);
 
@@ -879,6 +916,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     stage,
     keyboard,
     strip,
+    /**
+     * The details half of the panel (M3.11).
+     *
+     * Exposed for the reason the strip is: this object knows what the host
+     * BELIEVES the half says, the page reports what it really drew, and a suite
+     * reading only one of them would be asserting that a side agrees with
+     * itself. It also counts its own reads of the journal, which is the only
+     * way "it follows a signal rather than a clock" can be measured.
+     */
+    details,
+    hookToken: token,
     readiness: {
       cliPath: cli.path,
       cliVersion: cli.version,
@@ -1300,18 +1348,13 @@ export async function deactivate(): Promise<void> {
  */
 async function listen(parts: {
   readonly token: string;
-  readonly storage: StorageLayout;
   readonly registry: SessionRegistry;
   readonly logger: Logger;
-  readonly journal: JournalPolicy;
+  readonly journal: EventJournal;
 }): Promise<ListeningAddress | null> {
   const server = new HookEventServer({
     authenticator: new RequestAuthenticator(parts.token),
-    journal: new FileEventJournal({
-      layout: parts.storage,
-      logger: parts.logger,
-      policy: parts.journal,
-    }),
+    journal: parts.journal,
     sink: parts.registry,
     logger: parts.logger,
   });

@@ -1,6 +1,7 @@
 import '@vscode/codicons/dist/codicon.css';
 import '@xterm/xterm/css/xterm.css';
 import './page.css';
+import { PageDetails } from './details';
 import { PageLayout } from './layout';
 import { PageStrip } from './strip';
 import { Screens } from './screens';
@@ -204,6 +205,8 @@ function start(root: HTMLElement): void {
   let settling: number | null = null;
   /** Whether receipts are being sent. Turned off only by the probe -- see `receipts`. */
   let acking = true;
+  /** Whether the keyboard is in a terminal of ours, as this document sees it. */
+  let focusedHere = false;
   /**
    * The terminal the host last said was the active one.
    *
@@ -237,6 +240,7 @@ function start(root: HTMLElement): void {
     onClose: (terminalId) => { post({ kind: 'wants-close', terminalId }); },
     onRefused: (what) => { post({ kind: 'refused', what }); },
   });
+  const details = new PageDetails(layout.detailsHost, (what) => { post({ kind: 'refused', what }); });
 
   const report = (): ViewReport => {
     const screen = screens.visible;
@@ -256,7 +260,10 @@ function start(root: HTMLElement): void {
       written: screen.written,
       acking,
       bracketedPaste: screen.bracketedPaste,
+      focusedHere,
+      documentFocused: document.hasFocus(),
       tabs: strip.report(),
+      details: details.report(),
     };
   };
 
@@ -361,7 +368,10 @@ function start(root: HTMLElement): void {
    */
   const wire = (screen: Screen, terminalId: string | null): void => {
     screen.leaveToTheHost((event) => answeredHere(screen, event));
-    screen.onFocusChanged((focused) => { post({ kind: 'focused', focused }); });
+    screen.onFocusChanged((focused) => {
+      focusedHere = focused;
+      post({ kind: 'focused', focused });
+    });
     screen.onRightClick(() => { rightClicked(screen); });
     if (terminalId === null) {
       return;
@@ -551,6 +561,14 @@ function start(root: HTMLElement): void {
         strip.draw(message.tabs);
         drawStrip(message.tabs);
         post({ kind: 'measured', report: report(), because: 'the strip was drawn' });
+        return;
+      case 'details':
+        // Drawn, and NOT announced. `dragSplitterBy` and `nextMeasurement` wait
+        // for the next measurement whatever its reason, so a report posted here
+        // would be handed to a suite waiting for the border to move -- taken
+        // after the layout changed and before xterm had refitted, which is a
+        // measurement of a moment that never existed (2026-08-18).
+        details.draw(message.view);
         return;
       default:
         probed(message.action);

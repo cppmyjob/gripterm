@@ -4,10 +4,12 @@ import { join } from 'node:path';
 import {
   DEFAULT_JOURNAL_POLICY,
   FileEventJournal,
+  JOURNAL_TAIL_WINDOW_BYTES,
   StorageLayout,
   TerminalId,
   lastSequenceIn,
   readJournal,
+  readJournalTail,
 } from '../../packages/core/src/index';
 import { RecordingLogger } from '../helpers/port-fakes';
 import { TERMINAL_UUID } from '../helpers/domain-fixtures';
@@ -134,6 +136,17 @@ describe('the gap in a numbering', () => {
 });
 
 describe('a history with damage in it', () => {
+  it('steps over a day that was opened and never written to', async () => {
+    await mkdir(eventsDir(), { recursive: true });
+    await writeFile(join(eventsDir(), '2026-08-11.ndjson'), '', 'utf8');
+    await writeDay('2026-08-10', line(1, 1));
+
+    const read = await readJournalTail(layout, TERMINAL, 20);
+
+    expect(read.lines.map((entry) => entry.payload)).toStrictEqual([{ n: 1 }]);
+    expect(read.unreadableFiles).toStrictEqual([]);
+  });
+
   it('counts a torn line and returns its neighbours', async () => {
     await mkdir(eventsDir(), { recursive: true });
     await writeFile(
@@ -170,6 +183,138 @@ describe('a history with damage in it', () => {
 
     expect(read.lines).toHaveLength(1);
     expect(read.unreadableFiles).toStrictEqual([]);
+  });
+});
+
+describe('the tail of a history, which is what a panel shows', () => {
+  it('says nothing at all for a terminal that has never been written to', async () => {
+    expect(await readJournalTail(layout, TERMINAL, 20)).toStrictEqual({
+      lines: [],
+      gaps: [],
+      unreadableLines: 0,
+      unreadableFiles: [],
+      bytesRead: 0,
+    });
+  });
+
+  it('keeps the newest lines and hands them over oldest first', async () => {
+    await writeDay('2026-08-10', line(1, 1), line(2, 2), line(3, 3), line(4, 4));
+
+    const read = await readJournalTail(layout, TERMINAL, 2);
+
+    expect(read.lines.map((entry) => entry.payload)).toStrictEqual([{ n: 3 }, { n: 4 }]);
+  });
+
+  it('walks back into the day before when the newest one is short', async () => {
+    await writeDay('2026-08-10', line(1, 1), line(2, 2));
+    await writeDay('2026-08-11', line(1, 3));
+
+    const read = await readJournalTail(layout, TERMINAL, 3);
+
+    expect(read.lines.map((entry) => entry.payload)).toStrictEqual([{ n: 1 }, { n: 2 }, { n: 3 }]);
+  });
+
+  it('reads the flat file M1 left, when the days do not fill the tail', async () => {
+    await mkdir(join(root, 'terminals', TERMINAL_UUID), { recursive: true });
+    await writeFile(
+      join(root, 'terminals', TERMINAL_UUID, 'events.ndjson'),
+      `${JSON.stringify(line(null, 100))}
+`,
+      'utf8'
+    );
+    await writeDay('2026-08-10', line(1, 1));
+
+    const read = await readJournalTail(layout, TERMINAL, 5);
+
+    expect(read.lines.map((entry) => entry.payload)).toStrictEqual([{ n: 100 }, { n: 1 }]);
+    expect(read.gaps).toStrictEqual([]);
+  });
+
+  /*
+   * The difference from `readJournal`, and the reason this function exists at
+   * all rather than a `slice` of that one. The writer starts every day's file
+   * at one (`file-event-journal.ts`, "starts a new day at one"), so a reader
+   * that compared the last line of Monday with the first line of Tuesday finds
+   * a hole in every healthy journal older than a day -- and a panel that
+   * reported it would be crying wolf daily.
+   */
+  it('does not call the turn of the day a hole in the history', async () => {
+    await writeDay('2026-08-10', line(1, 1), line(2, 2));
+    await writeDay('2026-08-11', line(1, 3), line(2, 4));
+
+    expect((await readJournalTail(layout, TERMINAL, 20)).gaps).toStrictEqual([]);
+  });
+
+  it('still finds a hole inside one day', async () => {
+    await writeDay('2026-08-10', line(1, 1), line(4, 4));
+
+    expect((await readJournalTail(layout, TERMINAL, 20)).gaps).toStrictEqual([
+      { expected: 2, found: 4 },
+    ]);
+  });
+
+  it('does not report a hole among lines it did not keep', async () => {
+    await writeDay('2026-08-10', line(1, 1), line(5, 5), line(6, 6));
+
+    expect((await readJournalTail(layout, TERMINAL, 2)).gaps).toStrictEqual([]);
+  });
+
+  it('counts a torn line and returns its neighbours', async () => {
+    await mkdir(eventsDir(), { recursive: true });
+    await writeFile(
+      join(eventsDir(), '2026-08-10.ndjson'),
+      `${JSON.stringify(line(1, 1))}
+{"v":2,"seq":2,"at":"2026
+${JSON.stringify(line(3, 3))}
+`,
+      'utf8'
+    );
+
+    const read = await readJournalTail(layout, TERMINAL, 20);
+
+    expect(read.lines).toHaveLength(2);
+    expect(read.unreadableLines).toBe(1);
+    expect(read.gaps).toStrictEqual([{ expected: 2, found: 3 }]);
+  });
+
+  it('names a file it could not read and reads the rest', async () => {
+    await writeDay('2026-08-10', line(1, 1));
+    await mkdir(join(eventsDir(), '2026-08-11.ndjson'), { recursive: true });
+
+    const read = await readJournalTail(layout, TERMINAL, 20);
+
+    expect(read.lines).toHaveLength(1);
+    expect(read.unreadableFiles).toStrictEqual([join(eventsDir(), '2026-08-11.ndjson')]);
+  });
+
+  /*
+   * The whole point of the function: this runs again every time an event
+   * reaches the shown terminal, so what it costs must not grow with the
+   * history. `bytesRead` is that cost, returned rather than described, because
+   * a promise about work done is worth exactly what measures it.
+   */
+  it('reads a bounded window of a file however long the file is', async () => {
+    const fat = Array.from({ length: 20_000 }, (_, index) => line(index + 1, index + 1));
+    await writeDay('2026-08-10', ...fat);
+
+    const read = await readJournalTail(layout, TERMINAL, 3);
+
+    expect(read.bytesRead).toBeLessThanOrEqual(JOURNAL_TAIL_WINDOW_BYTES);
+    expect(read.lines.map((entry) => entry.payload)).toStrictEqual([
+      { n: 19_998 },
+      { n: 19_999 },
+      { n: 20_000 },
+    ]);
+  });
+
+  it('drops the half line the window starts in the middle of', async () => {
+    // The first line of a window that did not start at the beginning of the
+    // file is a fragment, and a fragment decoded is either an unreadable line
+    // in a healthy journal or, worse, a plausible one.
+    const fat = Array.from({ length: 20_000 }, (_, index) => line(index + 1, index + 1));
+    await writeDay('2026-08-10', ...fat);
+
+    expect((await readJournalTail(layout, TERMINAL, 20)).unreadableLines).toBe(0);
   });
 });
 

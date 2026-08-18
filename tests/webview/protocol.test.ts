@@ -55,6 +55,40 @@ const TAB_ORDER = {
   over: false,
 };
 
+/** The details half as the page found it, and the two facts only it can answer. */
+const DETAILS_REPORT = {
+  terminalId: 'a2f1c8de-0000-4000-8000-000000000001',
+  nothing: null,
+  headline: 'auth-refactor working',
+  glyph: '',
+  facts: ['tool: Edit', 'folder: D:/Projects/foo'],
+  task: 'Move token validation',
+  notes: 1,
+  events: ['Edit started'],
+  notices: [],
+  draws: 3,
+};
+
+/** The details half as the host orders it drawn: what the core rule produced. */
+const DETAILS_ORDER = {
+  nothing: null,
+  headline: {
+    terminalId: 'a2f1c8de-0000-4000-8000-000000000001',
+    label: 'auth-refactor',
+    words: 'working',
+    iconId: 'sync~spin',
+    colorId: 'charts.blue',
+    over: false,
+  },
+  facts: [{ name: 'tool', value: 'Edit' }],
+  startedAtMs: 1_700_000_000_000,
+  lastEventAtMs: 1_700_000_060_000,
+  task: 'Move token validation',
+  notes: [{ atMs: 1_700_000_030_000, text: 'read ADR-014 first' }],
+  events: [{ atMs: 1_700_000_040_000, words: 'Edit started' }],
+  notices: ['Texts are not kept in the journal.'],
+};
+
 const REPORT = {
   generation: 1,
   cols: 120,
@@ -71,7 +105,10 @@ const REPORT = {
   written: 4096,
   bracketedPaste: true,
   acking: true,
+  focusedHere: true,
+  documentFocused: true,
   tabs: [TAB_REPORT],
+  details: DETAILS_REPORT,
 };
 
 describe('what the host accepts from the page', () => {
@@ -243,6 +280,22 @@ describe('what the host accepts from the page', () => {
     // asserting about a picture that was never on screen.
     ['one good tab and one hole', { ...REPORT, tabs: [TAB_REPORT, { ...TAB_REPORT, label: undefined }] }],
     ['no word on bracketed paste, which decides what a paste means', { ...REPORT, bracketedPaste: undefined }],
+    ['no word on where the keyboard is, which the page answers for itself', { ...REPORT, focusedHere: undefined }],
+    ['no word on whether the document has the keyboard at all', { ...REPORT, documentFocused: undefined }],
+    ['no details half at all', { ...REPORT, details: undefined }],
+    ['a details half that is not an object', { ...REPORT, details: 'nothing yet' }],
+    ['a details half that will not say which terminal it is about', { ...REPORT, details: { ...DETAILS_REPORT, terminalId: undefined } }],
+    ['a details half with no word on its empty state', { ...REPORT, details: { ...DETAILS_REPORT, nothing: undefined } }],
+    ['a details half with no heading', { ...REPORT, details: { ...DETAILS_REPORT, headline: null } }],
+    ['a details half with no word on the glyph it drew', { ...REPORT, details: { ...DETAILS_REPORT, glyph: undefined } }],
+    ['a details half whose facts are not a list', { ...REPORT, details: { ...DETAILS_REPORT, facts: 'tool: Edit' } }],
+    ['a details half with a fact that is not words', { ...REPORT, details: { ...DETAILS_REPORT, facts: [7] } }],
+    ['a details half with no word on the task', { ...REPORT, details: { ...DETAILS_REPORT, task: undefined } }],
+    ['a details half that will not count its notes', { ...REPORT, details: { ...DETAILS_REPORT, notes: undefined } }],
+    ['a details half whose events are not a list', { ...REPORT, details: { ...DETAILS_REPORT, events: undefined } }],
+    ['a details half with an event that is not words', { ...REPORT, details: { ...DETAILS_REPORT, events: [{ words: 'Edit started' }] } }],
+    ['a details half whose notices are not a list', { ...REPORT, details: { ...DETAILS_REPORT, notices: null } }],
+    ['a details half that will not say how many times it was drawn', { ...REPORT, details: { ...DETAILS_REPORT, draws: undefined } }],
   ])('refuses a report with %s', (_what, report) => {
     expect(parseViewMessage({ kind: 'ready', report })).toBeNull();
   });
@@ -290,6 +343,69 @@ describe('what the page accepts from the host', () => {
       terminalId: 'one',
       because: 'the process ended',
     });
+  });
+
+  it('takes the details half, whole', () => {
+    expect(parseHostMessage({ kind: 'details', view: DETAILS_ORDER })).toEqual({
+      kind: 'details',
+      view: DETAILS_ORDER,
+    });
+  });
+
+  it('takes a details half with nothing to describe, which is a state and not a hole', () => {
+    const empty = {
+      ...DETAILS_ORDER,
+      nothing: 'No terminal in this panel yet.',
+      headline: null,
+      facts: [],
+      startedAtMs: null,
+      lastEventAtMs: null,
+      task: null,
+      notes: [],
+      events: [],
+      notices: [],
+    };
+
+    expect(parseHostMessage({ kind: 'details', view: empty })).toEqual({ kind: 'details', view: empty });
+  });
+
+  it('takes a heading with no colour of its own', () => {
+    const view = { ...DETAILS_ORDER, headline: { ...DETAILS_ORDER.headline, colorId: null } };
+
+    expect(parseHostMessage({ kind: 'details', view })).toEqual({ kind: 'details', view });
+  });
+
+  it.each([
+    ['no half at all', { kind: 'details' }],
+    ['a half that is not an object', { kind: 'details', view: 'nothing' }],
+    ['no word on the empty state', { kind: 'details', view: { ...DETAILS_ORDER, nothing: undefined } }],
+    ['a heading that is not an object', { kind: 'details', view: { ...DETAILS_ORDER, headline: 'auth-refactor' } }],
+    ['a heading of no terminal', { kind: 'details', view: { ...DETAILS_ORDER, headline: { ...DETAILS_ORDER.headline, terminalId: undefined } } }],
+    ['a heading with no name', { kind: 'details', view: { ...DETAILS_ORDER, headline: { ...DETAILS_ORDER.headline, label: 7 } } }],
+    ['a heading with no state in words', { kind: 'details', view: { ...DETAILS_ORDER, headline: { ...DETAILS_ORDER.headline, words: undefined } } }],
+    ['a heading with no icon', { kind: 'details', view: { ...DETAILS_ORDER, headline: { ...DETAILS_ORDER.headline, iconId: undefined } } }],
+    ['a heading with a colour that is not a name', { kind: 'details', view: { ...DETAILS_ORDER, headline: { ...DETAILS_ORDER.headline, colorId: 7 } } }],
+    ['a heading that will not say whether the terminal is over', { kind: 'details', view: { ...DETAILS_ORDER, headline: { ...DETAILS_ORDER.headline, over: 'yes' } } }],
+    ['facts that are not a list', { kind: 'details', view: { ...DETAILS_ORDER, facts: { tool: 'Edit' } } }],
+    ['a fact that is not an object', { kind: 'details', view: { ...DETAILS_ORDER, facts: ['tool'] } }],
+    ['a fact with no name', { kind: 'details', view: { ...DETAILS_ORDER, facts: [{ value: 'Edit' }] } }],
+    ['a fact with no value', { kind: 'details', view: { ...DETAILS_ORDER, facts: [{ name: 'tool' }] } }],
+    ['a start that is neither a moment nor nothing', { kind: 'details', view: { ...DETAILS_ORDER, startedAtMs: 'today' } }],
+    ['a start that is not a number at all', { kind: 'details', view: { ...DETAILS_ORDER, startedAtMs: Number.NaN } }],
+    ['no word on the last event', { kind: 'details', view: { ...DETAILS_ORDER, lastEventAtMs: undefined } }],
+    ['no word on the task', { kind: 'details', view: { ...DETAILS_ORDER, task: undefined } }],
+    ['notes that are not a list', { kind: 'details', view: { ...DETAILS_ORDER, notes: 'read ADR-014' } }],
+    ['a note that is not an object', { kind: 'details', view: { ...DETAILS_ORDER, notes: ['read ADR-014'] } }],
+    ['a note with no moment', { kind: 'details', view: { ...DETAILS_ORDER, notes: [{ text: 'read ADR-014' }] } }],
+    ['a note with no words', { kind: 'details', view: { ...DETAILS_ORDER, notes: [{ atMs: 1, text: 7 }] } }],
+    ['events that are not a list', { kind: 'details', view: { ...DETAILS_ORDER, events: undefined } }],
+    ['an event that is not an object', { kind: 'details', view: { ...DETAILS_ORDER, events: ['Edit started'] } }],
+    ['an event with no moment', { kind: 'details', view: { ...DETAILS_ORDER, events: [{ words: 'Edit started' }] } }],
+    ['an event with no words', { kind: 'details', view: { ...DETAILS_ORDER, events: [{ atMs: 1 }] } }],
+    ['notices that are not a list', { kind: 'details', view: { ...DETAILS_ORDER, notices: 'all is well' } }],
+    ['a notice that is not words', { kind: 'details', view: { ...DETAILS_ORDER, notices: [7] } }],
+  ])('refuses a details half with %s', (_what, message) => {
+    expect(parseHostMessage(message)).toBeNull();
   });
 
   it('takes the clipboard on its way into the terminal', () => {

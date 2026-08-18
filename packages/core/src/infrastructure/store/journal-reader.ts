@@ -1,4 +1,4 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { open, readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { decodeJournalLine } from './journal-line';
 import { isJournalFileName } from './storage-layout';
@@ -77,6 +77,170 @@ export async function readJournal(
   }
 
   return { lines, gaps: gapsIn(lines), unreadableLines, unreadableFiles };
+}
+
+/**
+ * How much of a file's end is read to find its last lines.
+ *
+ * A ceiling and not a promise about how many lines come back: with texts kept
+ * out of the journal (the default) a line is a few hundred bytes, so a window
+ * this size holds thousands of them. It exists because this read runs AGAIN
+ * every time an event reaches the terminal a person is looking at, and a cost
+ * that grows with the history is a panel that gets slower the longer somebody
+ * works.
+ */
+/** The line separator the journal is written with. */
+const NEWLINE = '\n';
+
+const BYTES_PER_KB = 1024;
+const KB_PER_MB = 1024;
+
+export const JOURNAL_TAIL_WINDOW_BYTES = BYTES_PER_KB * KB_PER_MB;
+
+export interface JournalTail {
+  /** Oldest first, and never more than the caller asked for. */
+  readonly lines: readonly JournalLine[];
+  /** Holes WITHIN a file. See `readJournalTail` for why not across them. */
+  readonly gaps: readonly JournalGap[];
+  readonly unreadableLines: number;
+  readonly unreadableFiles: readonly string[];
+  /** What the read cost, so that "bounded" is a measurement rather than a claim. */
+  readonly bytesRead: number;
+}
+
+/**
+ * The end of one terminal's history: at most `limit` lines, newest last.
+ *
+ * A second reader beside `readJournal` rather than a `slice` of it, and the two
+ * differences are the whole reason it exists.
+ *
+ * **It is bounded.** Files are opened newest first and only their last
+ * `JOURNAL_TAIL_WINDOW_BYTES` are read, stopping as soon as there are enough
+ * lines. The panel calls this on every event that reaches the terminal it is
+ * showing; `readJournal` reads every day the retention kept, which is the right
+ * answer for a projector rebuilding a state and the wrong one for a list of
+ * twenty lines.
+ *
+ * **It does not compare numbering across files.** The writer starts every day's
+ * file at one, so the last line of Monday and the first of Tuesday are 40 and 1
+ * -- which `readJournal` reports as a break in the sequence, correctly by its
+ * own contract and uselessly for a person: every journal older than a day would
+ * carry a warning. Within a file the counter is one unbroken run, and a hole in
+ * it is a real one.
+ *
+ * Never throws, for the same reason `readJournal` does not: a history is read
+ * to answer a question, and a read that fails wholesale answers nothing.
+ */
+export async function readJournalTail(
+  layout: StorageLayout,
+  terminalId: TerminalId,
+  limit: number
+): Promise<JournalTail> {
+  const paths = await journalPaths(layout, terminalId);
+  const unreadableFiles: string[] = [];
+  /** One entry per file that gave lines, newest file first. */
+  const perFile: JournalLine[][] = [];
+  let unreadableLines = 0;
+  let bytesRead = 0;
+  let kept = 0;
+
+  for (const path of [...paths].reverse()) {
+    if (kept >= limit) {
+      break;
+    }
+    const read = await readTail(path, JOURNAL_TAIL_WINDOW_BYTES);
+    if (read.kind === 'refused') {
+      unreadableFiles.push(path);
+      continue;
+    }
+    if (read.kind === 'absent') {
+      continue;
+    }
+    bytesRead += read.bytesRead;
+    const lines: JournalLine[] = [];
+    for (const text of linesOf(read.text)) {
+      const decoded = decodeJournalLine(text);
+      if (decoded.kind === 'line') {
+        lines.push(decoded.line);
+      } else {
+        unreadableLines += 1;
+      }
+    }
+    if (lines.length === 0) {
+      continue;
+    }
+    perFile.push(lines);
+    kept += lines.length;
+  }
+
+  // The oldest file is the one that overshot, so it is the one trimmed.
+  const oldest = perFile.at(-1);
+  if (oldest !== undefined && kept > limit) {
+    perFile[perFile.length - 1] = oldest.slice(kept - limit);
+  }
+  const oldestFirst = [...perFile].reverse();
+
+  return {
+    lines: oldestFirst.flat(),
+    gaps: oldestFirst.flatMap((lines) => gapsIn(lines)),
+    unreadableLines,
+    unreadableFiles,
+    bytesRead,
+  };
+}
+
+type TailRead =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'text', readonly text: string, readonly bytesRead: number }
+  | { readonly kind: 'refused' };
+
+/**
+ * The last `window` bytes of a file, with the fragment at the front dropped.
+ *
+ * A window that did not start at byte zero begins in the middle of a line, and
+ * that fragment is thrown away rather than decoded: at best it is an unreadable
+ * line reported in a healthy journal, at worst it is a plausible one. It is
+ * also where a multi-byte character can be cut in half, and dropping the
+ * fragment deals with both at once.
+ */
+async function readTail(path: string, window: number): Promise<TailRead> {
+  let handle;
+  try {
+    handle = await open(path, 'r');
+  } catch (cause: unknown) {
+    return (cause as { readonly code?: unknown }).code === 'ENOENT'
+      ? { kind: 'absent' }
+      : { kind: 'refused' };
+  }
+  try {
+    const stats = await handle.stat();
+    // A directory named like a journal file opens without complaint on this
+    // platform and stats as empty, which would make it indistinguishable from a
+    // day nothing was written to. `readJournal` reports it because `readFile`
+    // refuses it; this reader has to ask.
+    if (!stats.isFile()) {
+      return { kind: 'refused' };
+    }
+    const { size } = stats;
+    const start = Math.max(0, size - window);
+    const length = size - start;
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, start);
+    const text = buffer.toString('utf8');
+    return {
+      kind: 'text',
+      text: start === 0 ? text : text.slice(text.indexOf(NEWLINE) + 1),
+      bytesRead: length,
+    };
+  } catch {
+    // NOT EXERCISED BY THE SUITE, and said so rather than left to be found: a
+    // read that fails after the file opened is an I/O fault, and this suite has
+    // no portable way to stage one. It is here because the alternative is a
+    // throw out of a panel redraw.
+    return { kind: 'refused' };
+  } finally {
+    await handle.close();
+  }
 }
 
 /**

@@ -220,9 +220,56 @@ async function bridgeOf(terminalId: string): Promise<Bridge> {
   return bridge;
 }
 
+/** How often the keyboard is asked for again while something else holds it. */
+const FOCUS_EVERY_MS = 500;
+
+/** How long the keyboard is asked for before the suite calls it lost. */
+const FOCUS_WITHIN_MS = SETTLES_WITHIN_MS;
+
+/**
+ * Puts the keyboard inside the terminal, and keeps asking until it is there.
+ *
+ * Asked for AGAIN rather than once, and the panel asked for with it: a panel
+ * brought up by a reveal comes up WITHOUT the keyboard on purpose
+ * (`preserveFocus`, M3.10), and a suite in a shared window owns neither the
+ * focus nor what else is on screen.
+ *
+ * **When it still does not land, the report says whose fault it is.** The page
+ * answers two questions rather than one: `focusedHere` -- the keyboard is in our
+ * terminal -- and `documentFocused` -- this webview has the keyboard AT ALL.
+ * Measured on 2026-08-18, on this build and on the one before it: the failure
+ * this suite meets is `documentFocused: false`, which is the editor's window not
+ * holding the keyboard, and no amount of asking a view to focus changes that.
+ * Windows takes it away when a console process starts, and nothing in an
+ * extension can take it back.
+ */
+async function keyboardIntoTerminal(): Promise<void> {
+  const { workbench, keyboard } = await api();
+  const started = Date.now();
+  while (!keyboard.focused) {
+    if (Date.now() - started > FOCUS_WITHIN_MS) {
+      const report = await workbench.measure('the suite is asking why the keyboard is elsewhere', SETTLES_WITHIN_MS);
+      throw new Error(
+        `waited ${String(FOCUS_WITHIN_MS)} ms for the keyboard to be inside the terminal. ` +
+        (report.documentFocused
+          ? 'The page has the keyboard and the terminal did not take it, which is ours to answer for. '
+          : 'THE EDITOR WINDOW DOES NOT HOLD THE KEYBOARD: something else on this machine does, ' +
+            'and no view can ask for what the window has not got. Run this gate on a machine ' +
+            'nobody is using (measured 2026-08-18: with a person at the keyboard the foreground ' +
+            'belonged to their browser and their other editor for four fifths of a run). ') +
+        `panel visible: ${String(workbench.visible)}, report: ${JSON.stringify(report)}, ` +
+        `refusals: ${workbench.refusals.slice(-4).join(' | ')}`
+      );
+    }
+    await showPanel();
+    workbench.focusHalf('terminal');
+    await delay(FOCUS_EVERY_MS);
+  }
+}
+
 /** Brings the terminal up on the screen and puts the keyboard inside it. */
 async function attach(stand: Stand): Promise<Bridge> {
-  const { workbench, stage, keyboard } = await api();
+  const { workbench, stage } = await api();
   await showPanel();
   await workbench.whenReady(SETTLES_WITHIN_MS);
   stand.handle.show(false);
@@ -231,12 +278,7 @@ async function attach(stand: Stand): Promise<Bridge> {
     () => stage.attachedTerminal === stand.terminalId,
     SETTLES_WITHIN_MS
   );
-  workbench.focusHalf('terminal');
-  await until('the keyboard to be inside the terminal', () => keyboard.focused, SETTLES_WITHIN_MS)
-    .catch(async (cause: unknown) => {
-      const report = await workbench.measure('the suite is asking why the keyboard is elsewhere', SETTLES_WITHIN_MS);
-      throw new Error(`${String(cause)} -- attached: ${String(report.attached)}, tabs: ${JSON.stringify(report.tabs)}, refusals: ${workbench.refusals.slice(-4).join(' | ')}`);
-    });
+  await keyboardIntoTerminal();
   return await bridgeOf(stand.terminalId);
 }
 

@@ -85,6 +85,23 @@ export interface ViewReport {
    */
   readonly bracketedPaste: boolean;
   /**
+   * Whether the keyboard is inside the terminal, as the PAGE sees it.
+   *
+   * The page already says so when it changes (`focused`), and the host keeps
+   * that answer -- but a message is a thing that can be missed, and "the host
+   * believes the keyboard is elsewhere" and "the page never got the focus" send
+   * somebody to different places. In the report, both can be read at once.
+   */
+  readonly focusedHere: boolean;
+  /**
+   * Whether this document has the keyboard at all, as the browser sees it.
+   *
+   * Beside `focusedHere` because the two answer different questions and only
+   * together tell the two failures apart: an element of ours that refused the
+   * focus, and a whole webview the editor never gave it to.
+   */
+  readonly documentFocused: boolean;
+  /**
    * The strip as the page really DREW it -- one entry per tab on screen.
    *
    * Not an echo of what the host sent: every field here is read back off the
@@ -97,6 +114,18 @@ export interface ViewReport {
    * assumption in a stylesheet.
    */
   readonly tabs: readonly TabReport[];
+  /**
+   * The details half as the page really DREW it (M3.11).
+   *
+   * Read back off the document for the same reason the strip is: the half is
+   * the one surface that claims to say what this build KNOWS, and an assertion
+   * against what the host SENT would be an assertion that the host agrees with
+   * itself. `draws` is here for the promise the plan makes in words -- that the
+   * half follows the registry's signal and does not poll -- because a number
+   * that stands still while nothing happens is the only way to tell the two
+   * apart.
+   */
+  readonly details: DetailsReport;
   /**
    * Whether the page is sending receipts.
    *
@@ -146,6 +175,80 @@ export interface TabReport {
   readonly glyph: string;
   /** What the icon's theme variable resolved to, or an empty string when the theme has none. */
   readonly colour: string;
+}
+
+/**
+ * The details half, as the host orders it drawn.
+ *
+ * The same fields `describeTerminal` produces in the core, carried across
+ * without a translation of their own -- the page turns them into a document,
+ * and the moments into words a person's own clock agrees with, which is the one
+ * decision that cannot be taken in a rule (`atMs` here, `toLocaleString`
+ * there).
+ */
+export interface DetailsOrder {
+  /** What to say when there is nothing to describe, or `null` when there is. */
+  readonly nothing: string | null;
+  readonly headline: DetailsHeadOrder | null;
+  readonly facts: readonly DetailsFactOrder[];
+  readonly startedAtMs: number | null;
+  readonly lastEventAtMs: number | null;
+  readonly task: string | null;
+  readonly notes: readonly DetailsNoteOrder[];
+  readonly events: readonly DetailsEventOrder[];
+  readonly notices: readonly string[];
+}
+
+export interface DetailsHeadOrder {
+  readonly terminalId: string;
+  readonly label: string;
+  readonly words: string;
+  /** A `ThemeIcon` id, modifier and all -- turned into classes by the page. */
+  readonly iconId: string;
+  readonly colorId: string | null;
+  readonly over: boolean;
+}
+
+export interface DetailsFactOrder {
+  readonly name: string;
+  readonly value: string;
+}
+
+export interface DetailsNoteOrder {
+  readonly atMs: number;
+  readonly text: string;
+}
+
+export interface DetailsEventOrder {
+  readonly atMs: number;
+  readonly words: string;
+}
+
+/** The details half, as the page found it on its own screen afterwards. */
+export interface DetailsReport {
+  /** The terminal the half is about, or `null` when it is drawing an empty state. */
+  readonly terminalId: string | null;
+  /** The sentence in place of a terminal, or `null` when there is a terminal. */
+  readonly nothing: string | null;
+  /** The heading as text: the name and what it is doing. */
+  readonly headline: string;
+  /** The character the codicon font put beside the heading, or `none`. */
+  readonly glyph: string;
+  /** Every fact as `name: value`, in the order they were drawn. */
+  readonly facts: readonly string[];
+  readonly task: string | null;
+  readonly notes: number;
+  /** The words of every event drawn, oldest first. */
+  readonly events: readonly string[];
+  readonly notices: readonly string[];
+  /**
+   * How many times this half has been redrawn since the page was built.
+   *
+   * The measurement behind "without polling": a half that redraws on a timer
+   * counts up while a person does nothing, and no assertion about its contents
+   * can tell that from a half that redraws on a signal.
+   */
+  readonly draws: number;
 }
 
 export type ViewMessage =
@@ -256,6 +359,13 @@ export type HostMessage =
    * page cannot be told to show a terminal that has no tab.
    */
   | { readonly kind: 'tabs', readonly tabs: readonly TabOrder[] }
+  /**
+   * The details half, whole, every time -- a picture and not a delta, for the
+   * same reason the strip is one: a half that applied differences would drift
+   * the moment a message was lost, and a drifted half is a person reading last
+   * week's task about today's agent.
+   */
+  | { readonly kind: 'details', readonly view: DetailsOrder }
   /**
    * The seam the integration suite drives the page through, and it is named
    * `probe` so that nobody has to guess what it is for.
@@ -462,6 +572,168 @@ function parseTabOrder(value: unknown): TabOrder | null {
   return { terminalId, label, iconId, colorId: colorId.value, active, attention, over };
 }
 
+/**
+ * The order for the details half, parsed rather than cast like everything else
+ * that crosses this channel.
+ *
+ * One bad item refuses the whole order, for the reason `each` gives: a half
+ * drawn from three good facts and a hole is not the record it claims to be.
+ */
+function parseDetailsOrder(value: unknown): DetailsOrder | null {
+  const source = fields(value);
+  if (source === null) {
+    return null;
+  }
+  const nothing = textOrNothing(source, 'nothing');
+  const headline = parseDetailsHead(source.headline);
+  const facts = each(source.facts, parseDetailsFact);
+  const startedAtMs = countOrNothing(source, 'startedAtMs');
+  const lastEventAtMs = countOrNothing(source, 'lastEventAtMs');
+  const task = textOrNothing(source, 'task');
+  const notes = each(source.notes, parseDetailsNote);
+  const events = each(source.events, parseDetailsEvent);
+  const notices = each(source.notices, asText);
+  if (
+    nothing === null ||
+    headline === null ||
+    facts === null ||
+    startedAtMs === null ||
+    lastEventAtMs === null ||
+    task === null ||
+    notes === null ||
+    events === null ||
+    notices === null
+  ) {
+    return null;
+  }
+  return {
+    nothing: nothing.value,
+    headline: headline.value,
+    facts,
+    startedAtMs: startedAtMs.value,
+    lastEventAtMs: lastEventAtMs.value,
+    task: task.value,
+    notes,
+    events,
+    notices,
+  };
+}
+
+/** Wrapped like `textOrNothing`, and for the same reason: absent is not `null`. */
+function parseDetailsHead(value: unknown): { readonly value: DetailsHeadOrder | null } | null {
+  if (value === null) {
+    return { value: null };
+  }
+  const source = fields(value);
+  if (source === null) {
+    return null;
+  }
+  const terminalId = text(source, 'terminalId');
+  const label = text(source, 'label');
+  const words = text(source, 'words');
+  const iconId = text(source, 'iconId');
+  const colorId = textOrNothing(source, 'colorId');
+  const over = flag(source, 'over');
+  if (
+    terminalId === null ||
+    label === null ||
+    words === null ||
+    iconId === null ||
+    colorId === null ||
+    over === null
+  ) {
+    return null;
+  }
+  return { value: { terminalId, label, words, iconId, colorId: colorId.value, over } };
+}
+
+function parseDetailsFact(value: unknown): DetailsFactOrder | null {
+  const source = fields(value);
+  if (source === null) {
+    return null;
+  }
+  const name = text(source, 'name');
+  const factValue = text(source, 'value');
+  return name === null || factValue === null ? null : { name, value: factValue };
+}
+
+function parseDetailsNote(value: unknown): DetailsNoteOrder | null {
+  const source = fields(value);
+  if (source === null) {
+    return null;
+  }
+  const atMs = count(source, 'atMs');
+  const noteText = text(source, 'text');
+  return atMs === null || noteText === null ? null : { atMs, text: noteText };
+}
+
+function parseDetailsEvent(value: unknown): DetailsEventOrder | null {
+  const source = fields(value);
+  if (source === null) {
+    return null;
+  }
+  const atMs = count(source, 'atMs');
+  const words = text(source, 'words');
+  return atMs === null || words === null ? null : { atMs, words };
+}
+
+function parseDetailsReport(value: unknown): DetailsReport | null {
+  const source = fields(value);
+  if (source === null) {
+    return null;
+  }
+  const terminalId = textOrNothing(source, 'terminalId');
+  const nothing = textOrNothing(source, 'nothing');
+  const headline = text(source, 'headline');
+  const glyph = text(source, 'glyph');
+  const facts = each(source.facts, asText);
+  const task = textOrNothing(source, 'task');
+  const notes = count(source, 'notes');
+  const events = each(source.events, asText);
+  const notices = each(source.notices, asText);
+  const draws = count(source, 'draws');
+  if (
+    terminalId === null ||
+    nothing === null ||
+    headline === null ||
+    glyph === null ||
+    facts === null ||
+    task === null ||
+    notes === null ||
+    events === null ||
+    notices === null ||
+    draws === null
+  ) {
+    return null;
+  }
+  return {
+    terminalId: terminalId.value,
+    nothing: nothing.value,
+    headline,
+    glyph,
+    facts,
+    task: task.value,
+    notes,
+    events,
+    notices,
+    draws,
+  };
+}
+
+/** A plain string in a list. `each` wants a parser, and a string is its own. */
+function asText(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+/** `count`, for a number that may legitimately be nothing. See `textOrNothing`. */
+function countOrNothing(source: Fields, key: string): { readonly value: number | null } | null {
+  const found = source[key];
+  if (found === null) {
+    return { value: null };
+  }
+  return typeof found === 'number' && Number.isFinite(found) ? { value: found } : null;
+}
+
 function parseReport(value: unknown): ViewReport | null {
   const source = fields(value);
   if (source === null) {
@@ -482,9 +754,13 @@ function parseReport(value: unknown): ViewReport | null {
   const written = count(source, 'written');
   const acking = flag(source, 'acking');
   const bracketedPaste = flag(source, 'bracketedPaste');
+  const focusedHere = flag(source, 'focusedHere');
+  const documentFocused = flag(source, 'documentFocused');
   const tabs = each(source.tabs, parseTabReport);
+  const details = parseDetailsReport(source.details);
   if (
     tabs === null ||
+    details === null ||
     generation === null ||
     cols === null ||
     rows === null ||
@@ -499,7 +775,9 @@ function parseReport(value: unknown): ViewReport | null {
     attached === null ||
     written === null ||
     acking === null ||
-    bracketedPaste === null
+    bracketedPaste === null ||
+    focusedHere === null ||
+    documentFocused === null
   ) {
     return null;
   }
@@ -519,7 +797,10 @@ function parseReport(value: unknown): ViewReport | null {
     written,
     acking,
     bracketedPaste,
+    focusedHere,
+    documentFocused,
     tabs,
+    details,
   };
 }
 
@@ -649,6 +930,10 @@ export function parseHostMessage(value: unknown): HostMessage | null {
     case 'tabs': {
       const tabs = each(source.tabs, parseTabOrder);
       return tabs === null ? null : { kind: 'tabs', tabs };
+    }
+    case 'details': {
+      const view = parseDetailsOrder(source.view);
+      return view === null ? null : { kind: 'details', view };
     }
     case 'probe': {
       const action = parseProbe(source.action);

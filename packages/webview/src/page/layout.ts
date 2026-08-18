@@ -64,7 +64,6 @@ export class PageLayout {
     // So that the keyboard can be somewhere that is not the terminal -- see
     // `focusDetails`.
     this._details.tabIndex = 0;
-    this._details.append(...emptyDetails());
     root.append(this._terminal, this._splitter, this._details);
 
     this._splitter.addEventListener('pointerdown', (event) => { this._startDrag(event); });
@@ -84,6 +83,11 @@ export class PageLayout {
     return this._strip;
   }
 
+  /** Where the details half is drawn (M3.11). Empty until it is told anything. */
+  public get detailsHost(): HTMLElement {
+    return this._details;
+  }
+
   public get terminalWidth(): number {
     return this._terminal.getBoundingClientRect().width;
   }
@@ -98,8 +102,9 @@ export class PageLayout {
    * It is focusable at all because of O6: the half is part of the same document
    * as the terminal, and "the terminal has the keyboard" has to be a question
    * with a false answer -- otherwise the chords this build takes from the editor
-   * would be taken while a person is writing a note. M3.11 will put real fields
-   * here; until then the half itself takes the focus.
+   * would be taken while a person is writing a note. The half itself takes the
+   * focus rather than a field inside it: since M3.11 it holds the record, the
+   * notes and the history, and none of those is edited here.
    */
   public focusDetails(): void {
     this._details.focus();
@@ -170,22 +175,4 @@ export class PageLayout {
 
 function pointer(type: string, x: number, y: number): PointerEvent {
   return new PointerEvent(type, { clientX: x, clientY: y, bubbles: true, cancelable: true });
-}
-
-/**
- * What stands in the details half until M3.11 fills it.
- *
- * Said in words rather than left blank, by the owner's decision of 2026-08-17:
- * an empty half reads as a defect, and a half that says what is coming reads as
- * a plan. It promises nothing it does not have.
- */
-function emptyDetails(): readonly HTMLElement[] {
-  const title = document.createElement('h2');
-  title.textContent = 'Details';
-  const first = document.createElement('p');
-  first.textContent =
-    'What Gripterm knows about the terminal on the left will appear here: session state, the tool it is running, its task and your notes.';
-  const second = document.createElement('p');
-  second.textContent = 'Not built yet. Drag the border — the terminal half follows.';
-  return [title, first, second];
 }

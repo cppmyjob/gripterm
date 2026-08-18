@@ -101,6 +101,17 @@ module.exports = {
     // in this build that no undo of ours reaches (§I.3). A branch of either that
     // nothing exercises is a refusal nobody has checked, and every one of those
     // refusals is standing in front of somebody's running work.
+    // The rule of M3.11, at the same number and for a reason of its own: this
+    // one is the only place in the build that says what Gripterm KNOWS, and
+    // every branch of it is a sentence a person will believe. A branch nothing
+    // exercises is a history drawn as whole when it has a hole in it, or an
+    // event this build cannot read left off a list in silence.
+    'packages/core/src/domain/services/terminal-details.ts': {
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100,
+    },
     'packages/core/src/domain/services/orphan-processes.ts': {
       branches: 100,
       functions: 100,

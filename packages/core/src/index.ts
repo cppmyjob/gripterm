@@ -250,12 +250,16 @@ export {
   type JournalLine,
   type JournalLineDecode,
 } from './infrastructure/store/journal-line';
+export { AnnouncingJournal } from './infrastructure/store/announcing-journal';
 export {
+  JOURNAL_TAIL_WINDOW_BYTES,
   journalDayFiles,
   lastSequenceIn,
   readJournal,
+  readJournalTail,
   type JournalGap,
   type JournalRead,
+  type JournalTail,
 } from './infrastructure/store/journal-reader';
 export { FileSessionSettingsStore } from './infrastructure/store/file-session-settings-store';
 export {
@@ -574,9 +578,23 @@ export {
   CONTEXT_LIVE,
   CONTEXT_OVER,
   presentTerminal,
+  stateWords,
   type PresentationContext,
   type TerminalPresentation,
 } from './domain/services/terminal-presentation';
+
+export {
+  DETAILS_EVENT_LIMIT,
+  describeTerminal,
+  type DetailsEvent,
+  type DetailsFact,
+  type DetailsHeadline,
+  type DetailsInput,
+  type DetailsNote,
+  type DetailsView,
+  type HistoryEvent,
+  type JournalHistory,
+} from './domain/services/terminal-details';
 
 export {
   ATTENTION_STATES,

@@ -208,3 +208,140 @@ body {
   line-height: 1.45;
   opacity: 0.8;
 }
+
+/*
+ * The details half (M3.11). Laid out as a column with the history at the
+ * bottom, because that is the one part that grows without limit: it gets the
+ * leftover height and its own scrollbar, so the record above it never moves off
+ * the screen behind a long day's events.
+ */
+.gripterm-details {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.gripterm-details-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.gripterm-details-head .gripterm-details-icon {
+  align-self: center;
+  font-size: 14px;
+}
+
+.gripterm-details-name {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: normal;
+  opacity: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gripterm-details-state {
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+/* An ended terminal keeps its record and stops drawing the eye. */
+.gripterm-details-over .gripterm-details-name,
+.gripterm-details-over .gripterm-details-state {
+  opacity: 0.6;
+}
+
+.gripterm-details-nothing {
+  margin: 0;
+  line-height: 1.45;
+  opacity: 0.8;
+}
+
+.gripterm-details-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 2px 10px;
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.gripterm-details-facts dt {
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+.gripterm-details-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.gripterm-details-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+}
+
+.gripterm-details-section h3 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+.gripterm-details-task {
+  margin: 0;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.gripterm-details-notes,
+.gripterm-details-events,
+.gripterm-details-notices {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gripterm-details-notes li,
+.gripterm-details-events li {
+  display: flex;
+  gap: 8px;
+  padding: 1px 0;
+  overflow-wrap: anywhere;
+}
+
+.gripterm-details-notes time,
+.gripterm-details-events time {
+  flex: 0 0 auto;
+  opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The one part that grows without limit, so it is the one that scrolls. */
+.gripterm-details-events {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.gripterm-details-events li:last-child {
+  font-weight: 600;
+}
+
+.gripterm-details-notices {
+  flex: 0 0 auto;
+  opacity: 0.85;
+}
+
+.gripterm-details-notice {
+  padding: 2px 0;
+  color: var(--vscode-descriptionForeground);
+}
