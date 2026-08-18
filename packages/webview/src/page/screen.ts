@@ -26,6 +26,8 @@ export interface ScreenOptions {
 export class Screen {
   private readonly _terminal: Terminal;
   private readonly _fit: FitAddon;
+  /** The box this screen was put in, which is where the mouse reaches it. */
+  private readonly _host: HTMLElement;
   private _background = FALLBACK_BACKGROUND;
   private _written = 0;
   /** Which screenful the count belongs to. Bumped by `reset` -- see `write`. */
@@ -50,6 +52,7 @@ export class Screen {
     this._terminal.loadAddon(this._fit);
     this._terminal.loadAddon(new Unicode11Addon());
     this._terminal.unicode.activeVersion = '11';
+    this._host = host;
     this._terminal.open(host);
   }
 
@@ -75,6 +78,18 @@ export class Screen {
 
   public get scrollback(): number {
     return this._terminal.options.scrollback ?? 0;
+  }
+
+  /**
+   * Whether the program on this screen has asked for bracketed paste.
+   *
+   * xterm's own answer, after the request has crossed ConPTY and our channel.
+   * It is what decides whether `paste` wraps the text, so it is reported rather
+   * than assumed: "a paste arrives wrapped" is a promise about two things, and
+   * this is the one that belongs to the program.
+   */
+  public get bracketedPaste(): boolean {
+    return this._terminal.modes.bracketedPasteMode;
   }
 
   /** Which width table is in force -- '11' when the addon took, '6' when not. */
@@ -161,6 +176,95 @@ export class Screen {
   /** Everything the person types, on its way out. */
   public onInput(listener: (data: string) => void): void {
     this._terminal.onData(listener);
+  }
+
+  /**
+   * Whether the keyboard is inside this screen.
+   *
+   * The textarea's own focus and not the page's: the details half is part of the
+   * same document, and a person writing a note in it must not have their arrow
+   * keys taken away (O6). What this drives is the context key the keybindings
+   * hang on, so the difference is the difference between a working note field
+   * and a broken one.
+   */
+  public onFocusChanged(listener: (focused: boolean) => void): void {
+    const textarea = this._terminal.textarea;
+    if (textarea === undefined) {
+      return;
+    }
+    textarea.addEventListener('focus', () => { listener(true); });
+    textarea.addEventListener('blur', () => { listener(false); });
+  }
+
+  /** The right button over the screen. The page decides what it means. */
+  public onRightClick(listener: () => void): void {
+    this._host.addEventListener('contextmenu', (event) => {
+      // Refused to the editor, which would otherwise put its own webview menu
+      // over a terminal where the right button means copy and paste.
+      event.preventDefault();
+      listener();
+    });
+  }
+
+  /**
+   * Leaves some key presses alone, because somebody else is going to answer them.
+   *
+   * The chords of `keys.ts` are contributed to the editor as keybindings of
+   * ours, so each one comes back as a command with the bytes to send. If xterm
+   * ALSO handled the press, the agent would get every one of them twice -- and
+   * the two paths cannot be told apart from the pty's end.
+   *
+   * Returning `false` is xterm's own way of being told to keep out, and it
+   * matters that it does not swallow the event: the press has to go on reaching
+   * the editor, or the keybinding it was taken for would never fire.
+   */
+  public leaveToTheHost(theirs: (event: KeyboardEvent) => boolean): void {
+    this._terminal.attachCustomKeyEventHandler((event) => !theirs(event));
+  }
+
+  /** Puts the keyboard into this screen. */
+  public focus(): void {
+    this._terminal.focus();
+  }
+
+  /**
+   * Text from the clipboard, into the terminal, through xterm's own paste.
+   *
+   * `paste` rather than `input`, and this is the whole reason M3.8 carries the
+   * clipboard across the channel at all: xterm wraps the text in the
+   * bracketed-paste markers when the program has asked for them, and Claude Code
+   * asks. Written straight into the pty, a multi-line paste is a run of Enter
+   * presses -- and the first line leaves as a finished prompt.
+   */
+  public paste(text: string): void {
+    this._terminal.paste(text);
+  }
+
+  /** What the person has selected on the screen, or an empty string. */
+  public selection(): string {
+    return this._terminal.getSelection();
+  }
+
+  /** Selects the whole screen, or nothing -- the two states the right button tells apart. */
+  public select(all: boolean): void {
+    if (all) {
+      this._terminal.selectAll();
+      return;
+    }
+    this._terminal.clearSelection();
+  }
+
+  /**
+   * Dispatches a key press on the element a real one lands on.
+   *
+   * The probe of M3.8, and it is dispatched HERE rather than on the document so
+   * that it takes the same road: xterm's own handler sees it, and it bubbles to
+   * the listener the editor puts on the document to forward key presses to its
+   * keybinding service. What it cannot stand in for is the hardware and the
+   * operating system's own layer -- those are the owner's eyes (M3.14).
+   */
+  public dispatchKey(event: KeyboardEvent): void {
+    this._terminal.textarea?.dispatchEvent(event);
   }
 
   /** The size the screen settled at, which is the size the pty must be told. */

@@ -3,6 +3,7 @@ import '@xterm/xterm/css/xterm.css';
 import './page.css';
 import { PageLayout } from './layout';
 import { Screen } from './screen';
+import { chordById, chordFor, isCopyPress, isPastePress } from '../keys';
 import { parseHostMessage } from '../protocol';
 import type { ProbeAction, ViewMessage, ViewReport } from '../protocol';
 
@@ -142,6 +143,49 @@ async function codiconIsThere(): Promise<boolean> {
   }
 }
 
+/** The legacy code of the one key `Insert`, which is not a letter. */
+const INSERT_KEY_CODE = 45;
+
+/**
+ * A key press, built the way the editor expects to read one.
+ *
+ * `keyCode` is the part that matters and the part `KeyboardEventInit` has no
+ * field for: the editor forwards presses out of this document and dispatches its
+ * own keybindings from `StandardKeyboardEvent`, which reads the legacy
+ * `keyCode`. An event without one is a press the editor sees and cannot name --
+ * and the whole road of M3.8 runs through that dispatch.
+ */
+function keyPress(code: string, held: { readonly ctrlKey?: boolean, readonly shiftKey?: boolean }): KeyboardEvent {
+  const letter = code.slice(-1);
+  const legacy = code === 'Insert' ? INSERT_KEY_CODE : letter.charCodeAt(0);
+  const press = new KeyboardEvent('keydown', {
+    key: code === 'Insert' ? 'Insert' : letter.toLowerCase(),
+    code,
+    ctrlKey: held.ctrlKey ?? false,
+    shiftKey: held.shiftKey ?? false,
+    bubbles: true,
+    cancelable: true,
+  });
+  Object.defineProperty(press, 'keyCode', { get: () => legacy });
+  Object.defineProperty(press, 'which', { get: () => legacy });
+  return press;
+}
+
+/** What the press probe is allowed to name: the six chords, and the two that are not chords. */
+function keyPressFor(id: string): KeyboardEvent | null {
+  const chord = chordById(id);
+  if (chord !== null) {
+    return keyPress(chord.code, { ctrlKey: true });
+  }
+  if (id === 'ctrl+c') {
+    return keyPress('KeyC', { ctrlKey: true });
+  }
+  if (id === 'shift+insert') {
+    return keyPress('Insert', { shiftKey: true });
+  }
+  return null;
+}
+
 /** The line that says a replay begins in the middle of the output rather than at its start. */
 function lostLine(droppedChars: number): string {
   return `${DIM}— ${String(droppedChars)} earlier characters are not kept; this screen begins mid-stream —${PLAIN}\r\n`;
@@ -187,6 +231,7 @@ function start(root: HTMLElement): void {
     attached,
     written: screen.written,
     acking,
+    bracketedPaste: screen.bracketedPaste,
   });
 
   /** Says what this screen has taken, unless the probe has asked it to go silent. */
@@ -234,6 +279,73 @@ function start(root: HTMLElement): void {
     post({ kind: 'resized', terminalId: attached, cols, rows });
   });
 
+  /**
+   * The presses this page does not let xterm answer, and what it does with them.
+   *
+   * Three kinds, and each has a reason xterm must keep out:
+   *
+   *   * a **chord** of `keys.ts` -- the editor is going to hand it back as a
+   *     command with the bytes, and two answers would put two of everything into
+   *     the agent's prompt;
+   *   * **`Ctrl+C` with something selected** -- it copies rather than
+   *     interrupts, which is the owner's decision and the editor's own rule for
+   *     its terminal. With nothing selected this returns false and xterm sends
+   *     the interrupt, which is the whole difference;
+   *   * **`Shift+Insert`** -- a paste, and only the host can read a clipboard.
+   */
+  const answeredHere = (event: KeyboardEvent): boolean => {
+    if (chordFor(event) !== null) {
+      return true;
+    }
+    if (event.type !== 'keydown') {
+      // The releases of those same keys, which must not post a second time.
+      return false;
+    }
+    if (isCopyPress(event)) {
+      const selected = screen.selection();
+      if (selected.length === 0) {
+        return false;
+      }
+      post({ kind: 'copy', text: selected });
+      screen.select(false);
+      return true;
+    }
+    if (isPastePress(event)) {
+      post({ kind: 'wants-paste' });
+      return true;
+    }
+    return false;
+  };
+
+  screen.leaveToTheHost(answeredHere);
+
+  // The keyboard's whereabouts, which is what the context key those keybindings
+  // hang on is made of. The details half is in the same document, so this is the
+  // difference between a terminal that takes the arrow keys and a note field
+  // that can be written in (O6).
+  screen.onFocusChanged((focused) => { post({ kind: 'focused', focused }); });
+
+  /**
+   * The right button: copy what is selected, and paste when nothing is.
+   *
+   * The owner's decision of 2026-08-18, and the editor's own default for its
+   * terminal on Windows. Both halves have to go through the host -- a webview
+   * can neither read nor write the clipboard by itself.
+   */
+  const rightClicked = (): void => {
+    const selected = screen.selection();
+    if (selected.length > 0) {
+      post({ kind: 'copy', text: selected });
+      // Cleared, as the editor's terminal does: a selection left standing makes
+      // the next right button copy again when the person meant to paste.
+      screen.select(false);
+      return;
+    }
+    post({ kind: 'wants-paste' });
+  };
+
+  screen.onRightClick(rightClicked);
+
   whenLayoutChanged = (because): void => {
     if (settling !== null) {
       window.clearTimeout(settling);
@@ -259,8 +371,30 @@ function start(root: HTMLElement): void {
       case 'receipts':
         receipts(action.sending);
         return;
-      default:
+      case 'linger':
         screen.linger(action.ms);
+        return;
+      case 'press': {
+        const press = keyPressFor(action.chord);
+        if (press === null) {
+          post({ kind: 'refused', what: `a press this page does not know: ${action.chord}` });
+          return;
+        }
+        screen.dispatchKey(press);
+        return;
+      }
+      case 'focus':
+        if (action.where === 'terminal') {
+          screen.focus();
+          return;
+        }
+        layout.focusDetails();
+        return;
+      case 'right-click':
+        rightClicked();
+        return;
+      default:
+        screen.select(action.all);
         return;
     }
   };
@@ -318,6 +452,12 @@ function start(root: HTMLElement): void {
           return;
         }
         screen.write(message.data, () => { acknowledge(message.terminalId, message.data.length); });
+        return;
+      case 'paste':
+        // Through xterm rather than into the pty: it is what puts the brackets
+        // around the text, and a multi-line paste without them is a run of
+        // Enter presses with the first line leaving as a finished prompt.
+        screen.paste(message.text);
         return;
       case 'detach':
         if (message.terminalId !== attached) {

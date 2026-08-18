@@ -1,4 +1,13 @@
-import { parseHostMessage, parseViewMessage } from '../../packages/webview/src/protocol';
+import {
+  TERMINAL_CHORDS,
+  chordById,
+  chordFor,
+  isCopyPress,
+  isPastePress,
+  parseHostMessage,
+  parseViewMessage,
+} from '../../packages/webview/src/protocol';
+import * as keys from '../../packages/webview/src/keys';
 
 /**
  * The contract between the page and the extension host, checked from both ends.
@@ -35,6 +44,7 @@ const REPORT = {
   unicodeVersion: '11',
   attached: 'a2f1c8de-0000-4000-8000-000000000001',
   written: 4096,
+  bracketedPaste: true,
   acking: true,
 };
 
@@ -102,6 +112,23 @@ describe('what the host accepts from the page', () => {
     });
   });
 
+  it('takes the word that the keyboard is inside the terminal', () => {
+    // What raises the context key the keybindings hang on. `focusedView` cannot
+    // do it: it is true for the details half as well (O6).
+    expect(parseViewMessage({ kind: 'focused', focused: true })).toEqual({
+      kind: 'focused',
+      focused: true,
+    });
+  });
+
+  it('takes a selection on its way to the clipboard', () => {
+    expect(parseViewMessage({ kind: 'copy', text: 'READY' })).toEqual({ kind: 'copy', text: 'READY' });
+  });
+
+  it('takes the wish to paste, which only the host can grant', () => {
+    expect(parseViewMessage({ kind: 'wants-paste' })).toEqual({ kind: 'wants-paste' });
+  });
+
   it.each([
     ['nothing', null],
     ['a number', 42],
@@ -126,6 +153,9 @@ describe('what the host accepts from the page', () => {
     ['a terminal of no columns', { kind: 'resized', terminalId: 'one', cols: 0, rows: 24 }],
     ['a terminal of fractional rows', { kind: 'resized', terminalId: 'one', cols: 80, rows: 24.5 }],
     ['a size that is not a number at all', { kind: 'resized', terminalId: 'one', cols: Number.NaN, rows: 24 }],
+    ['a word about focus that is not a yes or a no', { kind: 'focused', focused: 'yes' }],
+    ['a copy with nothing to copy', { kind: 'copy' }],
+    ['a copy of something that is not text', { kind: 'copy', text: 42 }],
   ])('refuses %s', (_what, value) => {
     expect(parseViewMessage(value)).toBeNull();
   });
@@ -147,6 +177,7 @@ describe('what the host accepts from the page', () => {
     ['a number where the attached terminal belongs', { ...REPORT, attached: 7 }],
     ['no count of what was written', { ...REPORT, written: undefined }],
     ['no word on whether receipts are being sent', { ...REPORT, acking: undefined }],
+    ['no word on bracketed paste, which decides what a paste means', { ...REPORT, bracketedPaste: undefined }],
   ])('refuses a report with %s', (_what, report) => {
     expect(parseViewMessage({ kind: 'ready', report })).toBeNull();
   });
@@ -193,6 +224,40 @@ describe('what the page accepts from the host', () => {
       kind: 'detach',
       terminalId: 'one',
       because: 'the process ended',
+    });
+  });
+
+  it('takes the clipboard on its way into the terminal', () => {
+    const twoLines = ['first', 'second'].join(String.fromCharCode(10));
+
+    expect(parseHostMessage({ kind: 'paste', text: twoLines })).toEqual({ kind: 'paste', text: twoLines });
+  });
+
+  it('takes the press probe, because a suite has no fingers', () => {
+    expect(parseHostMessage({ kind: 'probe', action: { kind: 'press', chord: 'ctrl+j' } })).toEqual({
+      kind: 'probe',
+      action: { kind: 'press', chord: 'ctrl+j' },
+    });
+  });
+
+  it.each([['terminal'], ['details']])('takes the focus probe for the %s half', (where) => {
+    expect(parseHostMessage({ kind: 'probe', action: { kind: 'focus', where } })).toEqual({
+      kind: 'probe',
+      action: { kind: 'focus', where },
+    });
+  });
+
+  it('takes the right button, which a suite has no hand for', () => {
+    expect(parseHostMessage({ kind: 'probe', action: { kind: 'right-click' } })).toEqual({
+      kind: 'probe',
+      action: { kind: 'right-click' },
+    });
+  });
+
+  it.each([[true], [false]])('takes the selection probe, selecting everything: %s', (all) => {
+    expect(parseHostMessage({ kind: 'probe', action: { kind: 'select', all } })).toEqual({
+      kind: 'probe',
+      action: { kind: 'select', all },
     });
   });
 
@@ -266,7 +331,32 @@ describe('what the page accepts from the host', () => {
     ['a linger with no duration', { kind: 'probe', action: { kind: 'linger' } }],
     ['a linger that is not a duration', { kind: 'probe', action: { kind: 'linger', ms: Number.NaN } }],
     ['a linger of less than nothing', { kind: 'probe', action: { kind: 'linger', ms: -1 } }],
+    ['a paste with nothing in it', { kind: 'paste' }],
+    ['a paste of something that is not text', { kind: 'paste', text: ['a'] }],
+    ['a press with no chord named', { kind: 'probe', action: { kind: 'press' } }],
+    ['a focus probe with no half named', { kind: 'probe', action: { kind: 'focus' } }],
+    ['a focus probe for a half we do not have', { kind: 'probe', action: { kind: 'focus', where: 'notes' } }],
+    ['a selection probe that will not say which way', { kind: 'probe', action: { kind: 'select' } }],
   ])('refuses %s', (_what, value) => {
     expect(parseHostMessage(value)).toBeNull();
+  });
+});
+
+describe('what the package hands the other side', () => {
+  it('carries the chord table itself, and not a copy of it', () => {
+    /*
+     * This file IS the package -- `@gripterm/webview` points at it -- and the
+     * extension host reads the chords through it: the manifest binds them, the
+     * page refuses to answer them, and the command turns them into bytes. If the
+     * entry point stopped carrying them, the host would quietly fall back to
+     * knowing nothing about any chord, and every one of them would be refused
+     * with the terminal in plain sight.
+     */
+    expect(TERMINAL_CHORDS).toBe(keys.TERMINAL_CHORDS);
+    expect(chordById('ctrl+j')).toBe(keys.chordById('ctrl+j'));
+    expect(chordFor({ code: 'KeyJ', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false }))
+      .toBe(keys.chordById('ctrl+j'));
+    expect(isCopyPress({ code: 'KeyC', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false })).toBe(true);
+    expect(isPastePress({ code: 'Insert', ctrlKey: false, altKey: false, shiftKey: true, metaKey: false })).toBe(true);
   });
 });

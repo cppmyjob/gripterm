@@ -109,6 +109,8 @@ import { TerminalDecorationProvider } from './ui/terminal-decorations';
 import { TERMINALS_VIEW_ID, TerminalTreeDataProvider } from './ui/terminal-tree';
 import { WORKBENCH_VIEW_ID, WorkbenchView } from './ui/workbench-view';
 import { TerminalStage } from './ui/terminal-stage';
+import { TERMINAL_FOCUSED_KEY, TerminalKeyboard } from './ui/terminal-keyboard';
+import { registerTerminalKey } from './commands/terminal-key';
 import type { TerminalTreeNode } from './ui/terminal-tree';
 
 /** The agent this build knows how to start, by the name it goes by on a PATH. */
@@ -285,6 +287,14 @@ export interface GriptermApi {
    */
   readonly stage: TerminalStage;
   /**
+   * Who has the keyboard, and what a chord taken from the editor does (M3.8).
+   *
+   * Exposed because the refusals are the acceptance: "a key does not reach the
+   * pty from the details half" is a sentence this object says, and a suite
+   * reading it out of a log would be asserting on a string somebody can reword.
+   */
+  readonly keyboard: TerminalKeyboard;
+  /**
    * The data provider, for the one question only a real host answers about the
    * grouping (M2.14): what the ROOT of the contributed view actually contains.
    * How rows group is decided in `groupTerminals` and covered there.
@@ -405,6 +415,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   );
   const stage = new TerminalStage({ view: workbench, scheduler: new SystemScheduler(), logger });
   context.subscriptions.push(stage);
+  /*
+   * The keyboard of the panel (M3.8).
+   *
+   * The context key is set from here and nowhere else, and the two editor
+   * objects it needs -- the clipboard and `setContext` -- are handed in rather
+   * than reached for, so the rule about WHEN a chord is passed on stays a rule
+   * about our own state.
+   */
+  const keyboard = new TerminalKeyboard({
+    view: workbench,
+    stage,
+    clipboard: {
+      read: async () => await vscode.env.clipboard.readText(),
+      write: async (text) => { await vscode.env.clipboard.writeText(text); },
+    },
+    announce: (focused) => {
+      void vscode.commands.executeCommand('setContext', TERMINAL_FOCUSED_KEY, focused);
+    },
+    logger,
+  });
+  context.subscriptions.push(keyboard);
+  context.subscriptions.push(registerTerminalKey(keyboard));
 
   const location = readLaunchLocation(logger);
   // Read here rather than where it used to be read, further down: the engine is
@@ -825,6 +857,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     tree,
     workbench,
     stage,
+    keyboard,
     readiness: {
       cliPath: cli.path,
       cliVersion: cli.version,

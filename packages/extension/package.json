@@ -100,6 +100,44 @@
         "icon": "$(clear-all)"
       }
     ],
+    "keybindings": [
+      {
+        "command": "gripterm.terminalKey",
+        "args": "ctrl+b",
+        "key": "ctrl+b",
+        "when": "gripterm.terminalFocused"
+      },
+      {
+        "command": "gripterm.terminalKey",
+        "args": "ctrl+j",
+        "key": "ctrl+j",
+        "when": "gripterm.terminalFocused"
+      },
+      {
+        "command": "gripterm.terminalKey",
+        "args": "ctrl+p",
+        "key": "ctrl+p",
+        "when": "gripterm.terminalFocused"
+      },
+      {
+        "command": "gripterm.terminalKey",
+        "args": "ctrl+r",
+        "key": "ctrl+r",
+        "when": "gripterm.terminalFocused"
+      },
+      {
+        "command": "gripterm.terminalKey",
+        "args": "ctrl+w",
+        "key": "ctrl+w",
+        "when": "gripterm.terminalFocused"
+      },
+      {
+        "command": "gripterm.terminalKey",
+        "args": "ctrl+z",
+        "key": "ctrl+z",
+        "when": "gripterm.terminalFocused"
+      }
+    ],
     "menus": {
       "view/title": [
         {

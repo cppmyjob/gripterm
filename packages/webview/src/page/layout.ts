@@ -48,6 +48,9 @@ export class PageLayout {
     this._splitter.setAttribute('aria-orientation', 'vertical');
     this._details = document.createElement('div');
     this._details.className = 'gripterm-details';
+    // So that the keyboard can be somewhere that is not the terminal -- see
+    // `focusDetails`.
+    this._details.tabIndex = 0;
     this._details.append(...emptyDetails());
     root.append(this._terminal, this._splitter, this._details);
 
@@ -68,6 +71,19 @@ export class PageLayout {
 
   public get detailsWidth(): number {
     return this._details.getBoundingClientRect().width;
+  }
+
+  /**
+   * Puts the keyboard into the details half.
+   *
+   * It is focusable at all because of O6: the half is part of the same document
+   * as the terminal, and "the terminal has the keyboard" has to be a question
+   * with a false answer -- otherwise the chords this build takes from the editor
+   * would be taken while a person is writing a note. M3.11 will put real fields
+   * here; until then the half itself takes the focus.
+   */
+  public focusDetails(): void {
+    this._details.focus();
   }
 
   /** Lays the halves out again, or leaves them alone when there is no room to. */

@@ -373,6 +373,36 @@ export class WorkbenchView implements vscode.WebviewViewProvider, vscode.Disposa
   }
 
   /**
+   * Presses a chord on the page, the way a person's finger does as far as a
+   * page can.
+   *
+   * The seam of M3.8: a suite has no keyboard, and "the key reaches the agent"
+   * is the acceptance line. The event is dispatched on xterm's own textarea, so
+   * everything after it is the real road -- the editor's forwarding of key
+   * presses out of the webview, our context key, our keybinding, our command.
+   * What it cannot stand in for is the hardware and the operating system's
+   * layer; those are the owner's eyes (M3.14).
+   */
+  public press(chord: string): void {
+    this._post({ kind: 'probe', action: { kind: 'press', chord } });
+  }
+
+  /** Puts the keyboard into one half of the page, which is what O6 is about. */
+  public focusHalf(where: 'terminal' | 'details'): void {
+    this._post({ kind: 'probe', action: { kind: 'focus', where } });
+  }
+
+  /** Selects the whole screen, or nothing: the two states the right button tells apart. */
+  public select(all: boolean): void {
+    this._post({ kind: 'probe', action: { kind: 'select', all } });
+  }
+
+  /** The right button over the terminal, which a suite has no hand for. */
+  public rightClick(): void {
+    this._post({ kind: 'probe', action: { kind: 'right-click' } });
+  }
+
+  /**
    * Asks the page to reach for something the policy forbids, and waits to hear
    * that it was stopped.
    *

@@ -75,6 +75,16 @@ export interface ViewReport {
    */
   readonly written: number;
   /**
+   * Whether the terminal on this screen has asked for bracketed paste.
+   *
+   * The program's own request (DECSET 2004) as xterm understands it after the
+   * request has crossed ConPTY, our channel and a replay. It is reported because
+   * the promise of M3.8 -- "a paste arrives wrapped" -- is only true while this
+   * is true, and a suite that asserted the wrapping without asserting this would
+   * be unable to tell "we sent it wrong" from "the program never asked".
+   */
+  readonly bracketedPaste: boolean;
+  /**
    * Whether the page is sending receipts.
    *
    * Here because the integration suite turns it OFF on purpose: with no way to
@@ -108,7 +118,21 @@ export type ViewMessage =
    * coalesced the stream of layout changes into one `fit` -- so this is the
    * trailing edge of the debounce rather than a second one.
    */
-  | { readonly kind: 'resized', readonly terminalId: string, readonly cols: number, readonly rows: number };
+  | { readonly kind: 'resized', readonly terminalId: string, readonly cols: number, readonly rows: number }
+  /**
+   * The keyboard is inside the terminal, or it has left it.
+   *
+   * What raises and lowers the context key the keybindings hang on, and the
+   * reason it is the PAGE that says so rather than the editor: `focusedView` is
+   * true for the whole panel, so the details half would take the arrow keys and
+   * `Esc` away from a person editing a note in it (O6). Only the terminal
+   * element's own focus means the terminal has the keyboard.
+   */
+  | { readonly kind: 'focused', readonly focused: boolean }
+  /** The selection, on its way to the clipboard: a webview cannot write it itself. */
+  | { readonly kind: 'copy', readonly text: string }
+  /** The person asked to paste, and only the host can read the clipboard. */
+  | { readonly kind: 'wants-paste' };
 
 export type HostMessage =
   | { readonly kind: 'restyle', readonly fontFamily: string, readonly fontSize: number }
@@ -136,6 +160,17 @@ export type HostMessage =
   | { readonly kind: 'output', readonly terminalId: string, readonly data: string }
   /** This terminal is no longer on this screen, and why -- it ended, or another took its place. */
   | { readonly kind: 'detach', readonly terminalId: string, readonly because: string }
+  /**
+   * The clipboard, on its way into the terminal.
+   *
+   * It travels this way -- host reads, page pastes -- for one reason, and it is
+   * the defect M3.8 exists to avoid: the text must reach the pty through
+   * `term.paste`, which wraps it in the bracketed-paste markers the CLI turns
+   * on. Written straight into the pty instead, a multi-line paste arrives as a
+   * run of Enter presses, and Claude Code sends the first line as a finished
+   * prompt.
+   */
+  | { readonly kind: 'paste', readonly text: string }
   /**
    * The seam the integration suite drives the page through, and it is named
    * `probe` so that nobody has to guess what it is for.
@@ -173,7 +208,36 @@ export type ProbeAction =
   | { readonly kind: 'type', readonly text: string }
   | { readonly kind: 'receipts', readonly sending: boolean }
   /** Milliseconds the screen takes over each message before it counts as taken in. `0` is off. */
-  | { readonly kind: 'linger', readonly ms: number };
+  | { readonly kind: 'linger', readonly ms: number }
+  /**
+   * Presses a chord the way a person does, as far as a page can.
+   *
+   * The seam for the whole of M3.8, and the reason it exists: a suite has no
+   * keyboard, and "the key reaches the agent" is the acceptance line. The event
+   * is dispatched on the page's own document, which is where a real one lands
+   * too -- so what runs afterwards is the editor's forwarding, our keybinding,
+   * our context key and our command, rather than a copy of any of them. What it
+   * does NOT prove is the hardware and the operating system's own layer; that is
+   * the owner's eyes in M3.14.
+   */
+  | { readonly kind: 'press', readonly chord: string }
+  /** Puts the keyboard into one half of the page or the other. */
+  | { readonly kind: 'focus', readonly where: 'terminal' | 'details' }
+  /** The right button, over the terminal: copy when there is a selection, paste when there is not. */
+  | { readonly kind: 'right-click' }
+  /** Selects everything on the screen, or nothing -- the two states the right button tells apart. */
+  | { readonly kind: 'select', readonly all: boolean };
+
+/**
+ * The chord table, from the one file that holds it.
+ *
+ * Re-exported here because this file IS the package: `@gripterm/webview` points
+ * at it, and the extension needs the same list the page refuses to handle. A
+ * second copy on the host's side is precisely the drift this table exists to
+ * prevent.
+ */
+export { TERMINAL_CHORDS, chordById, chordFor, isCopyPress, isPastePress } from './keys';
+export type { KeyPress, TerminalChord } from './keys';
 
 type Fields = Record<string, unknown>;
 
@@ -236,6 +300,7 @@ function parseReport(value: unknown): ViewReport | null {
   const attached = textOrNothing(source, 'attached');
   const written = count(source, 'written');
   const acking = flag(source, 'acking');
+  const bracketedPaste = flag(source, 'bracketedPaste');
   if (
     generation === null ||
     cols === null ||
@@ -250,7 +315,8 @@ function parseReport(value: unknown): ViewReport | null {
     unicodeVersion === null ||
     attached === null ||
     written === null ||
-    acking === null
+    acking === null ||
+    bracketedPaste === null
   ) {
     return null;
   }
@@ -269,6 +335,7 @@ function parseReport(value: unknown): ViewReport | null {
     attached: attached.value,
     written,
     acking,
+    bracketedPaste,
   };
 }
 
@@ -324,6 +391,16 @@ export function parseViewMessage(value: unknown): ViewMessage | null {
         ? null
         : { kind: 'resized', terminalId, cols, rows };
     }
+    case 'focused': {
+      const focused = flag(source, 'focused');
+      return focused === null ? null : { kind: 'focused', focused };
+    }
+    case 'copy': {
+      const copied = text(source, 'text');
+      return copied === null ? null : { kind: 'copy', text: copied };
+    }
+    case 'wants-paste':
+      return { kind: 'wants-paste' };
     default:
       return null;
   }
@@ -373,6 +450,10 @@ export function parseHostMessage(value: unknown): HostMessage | null {
       const because = text(source, 'because');
       return terminalId === null || because === null ? null : { kind: 'detach', terminalId, because };
     }
+    case 'paste': {
+      const pasted = text(source, 'text');
+      return pasted === null ? null : { kind: 'paste', text: pasted };
+    }
     case 'probe': {
       const action = parseProbe(source.action);
       return action === null ? null : { kind: 'probe', action };
@@ -407,6 +488,20 @@ function parseProbe(value: unknown): ProbeAction | null {
       // is refused is a delay that is not a duration at all.
       const ms = count(source, 'ms');
       return ms === null || ms < 0 ? null : { kind: 'linger', ms };
+    }
+    case 'press': {
+      const chord = text(source, 'chord');
+      return chord === null ? null : { kind: 'press', chord };
+    }
+    case 'focus': {
+      const where = text(source, 'where');
+      return where === 'terminal' || where === 'details' ? { kind: 'focus', where } : null;
+    }
+    case 'right-click':
+      return { kind: 'right-click' };
+    case 'select': {
+      const all = flag(source, 'all');
+      return all === null ? null : { kind: 'select', all };
     }
     default:
       return null;

@@ -47,6 +47,7 @@ module.exports = {
     '!packages/core/src/index.ts',
     'packages/webview/src/protocol.ts',
     'packages/webview/src/split-rule.ts',
+    'packages/webview/src/keys.ts',
   ],
   coverageThreshold: {
     global: {
@@ -141,6 +142,15 @@ module.exports = {
       statements: 100,
     },
     'packages/webview/src/split-rule.ts': {
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100,
+    },
+    // The one list of chords the manifest, the page and the command all read.
+    // A branch of it that nothing exercises is a key press going somewhere
+    // nobody named -- to the editor, to the agent, or nowhere at all.
+    'packages/webview/src/keys.ts': {
       branches: 100,
       functions: 100,
       lines: 100,
