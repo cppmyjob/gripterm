@@ -50,6 +50,24 @@ const PTY_KEEP = ['package.json', 'LICENSE', 'lib', 'prebuilds'];
 const PTY_DROP = ['.pdb', '.map', '.test.js'];
 
 /**
+ * Directories inside those the copy refuses whole, by name.
+ *
+ * `prebuilds/<platform>/conpty/` holds `conpty.dll` and `OpenConsole.exe` -- a
+ * newer ConPTY than the one Windows ships -- and `conpty.node` loads them only
+ * when `useConptyDll: true` reaches it (`windowsPtyAgent.js`, which defaults the
+ * flag to `false`, and the string "Failed to load conpty.dll" inside the addon).
+ * Nothing in this build passes that flag, so the two files are 2.5 MB across the
+ * two Windows platforms that no install of ours ever opens: owner's decision
+ * 2026-08-18, taken over keeping a future switch free.
+ *
+ * The deadline on it is a test rather than a comment:
+ * `tests/extension/packaging.test.ts` asserts the archive carries no `conpty`
+ * directory, so switching `useConptyDll` on without putting these back turns the
+ * suite red instead of leaving the native code to fail at a person's terminal.
+ */
+const PTY_DROP_DIRS = ['conpty'];
+
+/**
  * Where the page lands: beside the bundle, in `dist/webview/`.
  *
  * `.vscodeignore` keeps `src/`, `out/` and every `.ts` out of the archive but
@@ -117,10 +135,10 @@ const pageOptions = {
   logLevel: 'info',
 };
 
-/** Whether this file is one the copy keeps. Directories are always descended into. */
+/** Whether this file is one the copy keeps. A refused directory is not descended into at all. */
 function wanted(source) {
   if (fs.statSync(source).isDirectory()) {
-    return true;
+    return !PTY_DROP_DIRS.includes(path.basename(source));
   }
   return !PTY_DROP.some((suffix) => source.endsWith(suffix));
 }
@@ -150,6 +168,30 @@ function measure(directory) {
 }
 
 /**
+ * Where the installed node-pty is, or a refusal a person can act on.
+ *
+ * `require.resolve` throws `MODULE_NOT_FOUND` with a message about a path, which
+ * says nothing about what the build was doing or what it costs to carry on
+ * without it. The cost is the whole reason a missing package stops the build: a
+ * bundle made without the addon works perfectly until somebody chooses the other
+ * engine, and then falls back to the editor's -- audibly in the log and invisibly
+ * on screen.
+ */
+function ptyPackageDir() {
+  try {
+    return path.dirname(require.resolve('node-pty/package.json'));
+  } catch (cause) {
+    throw new Error(
+      'node-pty is not installed, so this bundle would ship without the addon the `own` engine ' +
+      'loads. Run `pnpm install`. The build stops here rather than carrying on: an extension ' +
+      'packaged without the copy still starts, and every window that asked for ' +
+      '`gripterm.terminal.engine: own` silently gets a terminal made by the editor instead.',
+      { cause }
+    );
+  }
+}
+
+/**
  * Puts node-pty where the extension can require it at runtime.
  *
  * Part of `build:extension` and not only of `package`, deliberately: the
@@ -163,7 +205,7 @@ function measure(directory) {
  * until somebody selects the other engine.
  */
 function copyNodePty() {
-  const packageDir = path.dirname(require.resolve('node-pty/package.json'));
+  const packageDir = ptyPackageDir();
 
   fs.rmSync(PTY_DESTINATION, { recursive: true, force: true });
   fs.mkdirSync(PTY_DESTINATION, { recursive: true });

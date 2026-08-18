@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.integration.json",
+  // Built by the same rules as the integration suite and kept out of its glob on
+  // purpose: this one is loaded by an editor that has no development extension at
+  // all, and runs against the archive `vsce package` produced. `pnpm test:vsix`
+  // is the only thing that compiles or runs it.
+  "include": ["tests/vsix/**/*.ts"]
+}

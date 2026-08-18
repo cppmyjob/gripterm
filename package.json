@@ -14,11 +14,12 @@
     "typecheck": "tsc --build && tsc -p tsconfig.eslint.json",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
-    "test": "tsc -p tsconfig.eslint.json && jest",
-    "test:coverage": "tsc -p tsconfig.eslint.json && jest --coverage",
+    "test": "pnpm run build && pnpm run build:extension && tsc -p tsconfig.eslint.json && jest",
+    "test:coverage": "pnpm run build && pnpm run build:extension && tsc -p tsconfig.eslint.json && jest --coverage",
     "build:integration": "tsc -p tsconfig.integration.json",
     "test:integration": "pnpm run build && pnpm run build:extension && pnpm run build:integration && vscode-test",
     "package": "pnpm run build && pnpm run build:extension && pnpm --filter gripterm run package",
+    "test:vsix": "tsc -p tsconfig.vsix.json && node tests/vsix/run.mjs",
     "test:acceptance": "pnpm run build && pnpm run build:extension && tsc -p tsconfig.acceptance.json && node tests/acceptance/run.mjs"
   },
   "pnpm": {

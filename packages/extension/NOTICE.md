@@ -1,7 +1,14 @@
 # Notices
 
-Gripterm is licensed under Apache-2.0. It redistributes the following work, and
-these notices are a condition of doing so rather than a courtesy.
+Copyright 2026 Pavel Tsukanov.
+
+Gripterm is licensed under the Apache License, Version 2.0. The text of that
+licence travels in this archive as `LICENSE.txt`, unmodified — section 4(a) makes
+that a condition of distributing the work, not a courtesy, and until 2026-08-18
+the archive claimed the licence in two places and carried the text in none.
+
+It redistributes the following work, and these notices are a condition of doing
+so rather than a courtesy.
 
 ## Codicons (`@vscode/codicons`)
 
