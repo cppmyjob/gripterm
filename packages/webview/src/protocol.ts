@@ -85,6 +85,19 @@ export interface ViewReport {
    */
   readonly bracketedPaste: boolean;
   /**
+   * The strip as the page really DREW it -- one entry per tab on screen.
+   *
+   * Not an echo of what the host sent: every field here is read back off the
+   * document, and two of them cannot be read anywhere else. `glyph` is the
+   * character the codicon font actually put in the tab, so an icon id carried
+   * across literally (`sync~spin` as one class) reports `none` instead of a
+   * turning arrow -- which is the defect of M3.9 and is otherwise invisible in
+   * everything but a screenshot. `colour` is what the editor's own variable
+   * resolved to, so "the theme gave us this colour" is a value rather than an
+   * assumption in a stylesheet.
+   */
+  readonly tabs: readonly TabReport[];
+  /**
    * Whether the page is sending receipts.
    *
    * Here because the integration suite turns it OFF on purpose: with no way to
@@ -93,6 +106,46 @@ export interface ViewReport {
    * reports too.
    */
   readonly acking: boolean;
+}
+
+/**
+ * One tab, as the host orders it drawn.
+ *
+ * The same fields `stripTabs` produces in the core, carried across without a
+ * translation of their own -- the translations happen in the page, where the
+ * document is (`tab-look.ts`), because they are about CSS and not about
+ * terminals.
+ */
+export interface TabOrder {
+  readonly terminalId: string;
+  readonly label: string;
+  /** A `ThemeIcon` id, modifier and all. Turned into classes by the page. */
+  readonly iconId: string;
+  readonly colorId: string | null;
+  readonly active: boolean;
+  readonly attention: boolean;
+  readonly over: boolean;
+}
+
+/** One tab, as the page found it on its own screen afterwards. */
+export interface TabReport {
+  readonly terminalId: string;
+  readonly label: string;
+  readonly active: boolean;
+  readonly attention: boolean;
+  readonly over: boolean;
+  /**
+   * The character the codicon font put in this tab, or `none` when it put
+   * nothing there.
+   *
+   * The measurement the whole icon question turns on. A class the stylesheet
+   * has no rule for leaves `content` at `none`, which is exactly what a
+   * literally-carried `sync~spin` produces -- and what a person sees as an empty
+   * space where a state should be.
+   */
+  readonly glyph: string;
+  /** What the icon's theme variable resolved to, or an empty string when the theme has none. */
+  readonly colour: string;
 }
 
 export type ViewMessage =
@@ -132,7 +185,25 @@ export type ViewMessage =
   /** The selection, on its way to the clipboard: a webview cannot write it itself. */
   | { readonly kind: 'copy', readonly text: string }
   /** The person asked to paste, and only the host can read the clipboard. */
-  | { readonly kind: 'wants-paste' };
+  | { readonly kind: 'wants-paste' }
+  /**
+   * The person clicked a tab: show me this one.
+   *
+   * A wish and not an act. Which terminal the panel is showing is one answer
+   * owned by the stage (`terminal-stage.ts`), asked from four directions that
+   * cannot see each other -- so the strip is one more caller of `shown` rather
+   * than a second copy of that state.
+   */
+  | { readonly kind: 'chose', readonly terminalId: string }
+  /**
+   * The person clicked the cross on a tab.
+   *
+   * Also a wish, and this one has to be: closing a terminal is what writes
+   * `closedAt`, which is the mark that keeps a record from ever coming back
+   * (§4.2). A page that disposed of it itself would have gone round the one
+   * command that owns that decision.
+   */
+  | { readonly kind: 'wants-close', readonly terminalId: string };
 
 export type HostMessage =
   | { readonly kind: 'restyle', readonly fontFamily: string, readonly fontSize: number }
@@ -171,6 +242,20 @@ export type HostMessage =
    * prompt.
    */
   | { readonly kind: 'paste', readonly text: string }
+  /**
+   * The whole strip, and it is the whole of it every time.
+   *
+   * A list rather than a delta, for the reason every list in this build is one
+   * (M2.5): a page that applied differences would drift the moment one message
+   * was lost, and a strip that has drifted is a person clicking the tab of an
+   * agent that is not there. It is also AUTHORITATIVE -- a screen the host no
+   * longer lists is a screen the page disposes of, which is what keeps a closed
+   * terminal's xterm from living on in a page nobody rebuilt.
+   *
+   * Which tab is `active` travels inside the list rather than beside it, so the
+   * page cannot be told to show a terminal that has no tab.
+   */
+  | { readonly kind: 'tabs', readonly tabs: readonly TabOrder[] }
   /**
    * The seam the integration suite drives the page through, and it is named
    * `probe` so that nobody has to guess what it is for.
@@ -226,7 +311,18 @@ export type ProbeAction =
   /** The right button, over the terminal: copy when there is a selection, paste when there is not. */
   | { readonly kind: 'right-click' }
   /** Selects everything on the screen, or nothing -- the two states the right button tells apart. */
-  | { readonly kind: 'select', readonly all: boolean };
+  | { readonly kind: 'select', readonly all: boolean }
+  /**
+   * Clicks a tab, and clicks the cross on one.
+   *
+   * The seam of M3.9, and the same rule as every probe above it: the click is
+   * dispatched on the element a person's mouse would hit, so what runs
+   * afterwards is our handler, our message, our command -- not a second
+   * implementation of any of them. What it does not stand in for is the mouse
+   * and the operating system's own layer (M3.14).
+   */
+  | { readonly kind: 'click-tab', readonly terminalId: string }
+  | { readonly kind: 'click-close', readonly terminalId: string };
 
 /**
  * The chord table, from the one file that holds it.
@@ -238,6 +334,16 @@ export type ProbeAction =
  */
 export { TERMINAL_CHORDS, chordById, chordFor, isCopyPress, isPastePress } from './keys';
 export type { KeyPress, TerminalChord } from './keys';
+
+/**
+ * The two translations a tab needs, from the one file that holds them.
+ *
+ * Re-exported for the same reason the chord table is: this file IS the package.
+ * Nothing on the host's side draws a tab, but the suite that checks what the
+ * page drew has to be able to say what it should have drawn -- and a second
+ * copy of the rule in the suite would agree with the page about anything.
+ */
+export { codiconClasses, themeColorVariable } from './tab-look';
 
 type Fields = Record<string, unknown>;
 
@@ -281,6 +387,81 @@ function textOrNothing(source: Fields, key: string): { readonly value: string | 
   return typeof found === 'string' ? { value: found } : null;
 }
 
+/**
+ * A list of things, each of which has to be one.
+ *
+ * Every element is parsed, and one bad element refuses the whole list. A report
+ * with three good tabs and one hole is not a report about a strip: the page
+ * either drew what it was told to or it did not, and a suite reading the good
+ * three would be asserting about a strip that never existed.
+ */
+function each<T>(value: unknown, parse: (item: unknown) => T | null): readonly T[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const parsed: T[] = [];
+  for (const item of value as readonly unknown[]) {
+    const one = parse(item);
+    if (one === null) {
+      return null;
+    }
+    parsed.push(one);
+  }
+  return parsed;
+}
+
+function parseTabReport(value: unknown): TabReport | null {
+  const source = fields(value);
+  if (source === null) {
+    return null;
+  }
+  const terminalId = text(source, 'terminalId');
+  const label = text(source, 'label');
+  const active = flag(source, 'active');
+  const attention = flag(source, 'attention');
+  const over = flag(source, 'over');
+  const glyph = text(source, 'glyph');
+  const colour = text(source, 'colour');
+  if (
+    terminalId === null ||
+    label === null ||
+    active === null ||
+    attention === null ||
+    over === null ||
+    glyph === null ||
+    colour === null
+  ) {
+    return null;
+  }
+  return { terminalId, label, active, attention, over, glyph, colour };
+}
+
+function parseTabOrder(value: unknown): TabOrder | null {
+  const source = fields(value);
+  if (source === null) {
+    return null;
+  }
+  const terminalId = text(source, 'terminalId');
+  const label = text(source, 'label');
+  const iconId = text(source, 'iconId');
+  const colorId = textOrNothing(source, 'colorId');
+  const active = flag(source, 'active');
+  const attention = flag(source, 'attention');
+  const over = flag(source, 'over');
+  if (
+    terminalId === null ||
+    label === null ||
+    iconId === null ||
+    colorId === null ||
+    active === null ||
+    attention === null ||
+    over === null
+  ) {
+    return null;
+  }
+  return { terminalId, label, iconId, colorId: colorId.value, active, attention, over };
+}
+
 function parseReport(value: unknown): ViewReport | null {
   const source = fields(value);
   if (source === null) {
@@ -301,7 +482,9 @@ function parseReport(value: unknown): ViewReport | null {
   const written = count(source, 'written');
   const acking = flag(source, 'acking');
   const bracketedPaste = flag(source, 'bracketedPaste');
+  const tabs = each(source.tabs, parseTabReport);
   if (
+    tabs === null ||
     generation === null ||
     cols === null ||
     rows === null ||
@@ -336,6 +519,7 @@ function parseReport(value: unknown): ViewReport | null {
     written,
     acking,
     bracketedPaste,
+    tabs,
   };
 }
 
@@ -401,6 +585,14 @@ export function parseViewMessage(value: unknown): ViewMessage | null {
     }
     case 'wants-paste':
       return { kind: 'wants-paste' };
+    case 'chose': {
+      const terminalId = text(source, 'terminalId');
+      return terminalId === null ? null : { kind: 'chose', terminalId };
+    }
+    case 'wants-close': {
+      const terminalId = text(source, 'terminalId');
+      return terminalId === null ? null : { kind: 'wants-close', terminalId };
+    }
     default:
       return null;
   }
@@ -454,6 +646,10 @@ export function parseHostMessage(value: unknown): HostMessage | null {
       const pasted = text(source, 'text');
       return pasted === null ? null : { kind: 'paste', text: pasted };
     }
+    case 'tabs': {
+      const tabs = each(source.tabs, parseTabOrder);
+      return tabs === null ? null : { kind: 'tabs', tabs };
+    }
     case 'probe': {
       const action = parseProbe(source.action);
       return action === null ? null : { kind: 'probe', action };
@@ -502,6 +698,14 @@ function parseProbe(value: unknown): ProbeAction | null {
     case 'select': {
       const all = flag(source, 'all');
       return all === null ? null : { kind: 'select', all };
+    }
+    case 'click-tab': {
+      const terminalId = text(source, 'terminalId');
+      return terminalId === null ? null : { kind: 'click-tab', terminalId };
+    }
+    case 'click-close': {
+      const terminalId = text(source, 'terminalId');
+      return terminalId === null ? null : { kind: 'click-close', terminalId };
     }
     default:
       return null;

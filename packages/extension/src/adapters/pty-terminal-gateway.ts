@@ -39,6 +39,20 @@ const TERM_NAME = 'xterm-256color';
  * the first byte, and 80x30 is what the measurement stand of M3.2 ran `claude`
  * under.
  */
+/**
+ * How long a pty is left alone after its first output before a size that was
+ * waiting for it is applied.
+ *
+ * A measured platform fact and not a preference (2026-08-18): applied ON that
+ * first output, or one frame after it, the resize is LOST -- ConPTY puts no
+ * `ESC[8;rows;cols t` in the output stream and the client console keeps the size
+ * it was spawned with, so an agent draws every frame at a width nobody has.
+ * Sixteen milliseconds was still too early; a quarter of a second takes, every
+ * time. It is spent once per terminal, before there is anything on the screen
+ * to resize.
+ */
+const RESIZE_AFTER_FIRST_OUTPUT_MS = 250;
+
 const INITIAL_COLS = 80;
 const INITIAL_ROWS = 30;
 
@@ -508,7 +522,21 @@ export class PtyTerminalHandle implements TerminalHandle {
     }
   }
 
-  /** The first thing this pty ever printed: from here, calls to it are not queued. */
+  /**
+   * The first thing this pty ever printed: from here, calls to it are not
+   * queued -- but the size that was waiting goes a beat later.
+   *
+   * **The beat is a measured platform fact (2026-08-18).** A resize applied in
+   * the same turn as the pseudoconsole's first data event is lost, and so is one
+   * applied a frame later: ConPTY acknowledges nothing in the output stream and
+   * the client console keeps the size it was spawned with, so the agent draws
+   * its first frame -- and every frame after it -- at a width nobody has. The
+   * same call a quarter of a second later takes, every time.
+   *
+   * The condition for taking this out: a ConPTY that answers a resize made on
+   * top of its first output. Until then the number is in
+   * `RESIZE_AFTER_FIRST_OUTPUT_MS`, where it is explained rather than tuned.
+   */
   private _itSpoke(): void {
     if (this._spoke) {
       return;
@@ -516,9 +544,14 @@ export class PtyTerminalHandle implements TerminalHandle {
     this._spoke = true;
     const wanted = this._wantedSize;
     this._wantedSize = null;
-    if (wanted !== null) {
-      this.resize(wanted.cols, wanted.rows);
+    if (wanted === null) {
+      return;
     }
+    setTimeout(() => {
+      // Still worth doing if the terminal has gone in the meantime: `resize`
+      // refuses for an ended pty by itself, and refuses out loud.
+      this.resize(wanted.cols, wanted.rows);
+    }, RESIZE_AFTER_FIRST_OUTPUT_MS);
   }
 
   private _kill(cause: TerminalExitCause): void {

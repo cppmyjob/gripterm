@@ -32,9 +32,132 @@ body {
 }
 
 .gripterm-terminal {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   overflow: hidden;
   background: var(--vscode-terminal-background, var(--vscode-panel-background));
+}
+
+/*
+ * The strip of tabs, over the terminal and inside its half.
+ *
+ * `flex: 0 0 auto` so that it takes what it needs and the screens take the
+ * rest: the panel is short, and a strip that grew would take its height out of
+ * the one thing a person is reading.
+ */
+.gripterm-strip {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  gap: 1px;
+  background: var(--vscode-panel-background);
+  border-bottom: 1px solid var(--vscode-panel-border, transparent);
+  scrollbar-width: none;
+}
+
+.gripterm-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 200px;
+  padding: 3px 6px 3px 8px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--vscode-foreground);
+  opacity: 0.7;
+  border-bottom: 1px solid transparent;
+}
+
+.gripterm-tab:hover {
+  opacity: 0.9;
+  background: var(--vscode-list-hoverBackground, transparent);
+}
+
+/*
+ * The tab on screen. Marked with a line under it rather than a wash of colour,
+ * because the icon's colour is already carrying the state -- and two colours in
+ * one tab is a tab a person has to decode.
+ */
+.gripterm-tab-active {
+  opacity: 1;
+  background: var(--vscode-tab-activeBackground, var(--vscode-panel-background));
+  border-bottom-color: var(--vscode-focusBorder);
+}
+
+/* The process behind this one is gone. It stays until the cross is clicked. */
+.gripterm-tab-over {
+  opacity: 0.5;
+}
+
+.gripterm-tab-over .gripterm-tab-label {
+  text-decoration: line-through;
+}
+
+.gripterm-tab-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--vscode-font-size);
+}
+
+.gripterm-tab-icon,
+.gripterm-tab-mark,
+.gripterm-tab-close {
+  flex: 0 0 auto;
+  font-size: 14px;
+}
+
+/* The mark of an agent that has stopped and is waiting for a person. */
+.gripterm-tab-mark {
+  font-size: 8px;
+  color: var(--vscode-charts-yellow, var(--vscode-editorWarning-foreground));
+}
+
+.gripterm-tab-close {
+  opacity: 0;
+  border-radius: 3px;
+}
+
+/*
+ * The cross appears on the tab under the pointer and on the one on screen, and
+ * it is always there for a terminal whose process has gone -- that tab exists
+ * in order to be closed.
+ */
+.gripterm-tab:hover .gripterm-tab-close,
+.gripterm-tab-active .gripterm-tab-close,
+.gripterm-tab-over .gripterm-tab-close {
+  opacity: 0.8;
+}
+
+.gripterm-tab-close:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground, transparent);
+}
+
+/*
+ * Where the screens are stacked, one on top of another.
+ *
+ * `position: relative` and absolute children, so every screen -- shown or not --
+ * has the same box and the same size. Hidden ones are `visibility: hidden` and
+ * never `display: none`: a box with no display has no geometry, and
+ * `FitAddon.proposeDimensions()` answers NaN for it (xterm.js#3029).
+ */
+.gripterm-screens {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.gripterm-screen {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
 }
 
 /*

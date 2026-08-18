@@ -92,6 +92,19 @@ export class Screen {
     return this._terminal.modes.bracketedPasteMode;
   }
 
+  /**
+   * Whether the keyboard is inside this screen right now.
+   *
+   * xterm's own textarea against the document's answer, rather than a flag kept
+   * beside the focus events: a switch between tabs has to leave the keyboard
+   * where it was, and a second copy of "who has the keyboard" is exactly the
+   * kind that ends up disagreeing with the browser after one missed event.
+   */
+  public get focused(): boolean {
+    const textarea = this._terminal.textarea;
+    return textarea !== undefined && document.activeElement === textarea;
+  }
+
   /** Which width table is in force -- '11' when the addon took, '6' when not. */
   public get unicodeVersion(): string {
     return this._terminal.unicode.activeVersion;

@@ -48,6 +48,7 @@ module.exports = {
     'packages/webview/src/protocol.ts',
     'packages/webview/src/split-rule.ts',
     'packages/webview/src/keys.ts',
+    'packages/webview/src/tab-look.ts',
   ],
   coverageThreshold: {
     global: {
@@ -151,6 +152,23 @@ module.exports = {
     // A branch of it that nothing exercises is a key press going somewhere
     // nobody named -- to the editor, to the agent, or nowhere at all.
     'packages/webview/src/keys.ts': {
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100,
+    },
+    // The two rules of M3.9, and they are here because both of their failures
+    // are SILENT: a codicon class that matches no rule draws an empty box, and a
+    // colour that is not a colour is ignored by the browser without a word. The
+    // strip is what a person switches agents with, so a tab drawn without its
+    // state is a state nobody sees.
+    'packages/webview/src/tab-look.ts': {
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100,
+    },
+    'packages/core/src/domain/services/terminal-strip.ts': {
       branches: 100,
       functions: 100,
       lines: 100,

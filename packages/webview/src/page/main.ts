@@ -2,22 +2,25 @@ import '@vscode/codicons/dist/codicon.css';
 import '@xterm/xterm/css/xterm.css';
 import './page.css';
 import { PageLayout } from './layout';
-import { Screen } from './screen';
+import { PageStrip } from './strip';
+import { Screens } from './screens';
 import { chordById, chordFor, isCopyPress, isPastePress } from '../keys';
 import { parseHostMessage } from '../protocol';
-import type { ProbeAction, ViewMessage, ViewReport } from '../protocol';
+import type { ProbeAction, TabOrder, ViewMessage, ViewReport } from '../protocol';
+import type { Screen } from './screen';
 
 /**
  * The page Gripterm draws in its panel.
  *
- * It does four things and says what it did: it lays out the two halves, it puts
- * a terminal screen in the left one, it carries that terminal's bytes in both
- * directions, and it REPORTS -- its own box, its own font, its own policy
- * violations, and since M3.7 how much it has written and whether it is
- * acknowledging what it is sent. The reporting is not instrumentation added for
- * a suite; it is how anything here can be checked at all. "The agent's output
- * arrived" is otherwise a claim somebody makes by looking at a screen, and this
- * repository does not accept those (§I.1).
+ * It does five things and says what it did: it lays out the two halves, it keeps
+ * a screen for every terminal the panel holds, it draws the strip that switches
+ * between them, it carries those terminals' bytes in both directions, and it
+ * REPORTS -- its own box, its own font, its own policy violations, how much it
+ * has written, whether it is acknowledging what it is sent, and since M3.9 what
+ * the strip really looks like. The reporting is not instrumentation added for a
+ * suite; it is how anything here can be checked at all. "The agent's output
+ * arrived" and "the tab shows its state" are otherwise claims somebody makes by
+ * looking at a screen, and this repository does not accept those (§I.1).
  */
 
 interface VsCodeApi {
@@ -38,7 +41,8 @@ declare function acquireVsCodeApi(): VsCodeApi;
  * `onResize` -- a native call on a pty. It matters more than a repaint budget:
  * a resize under a live stream was measured LOSING output inside xterm (35
  * lines of 20 000, deterministically, M3.2 stage B §8), so each resize skipped
- * is a real cost avoided rather than a cycle saved.
+ * is a real cost avoided rather than a cycle saved. Since M3.9 one fit is N
+ * fits, one per screen, which makes the debounce worth more rather than less.
  */
 const SETTLE_MS = 80;
 
@@ -198,53 +202,75 @@ function start(root: HTMLElement): void {
   let fontSize = attribute(root, 'fontSize', DEFAULT_FONT_SIZE);
   let codiconLoaded = false;
   let settling: number | null = null;
-  /** The terminal this screen is showing, or `null` when it is showing nothing. */
-  let attached: string | null = null;
   /** Whether receipts are being sent. Turned off only by the probe -- see `receipts`. */
   let acking = true;
-  /** Code units written while receipts were off, owed to the host the moment they resume. */
-  let owed = 0;
+  /**
+   * The terminal the host last said was the active one.
+   *
+   * Kept because the strip can arrive BEFORE the screen it names: the host draws
+   * the strip first, so that a screen made afterwards is made at the height the
+   * strip has left it and its pty is told one size rather than two. A wish for a
+   * terminal with no screen yet is remembered here and granted when it appears.
+   */
+  let wanted: string | null = null;
+  /**
+   * Code units written while receipts were off, owed to each terminal.
+   *
+   * Per terminal since M3.9: every screen takes output at once, and a single
+   * counter would settle one terminal's debt against another's flow -- which is
+   * an agent released early and an agent left paused.
+   */
+  const owed = new Map<string, number>();
 
-  // Assigned once the screen exists. The layout is built first because the
-  // screen needs a box to live in, and the layout has to be able to report a
-  // change from the moment it starts observing one -- so the indirection is
-  // written down rather than left as an initialisation order to remember.
+  // Assigned once the screens exist. The layout is built first because they need
+  // a box to live in, and the layout has to be able to report a change from the
+  // moment it starts observing one -- so the indirection is written down rather
+  // than left as an initialisation order to remember.
   let whenLayoutChanged: (because: string) => void = () => { /* nothing to report before there is a screen */ };
 
   const layout = new PageLayout(root, {
     onChanged: (because) => { whenLayoutChanged(because); },
   });
-  const screen = new Screen(layout.terminalHost, { scrollback, fontFamily, fontSize });
-
-  const report = (): ViewReport => ({
-    generation,
-    cols: screen.cols,
-    rows: screen.rows,
-    terminalWidth: layout.terminalWidth,
-    detailsWidth: layout.detailsWidth,
-    scrollback: screen.scrollback,
-    background: screen.background,
-    fontFamily: screen.fontFamily,
-    fontSize: screen.fontSize,
-    codiconLoaded,
-    unicodeVersion: screen.unicodeVersion,
-    attached,
-    written: screen.written,
-    acking,
-    bracketedPaste: screen.bracketedPaste,
+  const screens = new Screens(layout.screensHost, { scrollback, fontFamily, fontSize });
+  const strip = new PageStrip(layout.stripHost, {
+    onChose: (terminalId) => { post({ kind: 'chose', terminalId }); },
+    onClose: (terminalId) => { post({ kind: 'wants-close', terminalId }); },
+    onRefused: (what) => { post({ kind: 'refused', what }); },
   });
 
-  /** Says what this screen has taken, unless the probe has asked it to go silent. */
+  const report = (): ViewReport => {
+    const screen = screens.visible;
+    return {
+      generation,
+      cols: screen.cols,
+      rows: screen.rows,
+      terminalWidth: layout.terminalWidth,
+      detailsWidth: layout.detailsWidth,
+      scrollback: screen.scrollback,
+      background: screen.background,
+      fontFamily: screen.fontFamily,
+      fontSize: screen.fontSize,
+      codiconLoaded,
+      unicodeVersion: screen.unicodeVersion,
+      attached: screens.showing,
+      written: screen.written,
+      acking,
+      bracketedPaste: screen.bracketedPaste,
+      tabs: strip.report(),
+    };
+  };
+
+  /** Says what a screen has taken, unless the probe has asked it to go silent. */
   const acknowledge = (terminalId: string, chars: number): void => {
     if (!acking) {
-      owed += chars;
+      owed.set(terminalId, (owed.get(terminalId) ?? 0) + chars);
       return;
     }
     post({ kind: 'ack', terminalId, chars });
   };
 
   /**
-   * Turns receipts off and on, and settles the debt when they come back.
+   * Turns receipts off and on, and settles every debt when they come back.
    *
    * The debt matters: without it, output written while the page was silent would
    * never be acknowledged, the host's counter would stay above the pause line
@@ -253,31 +279,16 @@ function start(root: HTMLElement): void {
    */
   const receipts = (sending: boolean): void => {
     acking = sending;
-    if (!sending || attached === null) {
+    if (!sending) {
       return;
     }
-    const settled = owed;
-    owed = 0;
-    if (settled > 0) {
-      post({ kind: 'ack', terminalId: attached, chars: settled });
+    for (const [terminalId, chars] of owed) {
+      if (chars > 0) {
+        post({ kind: 'ack', terminalId, chars });
+      }
     }
+    owed.clear();
   };
-
-  screen.onInput((data) => {
-    if (attached === null) {
-      // Nothing to type into. Dropped rather than reported: a person leaning on
-      // a key with no agent on the screen would otherwise fill the log.
-      return;
-    }
-    post({ kind: 'input', terminalId: attached, data });
-  });
-
-  screen.onResized((cols, rows) => {
-    if (attached === null) {
-      return;
-    }
-    post({ kind: 'resized', terminalId: attached, cols, rows });
-  });
 
   /**
    * The presses this page does not let xterm answer, and what it does with them.
@@ -293,7 +304,7 @@ function start(root: HTMLElement): void {
    *     the interrupt, which is the whole difference;
    *   * **`Shift+Insert`** -- a paste, and only the host can read a clipboard.
    */
-  const answeredHere = (event: KeyboardEvent): boolean => {
+  const answeredHere = (screen: Screen, event: KeyboardEvent): boolean => {
     if (chordFor(event) !== null) {
       return true;
     }
@@ -317,14 +328,6 @@ function start(root: HTMLElement): void {
     return false;
   };
 
-  screen.leaveToTheHost(answeredHere);
-
-  // The keyboard's whereabouts, which is what the context key those keybindings
-  // hang on is made of. The details half is in the same document, so this is the
-  // difference between a terminal that takes the arrow keys and a note field
-  // that can be written in (O6).
-  screen.onFocusChanged((focused) => { post({ kind: 'focused', focused }); });
-
   /**
    * The right button: copy what is selected, and paste when nothing is.
    *
@@ -332,7 +335,7 @@ function start(root: HTMLElement): void {
    * terminal on Windows. Both halves have to go through the host -- a webview
    * can neither read nor write the clipboard by itself.
    */
-  const rightClicked = (): void => {
+  const rightClicked = (screen: Screen): void => {
     const selected = screen.selection();
     if (selected.length > 0) {
       post({ kind: 'copy', text: selected });
@@ -344,7 +347,28 @@ function start(root: HTMLElement): void {
     post({ kind: 'wants-paste' });
   };
 
-  screen.onRightClick(rightClicked);
+  /**
+   * Everything one screen says, on its way out.
+   *
+   * Done once per screen, at the moment it is made, and never twice: a screen
+   * wired up again would post every keystroke to the pty two times, and the two
+   * copies are indistinguishable from the other end.
+   *
+   * `terminalId` is `null` for the idle screen, which has no pty to talk to. It
+   * still refuses the chords and still says where the keyboard is: the half is
+   * a terminal as far as a person and the context key are concerned, whether or
+   * not an agent is on it.
+   */
+  const wire = (screen: Screen, terminalId: string | null): void => {
+    screen.leaveToTheHost((event) => answeredHere(screen, event));
+    screen.onFocusChanged((focused) => { post({ kind: 'focused', focused }); });
+    screen.onRightClick(() => { rightClicked(screen); });
+    if (terminalId === null) {
+      return;
+    }
+    screen.onInput((data) => { post({ kind: 'input', terminalId, data }); });
+    screen.onResized((cols, rows) => { post({ kind: 'resized', terminalId, cols, rows }); });
+  };
 
   whenLayoutChanged = (because): void => {
     if (settling !== null) {
@@ -352,7 +376,10 @@ function start(root: HTMLElement): void {
     }
     settling = window.setTimeout(() => {
       settling = null;
-      screen.fit();
+      // EVERY screen, not the one in front. A hidden screen fitted only when it
+      // is shown would be resized in front of the person switching to it, and
+      // the agent would redraw its whole TUI at that moment.
+      screens.fit();
       post({ kind: 'measured', report: report(), because });
     }, SETTLE_MS);
   };
@@ -366,13 +393,13 @@ function start(root: HTMLElement): void {
         breakThePolicy();
         return;
       case 'type':
-        screen.type(action.text);
+        screens.visible.type(action.text);
         return;
       case 'receipts':
         receipts(action.sending);
         return;
       case 'linger':
-        screen.linger(action.ms);
+        screens.linger(action.ms);
         return;
       case 'press': {
         const press = keyPressFor(action.chord);
@@ -380,23 +407,57 @@ function start(root: HTMLElement): void {
           post({ kind: 'refused', what: `a press this page does not know: ${action.chord}` });
           return;
         }
-        screen.dispatchKey(press);
+        screens.visible.dispatchKey(press);
         return;
       }
       case 'focus':
         if (action.where === 'terminal') {
-          screen.focus();
+          screens.visible.focus();
           return;
         }
         layout.focusDetails();
         return;
       case 'right-click':
-        rightClicked();
+        rightClicked(screens.visible);
         return;
+      case 'select':
+        screens.visible.select(action.all);
+        return;
+      case 'click-tab':
+      case 'click-close': {
+        if (!strip.click(action.terminalId, action.kind === 'click-close')) {
+          post({ kind: 'refused', what: `a click on a tab this strip does not have: ${action.terminalId}` });
+        }
+        return;
+      }
       default:
-        screen.select(action.all);
+        post({ kind: 'refused', what: 'a probe this page does not know' });
         return;
     }
+  };
+
+  /**
+   * Draws the strip, throws away the screens it no longer names, and shows the
+   * one it says is active.
+   *
+   * The message is the whole truth about which terminals the panel holds, so
+   * this is where a closed terminal's screen really goes: a page kept alive
+   * behind a hidden panel never reloads, and a screen nothing disposes of holds
+   * its scrollback for as long as the window is open.
+   */
+  const drawStrip = (tabs: readonly TabOrder[]): void => {
+    const named = new Set(tabs.map((tab) => tab.terminalId));
+    for (const terminalId of screens.ids) {
+      if (!named.has(terminalId)) {
+        screens.close(terminalId);
+      }
+    }
+    wanted = tabs.find((tab) => tab.active)?.terminalId ?? null;
+    screens.show(wanted);
+    // The strip takes its height out of the terminal's, and it appears with the
+    // first tab and goes with the last: every screen has to be told about it, or
+    // the one in front would draw a row into the space the tabs are in.
+    screens.fit();
   };
 
   window.addEventListener('message', (event: MessageEvent<unknown>) => {
@@ -412,22 +473,28 @@ function start(root: HTMLElement): void {
       case 'restyle':
         fontFamily = message.fontFamily;
         fontSize = message.fontSize;
-        screen.restyle(fontFamily, fontSize);
+        screens.restyle(fontFamily, fontSize);
         layout.apply();
-        screen.fit();
+        screens.fit();
         post({ kind: 'measured', report: report(), because: 'the editor changed how we look' });
         return;
       case 'measure':
         post({ kind: 'measured', report: report(), because: message.because });
         return;
-      case 'attach':
-        // Emptied first, and with `reset` rather than `clear`: whatever the
-        // previous agent left switched on -- bracketed paste, the alternate
-        // buffer, a scroll region -- would otherwise be applied to this one's
-        // output.
+      case 'attach': {
+        const { screen, fresh } = screens.open(message.terminalId);
+        if (fresh) {
+          wire(screen, message.terminalId);
+          // Before anything is written on it: a screen that has never been
+          // fitted is 80x24 whatever the panel is, and the first thing it would
+          // tell its pty is a size nobody has.
+          screen.fit();
+        }
+        // Emptied first, and with `reset` rather than `clear`: whatever this
+        // terminal left switched on before -- bracketed paste, the alternate
+        // buffer, a scroll region -- would otherwise be applied to the replay.
         screen.reset();
-        attached = message.terminalId;
-        owed = 0;
+        owed.delete(message.terminalId);
         if (message.droppedChars > 0) {
           screen.write(lostLine(message.droppedChars));
         }
@@ -438,37 +505,52 @@ function start(root: HTMLElement): void {
         // at the 80x30 it was spawned with, which is the one thing a TUI reads
         // before it draws anything.
         post({ kind: 'resized', terminalId: message.terminalId, cols: screen.cols, rows: screen.rows });
+        if (message.terminalId === wanted) {
+          // The strip named this terminal as the one to show before it had a
+          // screen to show. Now it has one.
+          screens.show(wanted);
+        }
         post({ kind: 'measured', report: report(), because: 'a terminal was attached' });
         return;
-      case 'output':
-        if (message.terminalId !== attached) {
-          // Said out loud rather than written: output landing on the wrong
-          // screen is how two agents get mixed into one transcript, and it is
-          // invisible from the outside.
+      }
+      case 'output': {
+        const screen = screens.get(message.terminalId);
+        if (screen === undefined) {
+          // Said out loud rather than written somewhere: output that reached no
+          // screen is output a person will never see, and it is invisible from
+          // the outside.
           post({
             kind: 'refused',
-            what: `output arrived for ${message.terminalId} while the screen is showing ${attached ?? 'nothing'}`,
+            what: `output arrived for ${message.terminalId}, which has no screen here`,
           });
           return;
         }
         screen.write(message.data, () => { acknowledge(message.terminalId, message.data.length); });
         return;
+      }
       case 'paste':
         // Through xterm rather than into the pty: it is what puts the brackets
         // around the text, and a multi-line paste without them is a run of
         // Enter presses with the first line leaving as a finished prompt.
-        screen.paste(message.text);
+        screens.visible.paste(message.text);
         return;
-      case 'detach':
-        if (message.terminalId !== attached) {
+      case 'detach': {
+        const screen = screens.get(message.terminalId);
+        if (screen === undefined) {
           return;
         }
-        attached = null;
-        // NOT cleared: what the agent printed on its way out is the whole of
-        // what a person has to read afterwards. The screen keeps it and says
-        // underneath that it is over.
+        // NOT cleared and NOT thrown away: what the agent printed on its way out
+        // is the whole of what a person has to read afterwards, and the tab waits
+        // for them to close it (the owner's decision of 2026-08-18). The screen
+        // keeps it and says underneath that it is over.
         screen.write(`\r\n${DIM}— ${message.because} —${PLAIN}\r\n`);
         post({ kind: 'measured', report: report(), because: 'a terminal was detached' });
+        return;
+      }
+      case 'tabs':
+        strip.draw(message.tabs);
+        drawStrip(message.tabs);
+        post({ kind: 'measured', report: report(), because: 'the strip was drawn' });
         return;
       default:
         probed(message.action);
@@ -477,8 +559,9 @@ function start(root: HTMLElement): void {
   });
 
   layout.apply();
-  screen.fit();
-  screen.write(NOTHING_HERE);
+  wire(screens.idle, null);
+  screens.fit();
+  screens.idle.write(NOTHING_HERE);
 
   void codiconIsThere().then((loaded) => {
     codiconLoaded = loaded;
@@ -487,9 +570,8 @@ function start(root: HTMLElement): void {
     // measurement, and a false measurement is worse than a late one.
     //
     // It is also the handshake: the host answers `ready` by attaching whichever
-    // terminal this window is showing, with the tail it is redrawn from. A page
-    // that was thrown away and rebuilt knows nothing else about the agent it
-    // belongs to.
+    // terminals this window is holding, with the tails they are redrawn from. A
+    // page that was thrown away and rebuilt knows nothing else about them.
     post({ kind: 'ready', report: report() });
   });
 }

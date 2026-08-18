@@ -403,6 +403,22 @@ export class WorkbenchView implements vscode.WebviewViewProvider, vscode.Disposa
   }
 
   /**
+   * Clicks a tab, and clicks the cross on one -- the two acts of M3.9.
+   *
+   * The same rule as every probe here: the click is dispatched on the element a
+   * person's mouse would hit, so what runs afterwards is our handler, our
+   * message and our command. A suite that called the command directly would be
+   * checking the command and calling the strip tested.
+   */
+  public clickTab(terminalId: string): void {
+    this._post({ kind: 'probe', action: { kind: 'click-tab', terminalId } });
+  }
+
+  public clickClose(terminalId: string): void {
+    this._post({ kind: 'probe', action: { kind: 'click-close', terminalId } });
+  }
+
+  /**
    * Asks the page to reach for something the policy forbids, and waits to hear
    * that it was stopped.
    *

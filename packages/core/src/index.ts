@@ -579,6 +579,13 @@ export {
 } from './domain/services/terminal-presentation';
 
 export {
+  ATTENTION_STATES,
+  stripTabs,
+  type StripInput,
+  type StripTab,
+} from './domain/services/terminal-strip';
+
+export {
   groupTerminals,
   type TerminalGroup,
 } from './domain/services/terminal-grouping';

@@ -110,6 +110,7 @@ import { TERMINALS_VIEW_ID, TerminalTreeDataProvider } from './ui/terminal-tree'
 import { WORKBENCH_VIEW_ID, WorkbenchView } from './ui/workbench-view';
 import { TerminalStage } from './ui/terminal-stage';
 import { TERMINAL_FOCUSED_KEY, TerminalKeyboard } from './ui/terminal-keyboard';
+import { TerminalStrip } from './ui/terminal-strip';
 import { registerTerminalKey } from './commands/terminal-key';
 import type { TerminalTreeNode } from './ui/terminal-tree';
 
@@ -295,6 +296,15 @@ export interface GriptermApi {
    */
   readonly keyboard: TerminalKeyboard;
   /**
+   * The strip of tabs over the terminal (M3.9).
+   *
+   * Exposed because it is the one place that knows what the host BELIEVES the
+   * strip shows, and the page reports what it really drew -- so the two can be
+   * compared. A suite reading only one of them would be asserting that the page
+   * agrees with itself.
+   */
+  readonly strip: TerminalStrip;
+  /**
    * The data provider, for the one question only a real host answers about the
    * grouping (M2.14): what the ROOT of the contributed view actually contains.
    * How rows group is decided in `groupTerminals` and covered there.
@@ -437,6 +447,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   });
   context.subscriptions.push(keyboard);
   context.subscriptions.push(registerTerminalKey(keyboard));
+  /*
+   * The strip of tabs over the terminal (M3.9).
+   *
+   * It is built from the stage and the registry and owns nothing: which
+   * terminals the panel holds is the stage's answer, what each is called and
+   * doing is the registry's, and how the two become a tab is one rule in the
+   * core -- the same one the tree draws its rows with.
+   */
+  const strip = new TerminalStrip({ view: workbench, stage, registry, logger });
+  context.subscriptions.push(strip);
 
   const location = readLaunchLocation(logger);
   // Read here rather than where it used to be read, further down: the engine is
@@ -858,6 +878,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     workbench,
     stage,
     keyboard,
+    strip,
     readiness: {
       cliPath: cli.path,
       cliVersion: cli.version,

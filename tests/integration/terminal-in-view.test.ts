@@ -282,6 +282,10 @@ class Stand {
   }
 
   public async end(): Promise<void> {
+    // Off the strip first, which is what the cross on its tab does: a tab of
+    // ours left behind would stay on the panel -- with its screen -- for the
+    // whole of the run, and the suites after this one would count it (M3.9).
+    (await api()).stage.removed(this.terminalId);
     this._gateway.dispose();
     // Swallowed deliberately: this runs in a `finally`, and a temp directory
     // that could not be removed must not be reported as the failure of the test
@@ -380,21 +384,39 @@ suite('a terminal of ours, on our own screen', () => {
       const settled = await workbench.measure('the suite is reading the size', SETTLES_WITHIN_MS);
 
       /*
-       * The platform's own acknowledgement, taken out of the output stream:
-       * ConPTY answers a resize of the pseudoconsole with `ESC[8;rows;cols t`
-       * and repaints at the new width. That is the first size the agent ever
-       * sees, and until M3.7 it was the 80x30 the pty was spawned with -- which
-       * is the number every TUI reads before it draws anything.
+       * The pseudoconsole's own acknowledgement, taken out of the output
+       * stream: ConPTY answers a resize with `ESC[8;rows;cols t` and repaints at
+       * the new width.
        *
-       * Measured 2026-08-17 and the reason this is asserted on the FIRST resize
-       * only: ConPTY announces that one and says nothing about the ones after
-       * it. The later ones are checked below, at the last point on this side of
-       * the boundary where they can be seen at all.
+       * **That it answers AT ALL is the assertion, and that is a measurement
+       * rather than a weak claim (2026-08-18).** It answers the first resize a
+       * pty is given and says nothing about the ones after it -- and it answers
+       * NOTHING when two resizes land on top of each other, which is exactly
+       * what a screen made for a freshly attached terminal used to do with its
+       * two truthful answers about its own size (`TerminalBridge.resize`). So
+       * this line is red on a build that sends both and green on one that sends
+       * one, while the size the page finally settles at is asserted below, on
+       * this side of the boundary where every resize can still be seen.
+       *
+       * What the PROGRAM makes of it is a separate and open question: measured
+       * here, `process.stdout.columns` inside a pty never moves from the size it
+       * was spawned with, whatever the pseudoconsole is told, on the build
+       * before M3.9 exactly as on this one (A48 -- a live agent and the owner's
+       * eyes, M3.14).
        */
-      const announced = `[8;${String(settled.rows)};${String(settled.cols)}t`;
       await until(
-        `the pseudoconsole to acknowledge ${String(settled.cols)}x${String(settled.rows)}`,
-        () => bridge.tail.text.includes(announced),
+        'the pseudoconsole to acknowledge a resize at all',
+        () => bridge.tail.text.includes(`${String.fromCharCode(27)}[8;`),
+        SETTLES_WITHIN_MS
+      ).catch((cause: unknown) => {
+        // With what the gateway said while it was trying: a resize that never
+        // reached the pseudoconsole and one it refused look the same from here.
+        throw new Error(`${String(cause)} -- the gateway said: ${stand.said.join(' | ')}`);
+      });
+      // And the size the page settled at is the one the pty was last told.
+      await until(
+        `the pty to be told ${String(settled.cols)}x${String(settled.rows)}`,
+        () => bridge.lastSize?.cols === settled.cols && bridge.lastSize.rows === settled.rows,
         SETTLES_WITHIN_MS
       );
 
@@ -408,6 +430,43 @@ suite('a terminal of ours, on our own screen', () => {
       );
 
       await workbench.dragSplitterBy(90, SETTLES_WITHIN_MS);
+    } finally {
+      await stand.end();
+    }
+  });
+
+  test('the same size twice is one resize', async () => {
+    /*
+     * A rule with a measured price. A screen made for a terminal that has just
+     * been attached answers with its size TWICE -- once through xterm's own
+     * `onResize`, once because the page says it unprompted -- and both answers
+     * are right. Sent both, they reach ConPTY within a millisecond of each other
+     * and the pseudoconsole acknowledges NEITHER: no `ESC[8;rows;cols t` in the
+     * output stream, and the agent draws every frame at a width nobody has.
+     *
+     * It is counted here rather than watched at the pty, because the
+     * pseudoconsole answers only the FIRST resize a terminal ever gets -- so
+     * from down there one call and two look the same.
+     */
+    const stand = await Stand.start('09');
+    try {
+      await attach(stand);
+      const bridge = await bridgeOf(stand.terminalId);
+      const settled = await api().then(async ({ workbench }) =>
+        await workbench.measure('the suite is reading the size', SETTLES_WITHIN_MS));
+      const before = bridge.resizeCount;
+
+      const narrower = settled.cols - 7;
+      bridge.resize(narrower, settled.rows);
+      bridge.resize(narrower, settled.rows);
+      bridge.resize(narrower, settled.rows);
+
+      assert.equal(bridge.resizeCount - before, 1, 'the pty was told one size more than once');
+      assert.deepEqual(
+        { cols: bridge.lastSize?.cols, rows: bridge.lastSize?.rows },
+        { cols: narrower, rows: settled.rows },
+        'the bridge kept a size other than the one it sent'
+      );
     } finally {
       await stand.end();
     }
@@ -535,8 +594,8 @@ suite('a terminal of ours, on our own screen', () => {
     }
   });
 
-  test('a terminal that ends says so, and the screen keeps what it printed', async () => {
-    const { workbench } = await api();
+  test('a terminal that ends says so, and its screen stays where it was', async () => {
+    const { workbench, stage } = await api();
     const stand = await Stand.start('06');
     try {
       await attach(stand);
@@ -547,23 +606,26 @@ suite('a terminal of ours, on our own screen', () => {
       await until('the process to answer', () => bridge.tail.text.includes('PONG'));
       stand.say('bye');
 
-      const { stage } = await api();
-      await until(
-        'the stage to let the terminal go',
-        () => stage.attachedTerminal === null,
-        SETTLES_WITHIN_MS
-      );
+      await until('the bridge to see the process go', () => bridge.over, SETTLES_WITHIN_MS);
       const after = await workbench.measure('after the process went', SETTLES_WITHIN_MS);
 
-      assert.equal(after.attached, null);
-      // NOT cleared: the last thing an agent prints is the whole of what a
-      // person has left to read, and the line saying it is over is written under
-      // it rather than instead of it.
+      // The screen and the tab STAY, by the owner's decision of 2026-08-18: what
+      // an agent printed on its way out is the whole of what a person has left
+      // to read, and it waits for them to close it (M3.9). Until that decision
+      // the page let the terminal go here and this line read `null`.
+      assert.equal(after.attached, stand.terminalId);
+      assert.equal(stage.attachedTerminal, stand.terminalId);
+      // NOT cleared: the line saying it is over is written under what the agent
+      // printed rather than instead of it.
       assert.ok(
         after.written > before.written,
         'the screen was emptied when the process ended'
       );
     } finally {
+      // Taken off the strip by hand, because nothing else takes it off: this is
+      // the same act the cross performs, and without it the tab would stay for
+      // as long as the window is open.
+      stage.removed(stand.terminalId);
       await stand.end();
     }
   });

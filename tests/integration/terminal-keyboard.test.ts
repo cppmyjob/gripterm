@@ -52,9 +52,14 @@ process.stdout.write('READY' + String.fromCharCode(10));
 // in a source file is invisible in every diff it ever appears in.
 process.stdout.write(String.fromCharCode(27) + '[?2004h');
 process.stdin.resume();
+let answered = 0;
 process.stdin.on('data', (chunk) => {
   const codes = Array.from(chunk).map((byte) => String(byte)).join(',');
-  process.stdout.write('SAW ' + codes + String.fromCharCode(10));
+  // Numbered, and the number is what makes this countable: the pseudoconsole
+  // repaints the screen it holds and a repaint re-emits lines the program
+  // printed once. Two answers with one number are one answer.
+  answered += 1;
+  process.stdout.write('SAW ' + String(answered) + ' ' + codes + String.fromCharCode(10));
 });
 setInterval(() => { /* stay alive with nothing to say */ }, 60000);
 `;
@@ -199,6 +204,10 @@ class Stand {
   }
 
   public async end(): Promise<void> {
+    // Off the strip first, which is what the cross on its tab does: a tab of
+    // ours left behind would stay on the panel -- with its screen -- for the
+    // whole of the run, and the suites after this one would count it (M3.9).
+    (await api()).stage.removed(this.terminalId);
     this._gateway.dispose();
     await rm(this._directory, { recursive: true, force: true }).catch(() => null);
   }
@@ -223,13 +232,42 @@ async function attach(stand: Stand): Promise<Bridge> {
     SETTLES_WITHIN_MS
   );
   workbench.focusHalf('terminal');
-  await until('the keyboard to be inside the terminal', () => keyboard.focused, SETTLES_WITHIN_MS);
+  await until('the keyboard to be inside the terminal', () => keyboard.focused, SETTLES_WITHIN_MS)
+    .catch(async (cause: unknown) => {
+      const report = await workbench.measure('the suite is asking why the keyboard is elsewhere', SETTLES_WITHIN_MS);
+      throw new Error(`${String(cause)} -- attached: ${String(report.attached)}, tabs: ${JSON.stringify(report.tabs)}, refusals: ${workbench.refusals.slice(-4).join(' | ')}`);
+    });
   return await bridgeOf(stand.terminalId);
 }
 
-/** What the stand has been given, as the codes it printed. */
-function saw(bridge: Bridge): string {
-  return bridge.tail.text;
+/**
+ * Every answer the PROGRAM has given, once each.
+ *
+ * Distinct, and that is the whole point of the numbering: the tail is not the
+ * program's bytes. The pseudoconsole repaints the screen it holds -- after a
+ * resize, after a scroll -- and a repaint re-emits lines that were printed once,
+ * so a text count reads one arrival as two. Two lines with one number are one
+ * answer.
+ */
+function sawLines(bridge: Bridge): readonly string[] {
+  return [...new Set(bridge.tail.text.match(/SAW \d+ [\d,]+/gu) ?? [])];
+}
+
+/**
+ * The answers that carry these bytes, once each.
+ *
+ * Matched on the codes and never on the whole line, and at comma boundaries:
+ * the line begins with a number of its own, so a search for `10` in the text
+ * would find the tenth answer, and a search inside `110` would find a newline
+ * that was never sent.
+ */
+function answersWith(bridge: Bridge, codes: string): readonly string[] {
+  return sawLines(bridge).filter((line) => `,${codesOf(line)},`.includes(`,${codes},`));
+}
+
+/** The byte codes of one answer, without the number the program gave it. */
+function codesOf(line: string): string {
+  return line.slice(line.indexOf(' ', 'SAW '.length) + 1);
 }
 
 /**
@@ -247,10 +285,10 @@ async function untilSeen(
   codes: string
 ): Promise<void> {
   const { keyboard } = await api();
-  await until(what, () => saw(bridge).slice(since).includes(codes), SETTLES_WITHIN_MS).catch(
+  await until(what, () => answersWith(bridge, codes).length > since, SETTLES_WITHIN_MS).catch(
     (cause: unknown) => {
       throw new Error(
-        `${String(cause)} -- the process was given ${JSON.stringify(saw(bridge).slice(since).slice(0, 300))}` +
+        `${String(cause)} -- the process answered ${JSON.stringify(sawLines(bridge).slice(-6))}` +
         `, and this window refused: ${keyboard.refusals.slice(-3).join(' | ')}`
       );
     }
@@ -304,15 +342,15 @@ suite('the keyboard of our own panel', () => {
     const stand = await Stand.start('01');
     try {
       const bridge = await attach(stand);
-      const before = saw(bridge).length;
+      const before = answersWith(bridge, '10').length;
 
       workbench.press('ctrl+j');
 
       // 10 is the newline `Ctrl+J` means inside the CLI's prompt, which is how a
       // multi-line question is asked at all.
-      await untilSeen(bridge, before, 'the newline byte to reach the process', 'SAW 10');
+      await untilSeen(bridge, before, 'the newline byte to reach the process', '10');
       await delay(500);
-      const arrivals = saw(bridge).slice(before).split('SAW 10').length - 1;
+      const arrivals = answersWith(bridge, '10').length - before;
 
       assert.equal(arrivals, 1, `the press arrived ${String(arrivals)} times`);
       assert.equal(keyboard.refusals.length, 0, `this window refused: ${keyboard.refusals.join(' | ')}`);
@@ -333,15 +371,15 @@ suite('the keyboard of our own panel', () => {
       const bridge = await attach(stand);
       workbench.focusHalf('details');
       await until('the keyboard to leave the terminal', () => !keyboard.focused, SETTLES_WITHIN_MS);
-      const before = saw(bridge).length;
+      const before = sawLines(bridge).length;
 
       workbench.press('ctrl+j');
       await delay(500);
 
-      assert.equal(
-        saw(bridge).slice(before),
-        '',
-        `something answered a chord pressed outside the terminal: ${JSON.stringify(saw(bridge).slice(before))}`
+      assert.deepEqual(
+        sawLines(bridge).slice(before),
+        [],
+        'something answered a chord pressed outside the terminal'
       );
     } finally {
       await stand.end();
@@ -355,14 +393,14 @@ suite('the keyboard of our own panel', () => {
     const stand = await Stand.start('06');
     try {
       const bridge = await attach(stand);
-      const before = saw(bridge).length;
+      const before = answersWith(bridge, '10').length;
 
       await vscode.commands.executeCommand('gripterm.terminalKey', 'ctrl+j');
 
       // 10 is the newline `Ctrl+J` means inside the CLI's prompt, which is how a
       // multi-line question is asked at all.
-      await untilSeen(bridge, before, 'the newline byte to reach the process', 'SAW 10');
-      const arrivals = saw(bridge).slice(before).split('SAW 10').length - 1;
+      await untilSeen(bridge, before, 'the newline byte to reach the process', '10');
+      const arrivals = answersWith(bridge, '10').length - before;
       assert.equal(arrivals, 1, 'the same chord arrived more than once');
       assert.equal(keyboard.refusals.length, 0, `this window refused: ${keyboard.refusals.join(' | ')}`);
     } finally {
@@ -378,7 +416,7 @@ suite('the keyboard of our own panel', () => {
 
       workbench.focusHalf('details');
       await until('the keyboard to leave the terminal', () => !keyboard.focused, SETTLES_WITHIN_MS);
-      const before = saw(bridge).length;
+      const before = sawLines(bridge).length;
       const refused = keyboard.refusals.length;
 
       // Through the command itself, which is what a `when` clause protects and
@@ -387,7 +425,7 @@ suite('the keyboard of our own panel', () => {
       await vscode.commands.executeCommand('gripterm.terminalKey', 'ctrl+j');
       await delay(300);
 
-      assert.equal(saw(bridge).slice(before), '', 'a chord reached the pty from the details half');
+      assert.deepEqual(sawLines(bridge).slice(before), [], 'a chord reached the pty from the details half');
       assert.ok(
         keyboard.refusals.length > refused,
         'nothing was sent and nothing was said about it either'
@@ -408,12 +446,12 @@ suite('the keyboard of our own panel', () => {
       // gone cannot lower it, and every one of those chords would stay taken
       // from the person for the whole window.
       await until('the keyboard to be given up', () => !keyboard.focused, SETTLES_WITHIN_MS);
-      const before = saw(bridge).length;
+      const before = sawLines(bridge).length;
 
       await vscode.commands.executeCommand('gripterm.terminalKey', 'ctrl+r');
       await delay(300);
 
-      assert.equal(saw(bridge).slice(before), '', 'a chord reached the pty from behind a hidden panel');
+      assert.deepEqual(sawLines(bridge).slice(before), [], 'a chord reached the pty from behind a hidden panel');
     } finally {
       await showPanel();
       await stand.end();
@@ -442,7 +480,6 @@ suite('the keyboard of our own panel', () => {
         'the program never asked for bracketed paste, so nothing below is about our side'
       );
       await vscode.env.clipboard.writeText('first line\nsecond line');
-      const before = saw(bridge).length;
 
       // Nothing selected, so the right button pastes -- the owner's decision of
       // 2026-08-18 and the editor's own default on Windows.
@@ -462,8 +499,8 @@ suite('the keyboard of our own panel', () => {
        * pseudoconsole can deliver them, and a test that asserted them would be
        * asserting against the platform.
        */
-      const whole = 'SAW 102,105,114,115,116,32,108,105,110,101,13,115,101,99,111,110,100,32,108,105,110,101';
-      await untilSeen(bridge, before, 'the whole paste to arrive in one piece', whole);
+      const whole = '102,105,114,115,116,32,108,105,110,101,13,115,101,99,111,110,100,32,108,105,110,101';
+      await untilSeen(bridge, answersWith(bridge, whole).length, 'the whole paste to arrive in one piece', whole);
     } finally {
       // The person's own clipboard, put back: this suite runs on their machine.
       await vscode.env.clipboard.writeText(theirs);
@@ -489,16 +526,17 @@ suite('the keyboard of our own panel', () => {
       const copied = await clipboardHolding('READY');
       assert.ok(copied.includes('READY'), `the clipboard holds ${JSON.stringify(copied.slice(0, 80))}`);
       // 3 is the interrupt. It must NOT have been sent: the person was copying.
-      assert.ok(
-        !saw(bridge).includes('SAW 3'),
+      assert.deepEqual(
+        answersWith(bridge, '3'),
+        [],
         'the agent was interrupted by a press that was meant to copy'
       );
 
-      const before = saw(bridge).length;
+      const before = answersWith(bridge, '3').length;
       workbench.select(false);
       workbench.press('ctrl+c');
 
-      await untilSeen(bridge, before, 'the interrupt to reach the process', 'SAW 3');
+      await untilSeen(bridge, before, 'the interrupt to reach the process', '3');
     } finally {
       await vscode.env.clipboard.writeText(theirs);
       await stand.end();
@@ -512,13 +550,13 @@ suite('the keyboard of our own panel', () => {
     try {
       const bridge = await attach(stand);
       await vscode.env.clipboard.writeText('pasted by the old way');
-      const before = saw(bridge).length;
+      const before = answersWith(bridge, '112,97,115,116,101,100').length;
 
       workbench.select(false);
       workbench.press('shift+insert');
 
       // `pasted` -- enough of it to be sure it is ours and not an echo.
-      await untilSeen(bridge, before, 'the paste to reach the process', 'SAW 112,97,115,116,101,100');
+      await untilSeen(bridge, before, 'the paste to reach the process', '112,97,115,116,101,100');
     } finally {
       await vscode.env.clipboard.writeText(theirs);
       await stand.end();

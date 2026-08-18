@@ -2,12 +2,15 @@ import {
   TERMINAL_CHORDS,
   chordById,
   chordFor,
+  codiconClasses,
   isCopyPress,
   isPastePress,
   parseHostMessage,
   parseViewMessage,
+  themeColorVariable,
 } from '../../packages/webview/src/protocol';
 import * as keys from '../../packages/webview/src/keys';
+import * as look from '../../packages/webview/src/tab-look';
 
 /**
  * The contract between the page and the extension host, checked from both ends.
@@ -30,6 +33,28 @@ import * as keys from '../../packages/webview/src/keys';
  * rather than guarded at each of the places they would arrive.
  */
 
+/** One tab as the page found it on its own screen: the glyph is the measurement. */
+const TAB_REPORT = {
+  terminalId: 'a2f1c8de-0000-4000-8000-000000000001',
+  label: 'auth-refactor',
+  active: true,
+  attention: false,
+  over: false,
+  glyph: '',
+  colour: '#3794ff',
+};
+
+/** One tab as the host orders it drawn: ids, and the page turns them into CSS. */
+const TAB_ORDER = {
+  terminalId: 'a2f1c8de-0000-4000-8000-000000000001',
+  label: 'auth-refactor',
+  iconId: 'sync~spin',
+  colorId: 'charts.blue',
+  active: true,
+  attention: false,
+  over: false,
+};
+
 const REPORT = {
   generation: 1,
   cols: 120,
@@ -46,6 +71,7 @@ const REPORT = {
   written: 4096,
   bracketedPaste: true,
   acking: true,
+  tabs: [TAB_REPORT],
 };
 
 describe('what the host accepts from the page', () => {
@@ -125,6 +151,27 @@ describe('what the host accepts from the page', () => {
     expect(parseViewMessage({ kind: 'copy', text: 'READY' })).toEqual({ kind: 'copy', text: 'READY' });
   });
 
+  it('takes a strip with nothing on it, which is a panel holding no terminals', () => {
+    expect(parseViewMessage({ kind: 'ready', report: { ...REPORT, tabs: [] } })).toEqual({
+      kind: 'ready',
+      report: { ...REPORT, tabs: [] },
+    });
+  });
+
+  it('takes the tab the person clicked', () => {
+    expect(parseViewMessage({ kind: 'chose', terminalId: 'one' })).toEqual({
+      kind: 'chose',
+      terminalId: 'one',
+    });
+  });
+
+  it('takes the cross the person clicked', () => {
+    expect(parseViewMessage({ kind: 'wants-close', terminalId: 'one' })).toEqual({
+      kind: 'wants-close',
+      terminalId: 'one',
+    });
+  });
+
   it('takes the wish to paste, which only the host can grant', () => {
     expect(parseViewMessage({ kind: 'wants-paste' })).toEqual({ kind: 'wants-paste' });
   });
@@ -156,6 +203,10 @@ describe('what the host accepts from the page', () => {
     ['a word about focus that is not a yes or a no', { kind: 'focused', focused: 'yes' }],
     ['a copy with nothing to copy', { kind: 'copy' }],
     ['a copy of something that is not text', { kind: 'copy', text: 42 }],
+    ['a choice of no terminal', { kind: 'chose' }],
+    ['a choice of something that is not a terminal', { kind: 'chose', terminalId: 7 }],
+    ['a close of no terminal', { kind: 'wants-close' }],
+    ['a close of something that is not a terminal', { kind: 'wants-close', terminalId: null }],
   ])('refuses %s', (_what, value) => {
     expect(parseViewMessage(value)).toBeNull();
   });
@@ -177,6 +228,20 @@ describe('what the host accepts from the page', () => {
     ['a number where the attached terminal belongs', { ...REPORT, attached: 7 }],
     ['no count of what was written', { ...REPORT, written: undefined }],
     ['no word on whether receipts are being sent', { ...REPORT, acking: undefined }],
+    ['no strip at all, which is not the same as an empty one', { ...REPORT, tabs: undefined }],
+    ['a strip that is not a list', { ...REPORT, tabs: { one: TAB_REPORT } }],
+    ['a tab that is a bare word', { ...REPORT, tabs: ['auth-refactor'] }],
+    ['a tab of no terminal', { ...REPORT, tabs: [{ ...TAB_REPORT, terminalId: undefined }] }],
+    ['a tab with no words on it', { ...REPORT, tabs: [{ ...TAB_REPORT, label: 7 }] }],
+    ['a tab that will not say whether it is the one on screen', { ...REPORT, tabs: [{ ...TAB_REPORT, active: 'yes' }] }],
+    ['a tab that will not say whether it is marked', { ...REPORT, tabs: [{ ...TAB_REPORT, attention: undefined }] }],
+    ['a tab that will not say whether its process is gone', { ...REPORT, tabs: [{ ...TAB_REPORT, over: null }] }],
+    ['a tab with no word on what glyph it drew', { ...REPORT, tabs: [{ ...TAB_REPORT, glyph: undefined }] }],
+    ['a tab with no word on what colour it resolved', { ...REPORT, tabs: [{ ...TAB_REPORT, colour: undefined }] }],
+    // One bad tab refuses the whole strip: a report about three of four tabs is
+    // not a report about a strip, and a suite reading the good three would be
+    // asserting about a picture that was never on screen.
+    ['one good tab and one hole', { ...REPORT, tabs: [TAB_REPORT, { ...TAB_REPORT, label: undefined }] }],
     ['no word on bracketed paste, which decides what a paste means', { ...REPORT, bracketedPaste: undefined }],
   ])('refuses a report with %s', (_what, report) => {
     expect(parseViewMessage({ kind: 'ready', report })).toBeNull();
@@ -261,6 +326,39 @@ describe('what the page accepts from the host', () => {
     });
   });
 
+  it('takes the whole strip, which is how the page is told what to draw', () => {
+    expect(parseHostMessage({ kind: 'tabs', tabs: [TAB_ORDER] })).toEqual({
+      kind: 'tabs',
+      tabs: [TAB_ORDER],
+    });
+  });
+
+  it('takes a strip of nothing, which is how the last tab is closed', () => {
+    expect(parseHostMessage({ kind: 'tabs', tabs: [] })).toEqual({ kind: 'tabs', tabs: [] });
+  });
+
+  it('takes a tab whose state has no colour of its own', () => {
+    // `null` is an answer here and not an omission: a state that gives up its
+    // colour (`ended`) is drawn in the page's own, and a tab whose colour field
+    // went missing is a different failure -- ours.
+    const plain = { ...TAB_ORDER, colorId: null };
+    expect(parseHostMessage({ kind: 'tabs', tabs: [plain] })).toEqual({ kind: 'tabs', tabs: [plain] });
+  });
+
+  it('takes the click on a tab, because a suite has no mouse', () => {
+    expect(parseHostMessage({ kind: 'probe', action: { kind: 'click-tab', terminalId: 'one' } })).toEqual({
+      kind: 'probe',
+      action: { kind: 'click-tab', terminalId: 'one' },
+    });
+  });
+
+  it('takes the click on a cross, which is the one click that ends a conversation', () => {
+    expect(parseHostMessage({ kind: 'probe', action: { kind: 'click-close', terminalId: 'one' } })).toEqual({
+      kind: 'probe',
+      action: { kind: 'click-close', terminalId: 'one' },
+    });
+  });
+
   it('takes the drag probe, because a suite has no pointer', () => {
     expect(parseHostMessage({ kind: 'probe', action: { kind: 'drag-splitter', byPx: -120 } })).toEqual({
       kind: 'probe',
@@ -337,6 +435,19 @@ describe('what the page accepts from the host', () => {
     ['a focus probe with no half named', { kind: 'probe', action: { kind: 'focus' } }],
     ['a focus probe for a half we do not have', { kind: 'probe', action: { kind: 'focus', where: 'notes' } }],
     ['a selection probe that will not say which way', { kind: 'probe', action: { kind: 'select' } }],
+    ['a click on no tab', { kind: 'probe', action: { kind: 'click-tab' } }],
+    ['a click on a cross with no terminal', { kind: 'probe', action: { kind: 'click-close', terminalId: 3 } }],
+    ['a strip that is not a list', { kind: 'tabs', tabs: 'one' }],
+    ['a strip with no list at all', { kind: 'tabs' }],
+    ['a tab with no terminal', { kind: 'tabs', tabs: [{ ...TAB_ORDER, terminalId: undefined }] }],
+    ['a tab with no words on it', { kind: 'tabs', tabs: [{ ...TAB_ORDER, label: undefined }] }],
+    ['a tab with no icon', { kind: 'tabs', tabs: [{ ...TAB_ORDER, iconId: undefined }] }],
+    ['a tab whose colour field went missing', { kind: 'tabs', tabs: [{ ...TAB_ORDER, colorId: undefined }] }],
+    ['a tab whose colour is a number', { kind: 'tabs', tabs: [{ ...TAB_ORDER, colorId: 0x3794ff }] }],
+    ['a tab that will not say whether it is on screen', { kind: 'tabs', tabs: [{ ...TAB_ORDER, active: undefined }] }],
+    ['a tab that will not say whether it is marked', { kind: 'tabs', tabs: [{ ...TAB_ORDER, attention: 'no' }] }],
+    ['a tab that will not say whether its process is gone', { kind: 'tabs', tabs: [{ ...TAB_ORDER, over: undefined }] }],
+    ['a tab that is a bare word', { kind: 'tabs', tabs: ['auth-refactor'] }],
   ])('refuses %s', (_what, value) => {
     expect(parseHostMessage(value)).toBeNull();
   });
@@ -358,5 +469,13 @@ describe('what the package hands the other side', () => {
       .toBe(keys.chordById('ctrl+j'));
     expect(isCopyPress({ code: 'KeyC', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false })).toBe(true);
     expect(isPastePress({ code: 'Insert', ctrlKey: false, altKey: false, shiftKey: true, metaKey: false })).toBe(true);
+  });
+
+  it('carries the two translations a tab is drawn through', () => {
+    // The suite that checks what the page DREW has to be able to say what it
+    // should have drawn, and a second copy of these rules written beside the
+    // assertions would agree with the page about anything at all.
+    expect(codiconClasses('sync~spin')).toStrictEqual(look.codiconClasses('sync~spin'));
+    expect(themeColorVariable('charts.blue')).toBe(look.themeColorVariable('charts.blue'));
   });
 });

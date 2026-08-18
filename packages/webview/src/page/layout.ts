@@ -31,6 +31,10 @@ export interface LayoutOptions {
 export class PageLayout {
   private readonly _root: HTMLElement;
   private readonly _terminal: HTMLElement;
+  /** The strip of tabs, over the terminal and inside its half (M3.9). */
+  private readonly _strip: HTMLElement;
+  /** Where the screens are stacked. The box a hidden screen still has a size in. */
+  private readonly _screens: HTMLElement;
   private readonly _splitter: HTMLElement;
   private readonly _details: HTMLElement;
   private readonly _options: LayoutOptions;
@@ -42,6 +46,15 @@ export class PageLayout {
     this._options = options;
     this._terminal = document.createElement('div');
     this._terminal.className = 'gripterm-terminal';
+    // The strip sits over the terminal and NOT over the whole page (the owner's
+    // decision of 2026-08-18): it moves with the border, and the details half
+    // keeps its own heading where it is.
+    this._strip = document.createElement('div');
+    this._strip.className = 'gripterm-strip';
+    this._strip.setAttribute('role', 'tablist');
+    this._screens = document.createElement('div');
+    this._screens.className = 'gripterm-screens';
+    this._terminal.append(this._strip, this._screens);
     this._splitter = document.createElement('div');
     this._splitter.className = 'gripterm-splitter';
     this._splitter.setAttribute('role', 'separator');
@@ -61,8 +74,14 @@ export class PageLayout {
     }).observe(this._root);
   }
 
-  public get terminalHost(): HTMLElement {
-    return this._terminal;
+  /** Where the screens live: the terminal half under the strip. */
+  public get screensHost(): HTMLElement {
+    return this._screens;
+  }
+
+  /** Where the tabs are drawn. */
+  public get stripHost(): HTMLElement {
+    return this._strip;
   }
 
   public get terminalWidth(): number {

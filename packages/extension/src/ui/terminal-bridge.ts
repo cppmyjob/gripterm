@@ -67,6 +67,8 @@ export class TerminalBridge implements Disposable {
   private readonly _subscriptions: Disposable[] = [];
   private _sink: Sink | null = null;
   private _sentChars = 0;
+  private _attachCount = 0;
+  private _resizeCount = 0;
   private _lastSize: { readonly cols: number, readonly rows: number } | null = null;
   private _over = false;
 
@@ -96,6 +98,30 @@ export class TerminalBridge implements Disposable {
     return this._sentChars;
   }
 
+  /**
+   * How many times a screen has been drawn from this terminal's tail.
+   *
+   * The number the promise of M3.9 is made of: switching tabs must not redraw
+   * anything, and "it was not redrawn" is otherwise unfalsifiable -- a redraw
+   * from the tail looks exactly like the screen that was already there. One
+   * attach per terminal per page is the whole of what a switch may cost.
+   */
+  public get attachCount(): number {
+    return this._attachCount;
+  }
+
+  /**
+   * How many sizes this bridge has passed on to the pty.
+   *
+   * The number the rule below is made of: the same size twice is one resize, and
+   * "it was sent once" is otherwise unfalsifiable -- the pseudoconsole answers
+   * only the first resize a pty ever gets, so nothing further down can tell one
+   * call from two.
+   */
+  public get resizeCount(): number {
+    return this._resizeCount;
+  }
+
   /** Code units posted and not yet acknowledged. */
   public get unacknowledged(): number {
     return this._flow.unacknowledged;
@@ -104,6 +130,19 @@ export class TerminalBridge implements Disposable {
   /** Whether the process is being held back right now. */
   public get paused(): boolean {
     return this._flow.paused;
+  }
+
+  /**
+   * Whether the process behind this terminal has gone.
+   *
+   * The bridge outlives it, and that is deliberate since M3.9: the tab of a
+   * terminal that ended stays until the person closes it (the owner's decision
+   * of 2026-08-18), and the tail kept here is what a page rebuilt afterwards
+   * draws that screen from. What ends with the process is what may be SENT to
+   * it -- see `type` and `resize`.
+   */
+  public get over(): boolean {
+    return this._over;
   }
 
   /**
@@ -147,6 +186,7 @@ export class TerminalBridge implements Disposable {
    */
   public attach(sink: Sink): void {
     this._sink = sink;
+    this._attachCount += 1;
     // Nothing that was in flight to the previous screen counts against this one.
     this._apply(this._flow.left());
     const replay = this._tail.snapshot();
@@ -208,13 +248,49 @@ export class TerminalBridge implements Disposable {
     this._apply(this._flow.acknowledged(chars));
   }
 
-  /** What the person typed, towards the process. Nothing is added to it. */
+  /**
+   * What the person typed, towards the process. Nothing is added to it.
+   *
+   * Refused once the process has gone, and that guard is the price of keeping
+   * the bridge alive after it (M3.9): the screen of an ended terminal is still
+   * on the stack and can still be typed into, and what is behind it is a pty
+   * this window has already disposed of.
+   */
   public type(data: string): void {
+    if (this._over) {
+      return;
+    }
     this._options.screen.write(data);
   }
 
+  /**
+   * The size the screen settled at, towards the pty -- once per size.
+   *
+   * **The same size twice is dropped, and that is a measurement rather than
+   * tidiness (2026-08-18).** A screen made for a terminal that has just been
+   * attached answers with its size TWICE: once through xterm's own `onResize`,
+   * once because the page says it unprompted (a terminal attaching to a screen
+   * that is already the right size would otherwise never tell its pty anything
+   * at all). Both answers are right. Sent both, they reach ConPTY within a
+   * millisecond of each other and the pseudoconsole acknowledges NEITHER -- no
+   * `ESC[8;rows;cols t` in the output stream, and the agent's first frame is
+   * drawn at a width nobody has. Sent once, it acknowledges.
+   *
+   * What the PROGRAM behind the pty makes of a resize is a separate question and
+   * an open one: measured on this machine, `process.stdout.columns` inside it
+   * never moves from the size it was spawned with, whatever the pseudoconsole is
+   * told -- on the build before M3.9 exactly as on this one (A48, for a live
+   * agent and the owner's eyes in M3.14).
+   */
   public resize(cols: number, rows: number): void {
+    if (this._over) {
+      return;
+    }
+    if (this._lastSize?.cols === cols && this._lastSize.rows === rows) {
+      return;
+    }
     this._lastSize = { cols, rows };
+    this._resizeCount += 1;
     this._options.screen.resize(cols, rows);
   }
 
