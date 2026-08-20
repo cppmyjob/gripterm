@@ -183,7 +183,14 @@ async function entryFor(
   const terminalId: TerminalId | null = await whichTerminal(registry, logger, {
     target,
     title,
-    placeHolder: 'Which terminal?',
+    // Says that a second dialog follows, because the two read as ONE to the
+    // person who did not build them: the owner met this twice (M3.10 and the
+    // M3.14 acceptance), and the first time the note itself went into this
+    // filter box, where it matched no row and Enter did nothing. The wording is
+    // all this change is -- which terminal a command acts on is a decision, and
+    // `chooseTerminal` says why acting on one nobody picked is worse than one
+    // dialog too many.
+    placeHolder: 'Which terminal? The change itself comes next.',
     rows: EDITABLE_ROWS,
     whenEmpty: 'Gripterm: there is no terminal of this window to edit.',
     // The only row there could be is the one being edited, and the box that
