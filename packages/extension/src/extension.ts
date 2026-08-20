@@ -59,6 +59,7 @@ import {
   readTranscriptIndex,
   reviewHookPolicies,
   shellKindFor,
+  TerminalId,
 } from '@gripterm/core';
 import type {
   AgentCommandFactory,
@@ -833,7 +834,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
       logger,
     })
   );
-  context.subscriptions.push(...registerMetadataCommands(metadata, registry, logger));
+  context.subscriptions.push(
+    ...registerMetadataCommands(metadata, registry, logger, () =>
+      // The terminal on this window's own screen, for the one picker that puts
+      // it first (owner's decision 2026-08-20). Read at the moment the command
+      // runs rather than held: what is on screen is exactly the thing that
+      // changes between two invocations. `null` under the editor's engine, which
+      // has no screen of ours -- and `tryFromString` rather than `fromString`,
+      // because a stage that ever holds something unparseable must not turn a
+      // note into a thrown error.
+      stage.activeTerminal === null ? null : TerminalId.tryFromString(stage.activeTerminal)
+    )
+  );
   context.subscriptions.push(
     vscode.commands.registerCommand('gripterm.showLogs', () => {
       output.show(true);

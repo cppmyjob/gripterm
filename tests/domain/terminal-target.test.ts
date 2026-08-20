@@ -1,4 +1,4 @@
-import { TerminalId, chooseTerminal, terminalTargetOf } from '../../packages/core/src/index';
+import { TerminalId, chooseTerminal, showingFirst, terminalTargetOf } from '../../packages/core/src/index';
 import { NEXT_SESSION_UUID, SESSION_UUID, TERMINAL_UUID, makeEntry } from '../helpers/domain-fixtures';
 
 /**
@@ -103,5 +103,60 @@ describe('TerminalId.tryFromString', () => {
 
   it('answers null where fromString throws', () => {
     expect(TerminalId.tryFromString('not-an-id')).toBeNull();
+  });
+});
+
+/**
+ * The order a picker offers its rows in, and the owner's decision behind it
+ * (2026-08-20).
+ *
+ * `Gripterm: Add Note` opens a picker and then a box, and the pair reads as ONE
+ * dialog to the person who did not build it -- met twice, in M3.10 and in the
+ * M3.14 acceptance. The fix the owner chose is deliberately NOT "act on the
+ * terminal that is on screen": that would be `chooseTerminal`'s warning come
+ * true, a command acting on a record nobody picked. It is the gentler half --
+ * the row they are already looking at comes first, wearing a mark, so the
+ * answer is one Enter and it is still an answer they gave.
+ */
+
+const FIRST = TerminalId.fromString(TERMINAL_UUID);
+const SECOND = TerminalId.fromString(SESSION_UUID);
+const THIRD = TerminalId.fromString(NEXT_SESSION_UUID);
+const rows = [{ terminalId: FIRST }, { terminalId: SECOND }, { terminalId: THIRD }];
+
+describe('showingFirst puts the row the person is looking at at the top', () => {
+  it('moves it up and leaves the others in the order they were in', () => {
+    expect(showingFirst(rows, THIRD)).toStrictEqual([
+      { terminalId: THIRD },
+      { terminalId: FIRST },
+      { terminalId: SECOND },
+    ]);
+  });
+
+  it('changes nothing when this window is showing no terminal at all', () => {
+    // The editor's engine, and every window before the panel is opened: there is
+    // no screen of ours, so there is nothing anybody is looking at.
+    expect(showingFirst(rows, null)).toStrictEqual(rows);
+  });
+
+  it('changes nothing when the terminal on screen is not one of the candidates', () => {
+    // The ordinary case for a picker of somebody else's rows -- adoption offers
+    // records this window does not own, and the terminal on our screen is ours.
+    expect(showingFirst([{ terminalId: FIRST }, { terminalId: SECOND }], THIRD)).toStrictEqual([
+      { terminalId: FIRST },
+      { terminalId: SECOND },
+    ]);
+  });
+
+  it('offers exactly the same rows, never one more and never one fewer', () => {
+    // The guard that matters: a reordering that dropped or doubled a row would
+    // be a terminal a person cannot reach, or two that look alike.
+    const ordered = showingFirst(rows, SECOND);
+
+    const values = (list: readonly { readonly terminalId: TerminalId }[]): string[] =>
+      list.map((one) => one.terminalId.value).sort();
+
+    expect(ordered).toHaveLength(rows.length);
+    expect(values(ordered)).toStrictEqual(values(rows));
   });
 });

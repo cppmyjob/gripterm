@@ -98,6 +98,9 @@ export function registerAdoptTerminal(parts: AdoptTerminalParts): vscode.Disposa
       // another window, and the row says whose window and when it last spoke.
       whenSole: 'ask',
       whenEmpty: 'Gripterm: every terminal of another window belongs to a window that is still answering.',
+      // Nothing of ours is a candidate here -- every row belongs to another
+      // window -- so there is no terminal of this screen to put first.
+      showing: null,
       liveness: (entry) => base.reconciler.livenessOf(entry.owner.ownerId),
     });
     if (terminalId === null) {

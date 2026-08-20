@@ -73,6 +73,9 @@ export function registerResumeTerminal(parts: ResumeTerminalParts): vscode.Dispo
       // Taken when there is only one (M2.18): this opens a terminal and takes
       // nothing away, and what it is about to do is visible the moment it does.
       whenSole: 'take',
+      // Every candidate here is a terminal that is OVER, and the one on our
+      // screen is running -- there is nothing of this list to be looking at.
+      showing: null,
     });
     if (terminalId === null) {
       return;

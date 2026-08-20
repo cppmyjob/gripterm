@@ -63,6 +63,10 @@ export function registerCloseTerminal(
       // Asked even when there is one, unlike the edit commands (M2.18): this
       // ends a conversation, and the picker is where a person sees which.
       whenSole: 'ask',
+      // And for the same reason nothing is moved to the top of that list: an
+      // Enter pressed by reflex on a pre-sorted list is the mistake this picker
+      // exists to prevent.
+      showing: null,
     });
     if (terminalId === null) {
       return false;

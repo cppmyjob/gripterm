@@ -537,7 +537,7 @@ export {
   type WindowFacts,
 } from './domain/services/owner-identity';
 
-export { chooseTerminal, terminalTargetOf } from './domain/services/terminal-target';
+export { chooseTerminal, showingFirst, terminalTargetOf } from './domain/services/terminal-target';
 export type { SoleTerminal, TerminalChoice, TerminalTarget } from './domain/services/terminal-target';
 
 export {

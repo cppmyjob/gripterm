@@ -6,6 +6,7 @@ import {
   CONTEXT_OVER,
   chooseTerminal,
   presentTerminal,
+  showingFirst,
   terminalTargetOf,
 } from '@gripterm/core';
 import { say } from '../ui/say';
@@ -78,6 +79,24 @@ interface TerminalPick extends vscode.QuickPickItem {
   readonly terminalId: TerminalId;
 }
 
+/**
+ * What the row a person is already looking at says about itself.
+ *
+ * After whatever the row said anyway rather than instead of it: the description
+ * is where a picker carries the state and the folder, and a mark that replaced
+ * them would take away the very thing the list is read for.
+ */
+const SHOWING_NOW = 'showing now';
+
+function marked(pick: TerminalPick): TerminalPick {
+  return {
+    ...pick,
+    description: pick.description === undefined || pick.description === ''
+      ? SHOWING_NOW
+      : `${pick.description} · ${SHOWING_NOW}`,
+  };
+}
+
 export interface TerminalPickRequest {
   /**
    * Whatever the editor handed the command: a row of the list, an id from a
@@ -108,6 +127,20 @@ export interface TerminalPickRequest {
   readonly whenSole: SoleTerminal;
   /** Which rows to offer, by the same value the menus are keyed on. */
   readonly rows: readonly string[];
+  /**
+   * The terminal this window has on its own screen right now, or `null`.
+   *
+   * Required rather than optional, and for the same reason as `whenSole`: where
+   * a row a person is already looking at goes in a list is a decision about the
+   * command, and a default here would make it silently. Most commands answer
+   * `null` and say why -- their candidates are rows nobody is looking at, or the
+   * picker is the last place somebody sees what they are about to do.
+   *
+   * `null` is also the honest answer for the whole `editor` engine and for any
+   * window before its panel is opened: there is no screen of ours to be looking
+   * at.
+   */
+  readonly showing: TerminalId | null;
   /** What to say when there is nothing to offer. */
   readonly whenEmpty: string;
   /**
@@ -175,14 +208,17 @@ export async function whichTerminal(
     return null;
   }
 
-  const picks: TerminalPick[] = candidates(registry, request)
-    .filter(({ shown }) => request.rows.includes(shown.contextValue))
-    .map(({ entry, shown }) => ({
-      label: shown.label,
-      description: shown.description,
-      detail: entry.launch.cwd,
-      terminalId: entry.terminalId,
-    }));
+  const picks: readonly TerminalPick[] = showingFirst(
+    candidates(registry, request)
+      .filter(({ shown }) => request.rows.includes(shown.contextValue))
+      .map(({ entry, shown }) => ({
+        label: shown.label,
+        description: shown.description,
+        detail: entry.launch.cwd,
+        terminalId: entry.terminalId,
+      })),
+    request.showing
+  ).map((pick) => (pick.terminalId.value === request.showing?.value ? marked(pick) : pick));
 
   const choice = chooseTerminal(picks.map((pick) => pick.terminalId), request.whenSole);
   if (choice.kind === 'nothing') {

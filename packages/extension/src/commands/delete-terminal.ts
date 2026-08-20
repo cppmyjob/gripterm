@@ -97,6 +97,9 @@ export function registerDeleteTerminal(parts: DeleteTerminalParts): vscode.Dispo
       // and what stays, and this is where the person reads WHICH record that
       // is about.
       whenSole: 'ask',
+      // Nothing moved to the top, for the reason above: this list is read, not
+      // answered by reflex.
+      showing: null,
       liveness: livenessOf,
     });
     if (terminalId === null) {

@@ -101,3 +101,36 @@ export function chooseTerminal(
   }
   return { kind: 'ask' };
 }
+
+/**
+ * The same candidates, with the one the person is already looking at first.
+ *
+ * **The owner's decision of 2026-08-20, and the half of it that was refused.**
+ * The edit commands open a picker and then a box, and the two read as ONE
+ * dialog to somebody who did not build them: in M3.10 the note itself was typed
+ * into the picker's filter, where it matched no row and Enter did nothing, and
+ * the M3.14 acceptance found the same reading again. The obvious cure -- act on
+ * the terminal that is on screen and ask nothing -- is exactly what
+ * `chooseTerminal` above refuses, and for the same reason: a note written into
+ * a record nobody chose is worse than one dialog too many. So the row moves to
+ * the top and keeps a mark on it, and the answer stays the person's.
+ *
+ * Generic over "things with a terminal id" so that the rule can be tested here,
+ * in the domain, while the items themselves stay the editor's quick pick.
+ *
+ * `showing` is `null` wherever this window has no screen of its own -- the
+ * editor's engine, and any window before its panel has been opened -- and the
+ * order is then whatever the caller had.
+ */
+export function showingFirst<T extends { readonly terminalId: TerminalId }>(
+  candidates: readonly T[],
+  showing: TerminalId | null
+): readonly T[] {
+  if (showing === null) {
+    return candidates;
+  }
+  const looked = candidates.filter((one) => one.terminalId.value === showing.value);
+  return looked.length === 0
+    ? candidates
+    : [...looked, ...candidates.filter((one) => one.terminalId.value !== showing.value)];
+}

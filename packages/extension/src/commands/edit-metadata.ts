@@ -49,10 +49,11 @@ interface ColorPick extends vscode.QuickPickItem {
 export function registerMetadataCommands(
   metadata: TerminalMetadataService,
   registry: SessionRegistry,
-  logger: Logger
+  logger: Logger,
+  showing: () => TerminalId | null
 ): readonly vscode.Disposable[] {
   const resolve = async (target: unknown, title: string): Promise<TerminalEntry | null> =>
-    await entryFor(target, registry, logger, title);
+    await entryFor(target, registry, logger, title, showing());
 
   return [
     vscode.commands.registerCommand(RENAME_TERMINAL_COMMAND, async (target: unknown) => {
@@ -178,7 +179,8 @@ async function entryFor(
   target: unknown,
   registry: SessionRegistry,
   logger: Logger,
-  title: string
+  title: string,
+  showing: TerminalId | null
 ): Promise<TerminalEntry | null> {
   const terminalId: TerminalId | null = await whichTerminal(registry, logger, {
     target,
@@ -191,6 +193,17 @@ async function entryFor(
     // `chooseTerminal` says why acting on one nobody picked is worse than one
     // dialog too many.
     placeHolder: 'Which terminal? The change itself comes next.',
+    /*
+     * The one picker that puts a row at the top: the terminal on this window's
+     * own screen, marked as such. Owner's decision, 2026-08-20.
+     *
+     * The half deliberately NOT taken is to act on it without asking. These
+     * five commands are the ones a person opens repeatedly and by reflex, and a
+     * note written into a record nobody chose is worse than one dialog too many
+     * -- the same reasoning `chooseTerminal` carries, and the reason the answer
+     * is still an Enter rather than nothing.
+     */
+    showing,
     rows: EDITABLE_ROWS,
     whenEmpty: 'Gripterm: there is no terminal of this window to edit.',
     // The only row there could be is the one being edited, and the box that

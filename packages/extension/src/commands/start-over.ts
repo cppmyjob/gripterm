@@ -44,6 +44,8 @@ export function registerStartOver(
       // Asked even when there is one (M2.18): this archives the record whose
       // conversation id is the only handle on the old conversation.
       whenSole: 'ask',
+      // Finished rows only, so the terminal on our screen is not among them.
+      showing: null,
     });
     if (terminalId === null) {
       return;
