@@ -1,7 +1,7 @@
 import { confirmOrphans, orphanCandidates } from './orphan-processes';
 import { isWitnessedEnd } from './terminal-state-machine';
 import { precedesBoot } from './boot-window';
-import { processGone } from '../events/terminal-event';
+import { processGone, wentQuiet } from '../events/terminal-event';
 import type { AgentListing } from '../entities/agent-record';
 import type { OrphanCandidate, OrphanEvidence } from './orphan-processes';
 import type { Clock } from '../ports/clock';
@@ -24,6 +24,24 @@ import type { TerminalRepository } from '../repositories/terminal-repository';
  * that it can be argued with instead of looking established.
  */
 export const DEFAULT_RECONCILE_INTERVAL_MS = 30_000;
+
+/**
+ * How long a record may go on saying `working` with nothing arriving. [П]
+ *
+ * There is no measurement behind this number, and there cannot be one: it is a
+ * bet about how long a turn stays silent, and both sides of the bet are real. A
+ * turn that is running produces no hook between `PreToolUse` and `PostToolUse`,
+ * so a build that takes longer than this will be drawn `state unknown` while it
+ * works -- and then drawn `working` again by the very next event. That is the
+ * cost, and it is the smaller one: the other direction is a row that says work
+ * is happening after the person stopped it, which is П1's question answered
+ * wrongly in the direction where nobody looks (A50, measured 2026-08-20).
+ *
+ * Three minutes rather than one because the granularity is the sweep -- thirty
+ * seconds -- and rather than ten because a person who interrupted a turn is
+ * still at that window.
+ */
+export const DEFAULT_QUIET_AFTER_MS = 180_000;
 
 /**
  * How long a process we ended is given to stop answering, and how often it is
@@ -52,12 +70,15 @@ export interface ReconcileReport {
   readonly collected: readonly string[];
   /** Conversations the CLI is running that no record on this machine names. */
   readonly unknownSessions: readonly string[];
+  /** `TerminalId.value` of the records that stopped claiming work in this sweep. */
+  readonly quieted: readonly string[];
 }
 
 const NOTHING_FOUND: ReconcileReport = Object.freeze({
   orphaned: Object.freeze([]),
   collected: Object.freeze([]),
   unknownSessions: Object.freeze([]),
+  quieted: Object.freeze([]),
 });
 
 /** What the pass over other windows' leftovers ended, and what it would not. */
@@ -116,6 +137,8 @@ export interface ReconcilerOptions {
   readonly scheduler: Scheduler;
   readonly logger: Logger;
   readonly intervalMs?: number;
+  /** Overrides `DEFAULT_QUIET_AFTER_MS`. Exists for the tests and for an argument. */
+  readonly quietAfterMs?: number;
   /**
    * `os.uptime()`, for the boot rule.
    *
@@ -228,6 +251,10 @@ export class Reconciler implements Disposable {
       orphaned: this._orphans(listed),
       collected: await this._collect(survey, entries),
       unknownSessions: this._strangers(entries, listed),
+      // After `_orphans`, and the order is the rule: a record that has lost its
+      // process is no longer `working`, so it never reaches this pass. The
+      // established fact wins over the inferred one by arriving first.
+      quieted: this._quiet(),
     };
     if (moved) {
       this._notify();
@@ -598,6 +625,37 @@ export class Reconciler implements Disposable {
       return false;
     }
     return !this._options.isRunning(observed.pid);
+  }
+
+  /**
+   * Records that still claim to be working while nothing has been heard.
+   *
+   * `registry.own()` and not the whole base: this is an inference, and inferring
+   * about another window's record would overwrite what that window observes
+   * first-hand. It is also why nothing here probes or spawns anything -- the
+   * whole rule is a subtraction of two numbers the record already carries.
+   */
+  private _quiet(): readonly string[] {
+    const nowMs = this._options.clock.now().getTime();
+    const patienceMs = this._options.quietAfterMs ?? DEFAULT_QUIET_AFTER_MS;
+    const quieted: string[] = [];
+
+    for (const entry of this._options.registry.own()) {
+      if (entry.observed.state !== 'working') {
+        continue;
+      }
+      const silentMs = nowMs - entry.observed.lastEventAt.getTime();
+      if (silentMs < patienceMs) {
+        continue;
+      }
+      this._options.registry.ingest(entry.terminalId, wentQuiet());
+      quieted.push(entry.terminalId.value);
+      this._options.logger.info('a terminal that claimed to be working has gone quiet', {
+        terminalId: entry.terminalId.value,
+        silentMs,
+      });
+    }
+    return quieted;
   }
 
   /** Presence files nothing can establish anything about, and nothing points at. */

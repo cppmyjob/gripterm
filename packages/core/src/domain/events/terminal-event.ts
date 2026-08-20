@@ -30,6 +30,7 @@ export type HookEvent =
 /** Produced by the runner from its own observation. */
 export type SyntheticEvent =
   | ResumeTimedOutEvent
+  | WentQuietEvent
   | ProcessGoneEvent
   | TerminalClosedEvent
   | LaunchExitedNonZeroEvent
@@ -160,6 +161,11 @@ export interface ResumeTimedOutEvent {
   readonly kind: 'ResumeTimedOut';
 }
 
+/** The sweep found a record claiming work that nothing has been heard from. */
+export interface WentQuietEvent {
+  readonly kind: 'WentQuiet';
+}
+
 /** Reconciliation found the record but not the process. */
 export interface ProcessGoneEvent {
   readonly kind: 'ProcessGone';
@@ -202,6 +208,10 @@ export function isHookEvent(event: TerminalEvent): event is HookEvent {
 
 export function resumeTimedOut(): ResumeTimedOutEvent {
   return Object.freeze({ kind: 'ResumeTimedOut' });
+}
+
+export function wentQuiet(): WentQuietEvent {
+  return Object.freeze({ kind: 'WentQuiet' });
 }
 
 export function processGone(pid: number | null): ProcessGoneEvent {

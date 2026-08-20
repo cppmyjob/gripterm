@@ -7,6 +7,7 @@ import {
   resumeExitedNonZero,
   resumeTimedOut,
   terminalClosed,
+  wentQuiet,
   type HookEventContext,
   type NotificationType,
   type PersistedTerminalState,
@@ -61,6 +62,7 @@ const EVENT_CASES = {
   StopFailure: { kind: 'StopFailure', errorType: null, errorMessage: null, ...CONTEXT },
   CwdChanged: { kind: 'CwdChanged', oldCwd: null, newCwd: null, ...CONTEXT },
   ResumeTimedOut: resumeTimedOut(),
+  WentQuiet: wentQuiet(),
   ProcessGone: processGone(4242),
   TerminalClosed: terminalClosed(),
   LaunchExitedNonZero: launchExitedNonZero(1),
@@ -87,6 +89,7 @@ const EVENT_KINDS: Record<TerminalEvent['kind'], true> = {
   StopFailure: true,
   CwdChanged: true,
   ResumeTimedOut: true,
+  WentQuiet: true,
   ProcessGone: true,
   TerminalClosed: true,
   LaunchExitedNonZero: true,
@@ -150,6 +153,7 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     StopFailure: 'turn_failed',
     CwdChanged: 'launching',
     ResumeTimedOut: 'degraded',
+    WentQuiet: NOT_APPLIED,
     ProcessGone: 'orphaned',
     TerminalClosed: 'ended',
     LaunchExitedNonZero: 'ended',
@@ -171,6 +175,7 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     StopFailure: 'turn_failed',
     CwdChanged: 'idle',
     ResumeTimedOut: NOT_APPLIED,
+    WentQuiet: NOT_APPLIED,
     ProcessGone: 'orphaned',
     TerminalClosed: 'ended',
     LaunchExitedNonZero: 'ended',
@@ -192,6 +197,7 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     StopFailure: 'turn_failed',
     CwdChanged: 'working',
     ResumeTimedOut: NOT_APPLIED,
+    WentQuiet: 'degraded',
     ProcessGone: 'orphaned',
     TerminalClosed: 'ended',
     LaunchExitedNonZero: 'ended',
@@ -216,6 +222,7 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     StopFailure: 'turn_failed',
     CwdChanged: 'waiting_permission',
     ResumeTimedOut: NOT_APPLIED,
+    WentQuiet: NOT_APPLIED,
     ProcessGone: 'orphaned',
     TerminalClosed: 'ended',
     LaunchExitedNonZero: 'ended',
@@ -237,6 +244,7 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     StopFailure: 'turn_failed',
     CwdChanged: 'waiting_input',
     ResumeTimedOut: NOT_APPLIED,
+    WentQuiet: NOT_APPLIED,
     ProcessGone: 'orphaned',
     TerminalClosed: 'ended',
     LaunchExitedNonZero: 'ended',
@@ -258,6 +266,7 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     StopFailure: 'turn_failed',
     CwdChanged: 'turn_failed',
     ResumeTimedOut: NOT_APPLIED,
+    WentQuiet: NOT_APPLIED,
     ProcessGone: 'orphaned',
     TerminalClosed: 'ended',
     LaunchExitedNonZero: 'ended',
@@ -282,6 +291,7 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     StopFailure: NOT_APPLIED,
     CwdChanged: NOT_APPLIED,
     ResumeTimedOut: NOT_APPLIED,
+    WentQuiet: NOT_APPLIED,
     ProcessGone: NOT_APPLIED,
     TerminalClosed: NOT_APPLIED,
     LaunchExitedNonZero: NOT_APPLIED,
@@ -306,6 +316,7 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     StopFailure: 'turn_failed',
     CwdChanged: 'degraded',
     ResumeTimedOut: NOT_APPLIED,
+    WentQuiet: NOT_APPLIED,
     ProcessGone: 'orphaned',
     TerminalClosed: 'ended',
     LaunchExitedNonZero: 'ended',
@@ -327,6 +338,7 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     StopFailure: 'turn_failed',
     CwdChanged: 'degraded',
     ResumeTimedOut: NOT_APPLIED,
+    WentQuiet: NOT_APPLIED,
     ProcessGone: 'orphaned',
     TerminalClosed: 'ended',
     LaunchExitedNonZero: 'ended',
@@ -348,6 +360,7 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     StopFailure: NOT_APPLIED,
     CwdChanged: NOT_APPLIED,
     ResumeTimedOut: NOT_APPLIED,
+    WentQuiet: NOT_APPLIED,
     ProcessGone: NOT_APPLIED,
     TerminalClosed: NOT_APPLIED,
     LaunchExitedNonZero: NOT_APPLIED,
@@ -400,7 +413,7 @@ describe('the table covers the product and nothing else', () => {
 });
 
 describe.each(STATES)('from %s', (state) => {
-  it('lands where the table says, for all nineteen events', () => {
+  it('lands where the table says, for all twenty events', () => {
     expect(rowOf(state)).toStrictEqual(TABLE[state]);
   });
 });
@@ -435,6 +448,29 @@ describe('what the table alone cannot say', () => {
     );
 
     expect(renamed).toStrictEqual(['launching + LaunchExitedNonZero -> launch_failed']);
+  });
+
+  it('lets silence contradict a claim of work, and nothing else', () => {
+    // A50, measured 2026-08-20: the CLI sends NOTHING when a turn is
+    // interrupted -- none of the thirty-one hooks its binary carries. So a row
+    // that says `working` can go on saying it forever, and the only thing that
+    // can be said against it is that nothing has arrived. What that buys is
+    // narrow and has to stay narrow: silence disproves the CLAIM, it does not
+    // establish what replaced it. `degraded` is the state that says exactly
+    // that, and `idle` -- which is what the person usually did -- would be a
+    // guess about somebody else's program.
+    const contradicted = machine.apply('working', wentQuiet());
+    const others = STATES
+      .filter((state) => state !== 'working')
+      .map((state) => machine.apply(state, wentQuiet()));
+
+    expect(contradicted).toStrictEqual({
+      kind: 'moved',
+      from: 'working',
+      to: 'degraded',
+      signal: 'degraded',
+    });
+    expect(others.every((transition) => transition.kind === 'ignored')).toBe(true);
   });
 
   it('separates a dropped event from a no-op that was applied', () => {

@@ -61,6 +61,8 @@ import { FakeScheduler, FixedClock, RecordingLogger } from '../helpers/port-fake
 const NOW = new Date('2026-08-12T10:00:00.000Z');
 /** A minute before `NOW`, and two hours after the machine booted. */
 const HEARD_AT = new Date('2026-08-12T09:59:00.000Z');
+/** Longer ago than the sweep's patience with a silent `working` row, and after the boot. */
+const LONG_QUIET = new Date('2026-08-12T09:50:00.000Z');
 /** Before the boot below -- a record from a previous life of this machine. */
 const BEFORE_BOOT = new Date('2026-08-12T07:00:00.000Z');
 const BOOTED_HOURS_AGO_S = 7200;
@@ -524,6 +526,68 @@ describe('the liveness of the windows on this machine', () => {
     expect(reconciler.livenessOf(OwnerId.fromString(GONE))).toBe('dead');
     expect(report.collected).toStrictEqual([]);
     expect(logger.warnings).toHaveLength(1);
+  });
+});
+
+describe('a record that says it is working and has gone quiet', () => {
+  it('stops saying `working` once the silence is longer than the patience', async () => {
+    // A50, measured 2026-08-20: an interrupted turn produces no hook at all --
+    // not one of the thirty-one the CLI's binary carries -- so the row would
+    // say `working` until the person's next turn in that terminal. That is П1's
+    // question ("does this one need me") answered wrongly in the direction that
+    // costs: a row nobody looks at.
+    const { reconciler, base, registry } = build();
+    const mine = ours({ observed: observedAs('working', CLAUDE_PID, LONG_QUIET) });
+    base.hold(mine);
+    registry.register(mine);
+
+    const report = await reconciler.sweep();
+
+    expect(report.quieted).toStrictEqual([TERMINAL_UUID]);
+    expect(stateOf(registry, mine)).toBe('degraded');
+  });
+
+  it('waits out a silence that is still short', async () => {
+    const { reconciler, base, registry } = build();
+    const mine = ours({ observed: observedAs('working', CLAUDE_PID) });
+    base.hold(mine);
+    registry.register(mine);
+
+    const report = await reconciler.sweep();
+
+    expect(report.quieted).toStrictEqual([]);
+    expect(stateOf(registry, mine)).toBe('working');
+  });
+
+  it('says nothing about a quiet record that never claimed to be working', async () => {
+    // Silence around an `idle` row is what an idle row IS. The rule exists
+    // against a claim, not against quiet.
+    const { reconciler, base, registry } = build();
+    const mine = ours({ observed: observedAs('idle', CLAUDE_PID, LONG_QUIET) });
+    base.hold(mine);
+    registry.register(mine);
+
+    const report = await reconciler.sweep();
+
+    expect(report.quieted).toStrictEqual([]);
+    expect(stateOf(registry, mine)).toBe('idle');
+  });
+
+  it('prefers the harder fact when the quiet record has also lost its process', async () => {
+    // `orphaned` is established by a probe; `degraded` is inferred from an
+    // absence. Reporting the row as merely unknown would drop the stronger of
+    // the two, and it is the one a person can act on.
+    const { reconciler, base, registry, gone } = build();
+    const mine = ours({ observed: observedAs('working', CLAUDE_PID, LONG_QUIET) });
+    base.hold(mine);
+    registry.register(mine);
+    gone.add(CLAUDE_PID);
+
+    const report = await reconciler.sweep();
+
+    expect(report.orphaned).toStrictEqual([TERMINAL_UUID]);
+    expect(report.quieted).toStrictEqual([]);
+    expect(stateOf(registry, mine)).toBe('orphaned');
   });
 });
 

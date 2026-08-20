@@ -87,6 +87,7 @@ const NOTIFICATION_PHASE: Partial<Record<NotificationType, PersistedTerminalStat
 const LATE_HOOK = 'a witnessed end is not undone by a mid-turn hook';
 const LATE_INFERENCE = 'the process already reported what it is doing';
 const ALREADY_DEAD = 'this terminal already has a witnessed cause of death';
+const QUIET_ELSEWHERE = 'silence contradicts a claim of work, and nothing else claims it';
 
 /**
  * `(state, event) -> state`. The whole of what a terminal's state depends on.
@@ -159,6 +160,23 @@ export class TerminalStateMachine {
       // Rank 3. The timeout only ever asked one question -- "did the restore
       // ever start?" -- so anywhere but `launching` it has already been answered
       // by something better, and answering it again would undo the answer.
+      // Rank 3, and the narrowest rule in this table: nothing arrived. It is
+      // worth a transition against exactly one state -- `working` is the only
+      // one that CLAIMS something is happening -- and all it can do is take the
+      // claim away. What replaced it is not known, and `degraded` is the state
+      // that says so.
+      //
+      // A50 (measured 2026-08-20) is why the event exists at all: an
+      // interrupted turn produces NOTHING from the CLI -- not one of the
+      // thirty-one hooks its binary carries -- so a row left to itself says
+      // `working` until the person's next turn in that terminal. `idle` is what
+      // usually happened and is still a guess about another program's insides;
+      // this event refuses to make it.
+      case 'WentQuiet':
+        return current === 'working'
+          ? settle(current, 'degraded')
+          : ignored(current, QUIET_ELSEWHERE);
+
       case 'ResumeTimedOut':
         return current === 'launching'
           ? settle(current, 'degraded')

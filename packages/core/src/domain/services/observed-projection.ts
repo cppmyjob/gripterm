@@ -28,6 +28,11 @@ const TOOL_RULES: Readonly<Record<TerminalEvent['kind'], 'clear' | 'keep' | 'nam
   StopFailure: 'clear',
   CwdChanged: 'keep',
   ResumeTimedOut: 'keep',
+  // `keep`, and the choice is the honest one: this event says only that nothing
+  // has arrived. Clearing would assert that the tool finished -- which is the
+  // one thing an absence cannot establish, and the case A50 is about is exactly
+  // the tool that never reported its end.
+  WentQuiet: 'keep',
   ProcessGone: 'clear',
   TerminalClosed: 'clear',
   LaunchExitedNonZero: 'clear',

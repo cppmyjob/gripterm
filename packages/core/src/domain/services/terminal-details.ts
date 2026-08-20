@@ -335,6 +335,8 @@ function wordsFor(event: TerminalEvent | null): string {
       return 'working directory changed';
     case 'ResumeTimedOut':
       return 'restoring took too long';
+    case 'WentQuiet':
+      return 'nothing was heard for long enough to stop calling this working';
     case 'ProcessGone':
       return 'the process is gone';
     case 'TerminalClosed':
