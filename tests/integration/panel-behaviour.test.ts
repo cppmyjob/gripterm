@@ -62,10 +62,16 @@ suite('the panel our tab lives in', () => {
 
     // The measurement needs to be the LAST terminal, or it measures nothing: a
     // panel with another terminal still in it has no reason to close.
-    assert.deepEqual(
-      vscode.window.terminals.map((one) => one.name),
-      [],
-      'another suite left a terminal open, and this measurement is about the last one'
+    //
+    // WAITED FOR rather than asserted outright, and that is a measured lesson of
+    // its own: `engine-fallback` runs just before this file, makes two terminals
+    // of the editor's and disposes them, and `window.terminals` does not empty in
+    // the same tick. One run in three failed here before this wait went in.
+    const gone = await until(() => vscode.window.terminals.length === 0);
+    assert.equal(
+      gone,
+      true,
+      `a terminal was still open when this began: ${vscode.window.terminals.map((one) => one.name).join(', ')}`
     );
 
     const terminal = vscode.window.createTerminal({ name: 'gripterm-panel-probe' });
