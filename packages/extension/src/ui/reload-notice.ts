@@ -60,6 +60,10 @@ export const READ_ONCE_SETTINGS: readonly ReadOnceSetting[] = Object.freeze([
   Object.freeze({ setting: 'gripterm.launch.location', reads: 'where a terminal is opened' }),
   Object.freeze({ setting: 'gripterm.terminal.engine', reads: 'which engine makes a terminal' }),
   Object.freeze({
+    setting: 'gripterm.terminal.ideChannel',
+    reads: 'whether an agent of ours may reach the Claude Code extension',
+  }),
+  Object.freeze({
     setting: 'gripterm.journal.includeContent',
     reads: 'what the event journal is allowed to keep',
   }),

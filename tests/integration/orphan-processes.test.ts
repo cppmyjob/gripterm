@@ -298,6 +298,8 @@ suite('the processes of windows that are gone', () => {
       location: 'panel',
       extensionPath: extensionPath(),
       editor: { termProgram: 'vscode', termProgramVersion: vscode.version },
+      // The default: this suite is not about the channel to the other extension.
+      ideChannel: false,
       logger: log,
     });
     assert.equal(gateway.engine, 'own', `the own engine did not come up: ${log.lines.join(' | ')}`);

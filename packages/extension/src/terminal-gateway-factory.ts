@@ -34,6 +34,16 @@ export interface TerminalGatewayParams {
   /** The extension's own directory: where `build:extension` left the copy of node-pty. */
   readonly extensionPath: string;
   readonly editor: EditorIdentity;
+  /**
+   * What `gripterm.terminal.ideChannel` says: may the agent reach the Claude
+   * Code extension of this editor.
+   *
+   * Read here rather than deeper because it belongs to the engine question in
+   * every way that matters -- only a terminal of our own has to decide it. The
+   * editor's engine gets its terminals from the editor, the extension hands them
+   * its port there itself, and nothing in this build is in the middle of it.
+   */
+  readonly ideChannel: boolean;
   readonly logger: Logger;
   /**
    * Whoever will draw the terminals this gateway makes, or nobody.
@@ -119,6 +129,7 @@ export function terminalGatewayFor(params: TerminalGatewayParams): TerminalGatew
   return new PtyTerminalGateway({
     pty,
     editor: params.editor,
+    ideChannel: params.ideChannel,
     logger: params.logger,
     audience,
   });

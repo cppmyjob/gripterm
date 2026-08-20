@@ -184,6 +184,8 @@ class Stand {
       location: 'editor',
       extensionPath: extensionPath(),
       editor: { termProgram: 'vscode', termProgramVersion: vscode.version },
+      // The default: this suite is not about the channel to the other extension.
+      ideChannel: false,
       logger: log,
       audience: stage,
     });

@@ -47,6 +47,7 @@ function environment(overrides: Partial<TerminalEnvironmentParams> = {}): Record
     delta: {},
     editor: EDITOR,
     caseInsensitiveNames: false,
+    ideChannel: true,
     ...overrides,
   });
 }
@@ -230,6 +231,7 @@ describe('the environment folds case where the platform does', () => {
       delta: { PATH: '/b' },
       editor: EDITOR,
       caseInsensitiveNames: false,
+      ideChannel: true,
     });
 
     expect(result.Path).toBe('/a');
@@ -242,8 +244,42 @@ describe('the environment folds case where the platform does', () => {
       delta: {},
       editor: EDITOR,
       caseInsensitiveNames: false,
+      ideChannel: true,
     });
 
     expect(result.vscode_pid).toBe('4242');
+  });
+});
+
+describe('the channel to the Claude Code extension, which this engine turns off by default', () => {
+  /*
+   * Measured 2026-08-20, by hand, in a real editor. Under `own` the CLI reaches
+   * the Claude Code extension WITHOUT the port we cannot give it: it finds the
+   * extension by the lock files in `~/.claude/ide/`, because `TERM_PROGRAM` --
+   * which this rule sets on purpose -- tells it that it is inside an editor.
+   * The channel works: the agent was asked which file was open and what was
+   * selected in it, and answered both.
+   *
+   * The price is the editor's own terminal taking the focus every time a prompt
+   * is sent, which the owner refused to live with, so the variable the CLI reads
+   * goes in and the person turns it back on if they want the other trade.
+   */
+  it('goes out as the variable the CLI reads, so nothing has to be guessed about it', () => {
+    expect(environment({ ideChannel: false }).CLAUDE_CODE_AUTO_CONNECT_IDE).toBe('false');
+  });
+
+  it('says nothing at all when the person asked for the channel', () => {
+    // Not "true": the CLI has four other reasons to connect, and a build that
+    // wrote `true` here would be claiming to be the one that decided.
+    expect(environment({ ideChannel: true })).not.toHaveProperty('CLAUDE_CODE_AUTO_CONNECT_IDE');
+  });
+
+  it('gives way to a delta that names it, because the delta is the part somebody chose', () => {
+    const result = environment({
+      ideChannel: false,
+      delta: { CLAUDE_CODE_AUTO_CONNECT_IDE: 'true' },
+    });
+
+    expect(result.CLAUDE_CODE_AUTO_CONNECT_IDE).toBe('true');
   });
 });

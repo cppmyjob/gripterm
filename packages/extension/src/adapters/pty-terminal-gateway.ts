@@ -62,6 +62,14 @@ export interface PtyTerminalGatewayOptions {
   readonly editor: EditorIdentity;
   readonly logger: Logger;
   /**
+   * Whether the agent may reach the Claude Code extension of this editor.
+   *
+   * The person's answer, carried from `gripterm.terminal.ideChannel` and handed
+   * to the rule that builds the environment, where both sides of the trade are
+   * written down.
+   */
+  readonly ideChannel: boolean;
+  /**
    * Whoever is going to draw these terminals, or `null` when nobody is.
    *
    * `null` is not a degenerate case: the contract suite makes gateways with no
@@ -111,12 +119,14 @@ export class PtyTerminalGateway implements TerminalGateway, Disposable {
   private readonly _handles = new Map<string, PtyTerminalHandle>();
   private readonly _pty: NodePtyModule;
   private readonly _editor: EditorIdentity;
+  private readonly _ideChannel: boolean;
   private readonly _logger: Logger;
   private readonly _audience: TerminalAudience | null;
 
   constructor(options: PtyTerminalGatewayOptions) {
     this._pty = options.pty;
     this._editor = options.editor;
+    this._ideChannel = options.ideChannel;
     this._logger = options.logger;
     this._audience = options.audience ?? null;
   }
@@ -145,6 +155,7 @@ export class PtyTerminalGateway implements TerminalGateway, Disposable {
       host: process.env,
       delta: spec.env,
       editor: this._editor,
+      ideChannel: this._ideChannel,
       // Windows does not tell `Path` from `PATH`; Unix does. An argument rather
       // than a check inside the rule, because the rule lives in the core and the
       // platform does not.

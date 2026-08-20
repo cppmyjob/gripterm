@@ -24,6 +24,7 @@ const TOAST_STATES = 'notify.toastStates';
 const LAUNCH_MODE = 'launch.mode';
 const LAUNCH_LOCATION = 'launch.location';
 const TERMINAL_ENGINE = 'terminal.engine';
+const TERMINAL_IDE_CHANNEL = 'terminal.ideChannel';
 const JOURNAL_RETENTION_DAYS = 'journal.retentionDays';
 const JOURNAL_MAX_SIZE_MB = 'journal.maxSizeMb';
 const JOURNAL_INCLUDE_CONTENT = 'journal.includeContent';
@@ -157,6 +158,29 @@ export function readLaunchLocation(logger: Logger): LaunchLocation {
  * addon will not load falls back. Both happen in `terminalGatewayFor`, out loud,
  * and the record is stamped from the gateway that answered rather than from here.
  */
+/**
+ * Whether a terminal of our own may reach the Claude Code extension of this
+ * editor -- `gripterm.terminal.ideChannel`, off unless somebody says otherwise.
+ *
+ * **Both sides of it were measured on 2026-08-20, by hand, in a real window.**
+ * ON, the agent is handed the file that is open and the text selected in it --
+ * asked which file and what selection, it named both. The price is that the
+ * editor's own terminal takes the focus from our panel on every prompt sent, and
+ * that only ONE agent gets the channel however many are running: the CLI says so
+ * itself. The owner refused to pay the focus by default, and this is that
+ * decision written where the setting is read.
+ *
+ * Anything that is not exactly `true` leaves it off, the same rule the journal's
+ * content switch follows: a setting we cannot read is not permission.
+ *
+ * It reaches only the `own` engine. Under `editor` the terminals are the
+ * editor's, the extension gives them its port itself, and nothing here is in the
+ * middle of that.
+ */
+export function readIdeChannel(): boolean {
+  return vscode.workspace.getConfiguration(SECTION).get<unknown>(TERMINAL_IDE_CHANNEL) === true;
+}
+
 export function readTerminalEngine(logger: Logger): TerminalEngine {
   const configured = vscode.workspace.getConfiguration(SECTION).get<string>(TERMINAL_ENGINE);
   if (configured === undefined) {

@@ -95,6 +95,7 @@ import { registerNewTerminal } from './commands/new-terminal';
 import {
   readJournalPolicy,
   readLaunchLocation,
+  readIdeChannel,
   readLaunchMode,
   readStorageDir,
   readTerminalEngine,
@@ -509,6 +510,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     setting: readTerminalEngine(logger),
     mode,
     location,
+    ideChannel: readIdeChannel(),
     extensionPath: context.extensionPath,
     editor: editorIdentity(),
     logger,

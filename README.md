@@ -39,7 +39,7 @@ the behaviour the extension relies on. Check yours with `claude --version`.
 | Where the agent is | wherever `gripterm.launch.location` says: a group of the editor area, an editor tab, or the terminal panel | in the Gripterm panel: the terminal on the left, what is known about it on the right, and a strip of tabs when there are several |
 | Platforms | wherever the editor runs | Windows and macOS. On Linux there is no prebuilt native addon to load, so the editor makes the terminal instead and the log says so |
 | `gripterm.launch.mode: shell` | yes | refused the same way: the editor makes the terminal and the log says so |
-| What other extensions add to a terminal | reaches the agent: the channel from the Claude Code extension to the CLI, the git askpass of the editor | does not reach it. Those arrive through a mechanism the editor applies to its own terminals, and no extension can read another one |
+| What other extensions add to a terminal | reaches the agent: the channel from the Claude Code extension to the CLI, the git askpass of the editor | mostly does not: it arrives through a mechanism the editor applies to its own terminals, and no extension can read another one. The Claude Code channel is the exception — the CLI finds that extension by itself, with no port from us — and it is **off unless you turn on `gripterm.terminal.ideChannel`**: while it is on, the agent is handed the file you have open and the text you have selected, and the editor's own terminal takes the focus from the Gripterm panel every time you send a prompt |
 | History | the editor's own scrollback | 1000 lines, and less if the panel was destroyed and redrawn |
 | Search over the history | the editor's | not built |
 

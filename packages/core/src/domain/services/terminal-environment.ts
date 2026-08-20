@@ -31,11 +31,15 @@
  * `environmentVariableCollection`, and the stable API exposes only our own
  * (`@types/vscode` 1.94, `index.d.ts:8084`) -- there is no read of another
  * extension's collection to be had. So under `own` the agent gets no
- * `CLAUDE_CODE_SSE_PORT` (the Claude Code extension's own channel to the CLI) and
- * no `GIT_ASKPASS` / `VSCODE_GIT_*` (the editor's credential prompt). Both are
- * losses of the engine, not omissions of this rule, and both are named in the
- * plan's register (§7.2) with a measurement of their own to come before `own`
- * could ever become the default.
+ * `CLAUDE_CODE_SSE_PORT` and no `GIT_ASKPASS` / `VSCODE_GIT_*` (the editor's
+ * credential prompt). Both are losses of the engine, not omissions of this rule,
+ * and both are named in the plan's register (§7.2).
+ *
+ * **What the missing port turned out NOT to cost, measured 2026-08-20.** The
+ * channel to the Claude Code extension is not lost with it: the CLI finds the
+ * extension by the lock files in `~/.claude/ide/` and connects without any port
+ * from us. That channel is now a decision rather than an accident -- see
+ * `channelOf`, which turns it off unless the person asks.
  */
 
 /**
@@ -84,6 +88,14 @@ export interface TerminalEnvironmentParams {
    * gets whichever of them the platform decides to keep.
    */
   readonly caseInsensitiveNames: boolean;
+  /**
+   * Whether the agent may reach the Claude Code extension of this editor.
+   *
+   * Not a question this rule can answer for anybody: it is a trade with two real
+   * sides, and the person owns it. See `channelOf` for both sides and for what
+   * was measured.
+   */
+  readonly ideChannel: boolean;
 }
 
 /**
@@ -106,6 +118,9 @@ export function terminalEnvironment(params: TerminalEnvironmentParams): Record<s
     table.remove(name);
   }
   for (const [name, value] of Object.entries(identityOf(params.editor))) {
+    table.set(name, value);
+  }
+  for (const [name, value] of Object.entries(channelOf(params.ideChannel))) {
     table.set(name, value);
   }
   for (const [name, value] of Object.entries(params.delta)) {
@@ -140,6 +155,40 @@ function identityOf(editor: EditorIdentity): Record<string, string> {
     ...named('TERM_PROGRAM', editor.termProgram),
     ...named('TERM_PROGRAM_VERSION', editor.termProgramVersion),
   };
+}
+
+/**
+ * `CLAUDE_CODE_AUTO_CONNECT_IDE`, and only when the channel is turned OFF.
+ *
+ * **The channel exists under this engine, which was believed otherwise until
+ * 2026-08-20.** The plan said the agent loses the Claude Code extension here,
+ * because the extension hands its port to the editor's own terminals through a
+ * collection no other extension can read. The port turns out not to be needed:
+ * the CLI finds the extension by the lock files in `~/.claude/ide/`, and it goes
+ * looking because `TERM_PROGRAM` -- which this rule sets on purpose -- tells it
+ * that it is inside an editor. Measured by hand in a real window: `/ide`
+ * answered "Visual Studio Code ✓", and the agent, asked which file was open and
+ * what was selected, named both.
+ *
+ * **The price, measured the same day.** The editor's own terminal takes the
+ * focus away from our panel every time a prompt is sent, and only ONE agent gets
+ * the channel at all -- the CLI says so itself: "Only one Claude Code instance
+ * can be connected to VS Code at a time". So a panel of five agents pays with
+ * its focus for a channel one of them has. The owner's decision of 2026-08-20:
+ * off by default, and a setting that turns it back on for whoever wants the
+ * other side of the trade.
+ *
+ * **Why `false` and never `true`.** This is the one answer the CLI takes as
+ * final (`CLAUDE_CODE_AUTO_CONNECT_IDE === false` returns before every other
+ * check). It has four other reasons to connect, and a build that wrote `true`
+ * here would be claiming a decision it did not make; leaving the name unset
+ * leaves those four exactly as they were.
+ *
+ * The person's own delta is applied after this and wins, which is the same order
+ * everything else in this rule follows.
+ */
+function channelOf(wanted: boolean): Record<string, string> {
+  return wanted ? {} : { CLAUDE_CODE_AUTO_CONNECT_IDE: 'false' };
 }
 
 /**

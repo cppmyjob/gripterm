@@ -118,7 +118,8 @@ async function gatewayFor(
   mode: 'process' | 'shell',
   where: string,
   log: CollectedLog,
-  told: string[] = []
+  told: string[] = [],
+  ideChannel = false
 ): Promise<MadeGateway> {
   return (await api()).makeGateway({
     setting,
@@ -126,13 +127,16 @@ async function gatewayFor(
     location: 'panel',
     extensionPath: where,
     editor: { termProgram: 'vscode', termProgramVersion: vscode.version },
+    // The default of the setting, so that what most of this suite measures is
+    // what a person who configured nothing would get.
+    ideChannel,
     logger: log,
     announce: (message) => told.push(message),
   });
 }
 
-async function ownGateway(log: CollectedLog): Promise<MadeGateway> {
-  const gateway = await gatewayFor('own', 'process', extensionPath(), log);
+async function ownGateway(log: CollectedLog, ideChannel = false): Promise<MadeGateway> {
+  const gateway = await gatewayFor('own', 'process', extensionPath(), log, [], ideChannel);
   // Not a skip: `build:extension` makes the copy, and the integration run
   // performs that build, so anything else here is a broken build.
   assert.equal(gateway.engine, 'own', `the own engine did not come up: ${log.lines.join(' | ')}`);
@@ -229,6 +233,45 @@ suite('the own engine: the environment it hands the agent', () => {
     }
   });
 
+  test('says nothing about the other extension when the person asked for that channel', async () => {
+    /*
+     * The other half of the setting, and it is here rather than only in the unit
+     * suite for one reason: a wiring that hard-coded the refusal would satisfy
+     * every test that reads the rule directly. This one goes through the real
+     * gateway with the answer flipped.
+     *
+     * Nothing is asserted about the CLI connecting -- that needs a live agent
+     * and an editor with the other extension in it, which is the owner's eyes
+     * (M3.14). What is asserted is that this build stops saying no.
+     */
+    const log = new CollectedLog();
+    const gateway = await ownGateway(log, true);
+    const { script, dump } = await environmentDump(`channel-${String(process.pid)}`);
+
+    try {
+      const handle = await gateway.create({
+        terminalId: idFor('0009'),
+        name: 'gripterm-own-channel',
+        cwd: os.tmpdir(),
+        env: {},
+        shellPath: nodePath(),
+        shellArgs: [script, dump],
+      });
+      await closeOf(handle);
+
+      const written = JSON.parse(await readFile(dump, 'utf8')) as Record<string, string>;
+      assert.equal(
+        written.CLAUDE_CODE_AUTO_CONNECT_IDE,
+        undefined,
+        'the build answered a question the person had already answered'
+      );
+    } finally {
+      gateway.dispose();
+      await rm(dump, { force: true });
+      await rm(script, { force: true });
+    }
+  });
+
   test('takes the editor internals off, puts the editor identity on, and carries the rest through', async () => {
     const log = new CollectedLog();
     const gateway = await ownGateway(log);
@@ -264,6 +307,19 @@ suite('the own engine: the environment it hands the agent', () => {
       // assertion above.
       assert.equal(written[CARRIED], 'from-the-host', 'the host environment was not carried through');
       assert.equal(written.TERM_PROGRAM, 'vscode', 'the CLI cannot tell it is inside an editor');
+      /*
+       * And with that one, the CLI would go looking for the Claude Code
+       * extension by the lock files in `~/.claude/ide/` -- measured by hand
+       * 2026-08-20, in a real window, where it found it and connected. The
+       * channel works; the price is the editor's own terminal taking the focus
+       * from our panel on every prompt, and the owner's decision that day was
+       * off by default. This is that decision reaching a process.
+       */
+      assert.equal(
+        written.CLAUDE_CODE_AUTO_CONNECT_IDE,
+        'false',
+        'the agent was left free to connect to the other extension, focus and all'
+      );
       assert.equal(written.TERM_PROGRAM_VERSION, vscode.version);
       assert.equal(written.COLORTERM, 'truecolor');
       // node-pty writes TERM itself, out of the `name` option (`env.TERM =
