@@ -139,7 +139,7 @@ type Row = Record<ColumnName, Cell>;
 const TABLE: Record<PersistedTerminalState, Row> = {
   launching: {
     SessionStart: 'idle',
-    SessionEnd: 'ended',
+    SessionEnd: NOT_APPLIED,
     UserPromptSubmit: 'working',
     PreToolUse: 'working',
     PostToolUse: 'working',
@@ -369,6 +369,8 @@ const TABLE: Record<PersistedTerminalState, Row> = {
 };
 
 const STATES = Object.keys(TABLE) as readonly PersistedTerminalState[];
+/** The two states a hook cannot get back out of, spelled here so a test can say so. */
+const WITNESSED_END: ReadonlySet<PersistedTerminalState> = new Set(['ended', 'resume_failed']);
 const COLUMNS = Object.keys(EVENT_CASES) as readonly ColumnName[];
 
 const machine = new TerminalStateMachine();
@@ -471,6 +473,29 @@ describe('what the table alone cannot say', () => {
       signal: 'degraded',
     });
     expect(others.every((transition) => transition.kind === 'ignored')).toBe(true);
+  });
+
+  it('refuses to let a shutdown answer whether a start ever got going', () => {
+    // A45, measured 2026-08-20 against CLI 2.1.233: `claude --resume <a
+    // conversation that is not there>` prints "No conversation found", sends
+    // exactly ONE hook -- `SessionEnd`, whose `reason` is the same `other` we
+    // collapse anything unrecognised into, so the payload does not distinguish
+    // it -- and exits with code 1 about 1.6 s LATER. Settling the record as
+    // `ended` on that hook means the exit code arrives at a record that is
+    // already dead, `resume_failed` never happens, and the offer to start the
+    // conversation over (M2.13) is gone from the one path that needs it most.
+    //
+    // The refusal is this narrow on purpose: `launching` is the only state in
+    // which "the CLI shut down" and "the start got going" are different
+    // questions. Everywhere else the hook is first-hand evidence and settles
+    // the record as it always did.
+    const tooEarly = machine.apply('launching', EVENT_CASES.SessionEnd);
+    const elsewhere = STATES
+      .filter((state) => state !== 'launching' && !WITNESSED_END.has(state))
+      .map((state) => machine.apply(state, EVENT_CASES.SessionEnd));
+
+    expect(tooEarly.kind).toBe('ignored');
+    expect(elsewhere.every((one) => one.kind === 'moved' && one.to === 'ended')).toBe(true);
   });
 
   it('separates a dropped event from a no-op that was applied', () => {

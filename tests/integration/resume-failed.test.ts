@@ -4,6 +4,7 @@ import { access, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { GriptermApi } from '../../packages/extension/src/extension';
+import type { RegistryChange } from '../../packages/core/src/index';
 
 /**
  * The `resume_failed` branch of П5, in the only configuration that can produce
@@ -18,6 +19,15 @@ import type { GriptermApi } from '../../packages/extension/src/extension';
  * of them can be deleted between two sittings.
  *
  * Measured on 2.1.228: exit code 1 after 1178 ms under the editor's own pty.
+ *
+ * A26 NO LONGER HOLDS on 2.1.233 (measured 2026-08-20, A45, real pty): the
+ * absent conversation prints "No conversation found", sends `SessionEnd` at
+ * about 1.6 s and exits with code 1 at about 3.15 s. The scenario here is kept
+ * as it is anyway -- it is a DIFFERENT refusal, made before a session exists at
+ * all, and this suite is the only place it is exercised. What the newer
+ * measurement changes is the state machine, not this file: a `SessionEnd`
+ * arriving while the record is still `launching` no longer settles it, or the
+ * exit code would find a record that is already dead.
  *
  * Nothing of the person's is touched. The record is written by this test, owned
  * by a window that never existed, and points at a conversation with no
@@ -112,6 +122,45 @@ async function stateWithin(gripterm: GriptermApi, wanted: string): Promise<strin
   return seen;
 }
 
+/**
+ * Every move the registry announced about this record, in order.
+ *
+ * A52 (2026-08-20): this test failed ONCE in two consecutive full runs, with
+ * `ended` where `resume_failed` is owed, and nothing in the runner's output
+ * could say which of the two paths through `deathEvent` produced it -- the
+ * record having left `launching` before the exit was reported, or the editor
+ * not naming an exit code at all. A live measurement cannot settle it either:
+ * five runs of the same `claude` all exited in 1.55-1.63 s with no hook of any
+ * kind, so there is nothing to reproduce on demand.
+ *
+ * The trail settles it from inside the next failure instead of asking for a
+ * third run. The `from` of the death move is the whole answer -- `launching`
+ * means the editor reported no code, anything else means something moved the
+ * record first and is named on the line above it.
+ */
+function trailOf(gripterm: GriptermApi): { readonly lines: string[], readonly stop: () => void } {
+  const lines: string[] = [];
+  const subscription = gripterm.registry.subscribe((change: RegistryChange) => {
+    if (change.kind !== 'entry' || change.entry.terminalId.value !== FAILING_TERMINAL) {
+      return;
+    }
+    const moved = change.transition;
+    lines.push(
+      moved === null
+        ? `registered as ${change.entry.observed.state}`
+        : moved.kind === 'moved'
+          ? `${moved.from} -> ${moved.to} (${moved.signal})`
+          : `${moved.kind} at ${moved.state}`
+    );
+  });
+  return {
+    lines,
+    stop: (): void => {
+      subscription.dispose();
+    },
+  };
+}
+
 /** Everything this test put in the person's store, including what deletion left behind. */
 async function cleanUp(storageDir: string): Promise<void> {
   await rm(join(storageDir, 'terminals', FAILING_TERMINAL), { recursive: true, force: true });
@@ -137,6 +186,7 @@ suite('a restore the CLI refuses to start', () => {
     await assert.rejects(access(GONE_MCP_CONFIG), 'the mcp config this test needs gone is present');
 
     const directory = join(readiness.storageDir, 'terminals', FAILING_TERMINAL);
+    const trail = trailOf(gripterm);
     try {
       await mkdir(directory, { recursive: true });
       const now = Date.now();
@@ -157,7 +207,11 @@ suite('a restore the CLI refuses to start', () => {
       // The measurement: the process exits, and the exit is read as a FAILED
       // RESTORE rather than as an ordinary end -- which is what separates the
       // offer to start over from a row that says nothing (M2.13).
-      assert.equal(await stateWithin(gripterm, 'resume_failed'), 'resume_failed');
+      assert.equal(
+        await stateWithin(gripterm, 'resume_failed'),
+        'resume_failed',
+        `the record's whole trail: ${trail.lines.join(' | ') || '(nothing was announced)'}`
+      );
 
       // And the terminal is gone with it, which is why the notification for this
       // signal leads to the RECORD and not to a pane: there is no pane.
@@ -180,6 +234,7 @@ suite('a restore the CLI refuses to start', () => {
 
       assert.equal(gripterm.lifecycle.discard(entry.terminalId), 'discarded');
     } finally {
+      trail.stop();
       await new Promise((resolve) => setTimeout(resolve, 1000));
       await cleanUp(readiness.storageDir);
     }

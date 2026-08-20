@@ -653,6 +653,44 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
     });
   });
 
+  it('still calls it a failed restore when the CLI announced its own shutdown first', async () => {
+    // A45, measured 2026-08-20 against CLI 2.1.233 under a real pty:
+    // `claude --resume <a conversation that is not there>` prints "No
+    // conversation found with session ID: ...", sends exactly ONE hook --
+    // `SessionEnd` with `reason: "other"` -- at about 1.6 s, and exits with
+    // code 1 at about 3.15 s. So the CLI's announcement of its own shutdown
+    // arrives FIRST and the only evidence about the restore arrives second.
+    //
+    // The record must reach `resume_failed` all the same. That state is what
+    // M2.13 turns into an offer to start the conversation over, and this path
+    // -- a conversation that is simply gone -- is the one that needs the offer.
+    const { lifecycle, registry, gateway, logger } = stand();
+    const entry = await lifecycle.launch(request());
+    gateway.handleFor(entry.terminalId).close(undefined, 'shutdown');
+    const restored = await lifecycle.start(entry, 'resume');
+
+    // The payload as measured, `reason` included: `other` is also the value we
+    // collapse anything unrecognised into, so the body cannot answer the
+    // question on its own and the ORDER is the whole of the case.
+    registry.receive({
+      terminalId: restored.terminalId,
+      receivedAt: STARTED_AT,
+      raw: JSON.stringify({
+        session_id: restored.sessionId.value,
+        transcript_path: '/tmp/gripterm-a45.jsonl',
+        cwd: '/tmp',
+        hook_event_name: 'SessionEnd',
+        reason: 'other',
+      }),
+    });
+    expect(registry.get(restored.terminalId)?.observed.state).toBe('launching');
+
+    gateway.handleFor(restored.terminalId).close(1, 'process');
+
+    expect(registry.get(restored.terminalId)?.observed.state).toBe('resume_failed');
+    expect(closeEvents(logger).at(-1)).toBe('ResumeExitedNonZero');
+  });
+
   it('calls a clean exit an ordinary end', async () => {
     // `/exit` gives code 0. A person leaving is not a failure to report.
     expect(await closing(0, 'launch', 'process')).toMatchObject({

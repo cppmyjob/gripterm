@@ -88,6 +88,7 @@ const LATE_HOOK = 'a witnessed end is not undone by a mid-turn hook';
 const LATE_INFERENCE = 'the process already reported what it is doing';
 const ALREADY_DEAD = 'this terminal already has a witnessed cause of death';
 const QUIET_ELSEWHERE = 'silence contradicts a claim of work, and nothing else claims it';
+const SHUTDOWN_BEFORE_START = 'the CLI shutting down says nothing about whether the start got going';
 
 /**
  * `(state, event) -> state`. The whole of what a terminal's state depends on.
@@ -124,8 +125,35 @@ export class TerminalStateMachine {
       case 'SessionStart':
         return settle(current, 'idle');
 
+      // The one pair where a first-hand hook is refused, and the refusal is
+      // this narrow on purpose.
+      //
+      // A45, measured 2026-08-20 against CLI 2.1.233 under a real pty: a resume
+      // of a conversation that is not there sends exactly ONE hook --
+      // `SessionEnd`, at about 1.6 s -- and then exits with code 1 at about
+      // 3.15 s. Its `reason` is `other`, which is also the value an unrecognised
+      // one collapses into, so the payload cannot be made to tell this case from
+      // an ordinary end. Settled on that hook, the record is `ended` when the
+      // exit code arrives, `death` refuses it as late, and `resume_failed` --
+      // the state M2.13 turns into an offer to start the conversation over --
+      // never happens on the path that needs the offer most.
+      //
+      // `launching` is the only state in which "the CLI shut down" and "the
+      // start got going" are different questions, so it is the only state where
+      // the hook is not allowed to answer.
+      //
+      // THE PRICE: a record whose CLI says goodbye and then does not exit sits
+      // in `launching`. It is bounded on both paths and by different clocks --
+      // the restore timeout at 20 s (`ResumeTimedOut` -> `degraded`) and the
+      // reconciliation sweep at 30 s (`ProcessGone` -> `orphaned`) -- so the
+      // longest a row can hold a start that is over is one sweep.
+      // REMOVED WHEN: a build ships a `SessionEnd` payload that distinguishes
+      // "this session never started" (a `reason` of its own), at which point the
+      // hook can settle the record and carry the distinction with it.
       case 'SessionEnd':
-        return phase(current, 'ended');
+        return current === 'launching'
+          ? ignored(current, SHUTDOWN_BEFORE_START)
+          : phase(current, 'ended');
 
       // Absolute, not "stays `working`". These three arrive only while a turn is
       // running, so they are evidence of `working` whatever we believed before

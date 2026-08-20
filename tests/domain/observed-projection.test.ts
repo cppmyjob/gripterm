@@ -223,13 +223,18 @@ describe('a history the state machine refuses', () => {
     // A hook that arrives after a witnessed end is dropped, and dropping it must
     // leave `lastEventAt` alone: a record whose clock moved for events it
     // refused makes "nothing has happened here for ten minutes" unreadable.
+    // The history begins with the beginning on purpose. Since A45 a `SessionEnd`
+    // is refused while the record is still `launching` -- the CLI shutting down
+    // says nothing about whether the start got going -- so a witnessed end is
+    // now reached the way a real conversation reaches it: it started first.
     const projection = project(
+      moment({ kind: 'SessionStart', sessionId: SESSION, source: 'startup', ...CONTEXT }, 0),
       moment({ kind: 'SessionEnd', sessionId: SESSION, reason: 'logout', ...CONTEXT }, 1),
       moment({ kind: 'PostToolUse', sessionId: SESSION, toolName: 'Bash', toolUseId: 't', ...CONTEXT }, 5)
     );
 
     expect(projection.observed.state).toBe('ended');
     expect(projection.observed.lastEventAt).toStrictEqual(at(1));
-    expect(projection).toMatchObject({ applied: 1, ignored: 1 });
+    expect(projection).toMatchObject({ applied: 2, ignored: 1 });
   });
 });

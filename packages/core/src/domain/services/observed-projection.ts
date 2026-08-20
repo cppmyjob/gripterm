@@ -147,7 +147,11 @@ export interface Projection {
  *     window's own knowledge and are not in the journal. A replay therefore ends
  *     where the last HOOK left the terminal, which is the honest answer for a
  *     record whose process is gone anyway: what the conversation was doing, not
- *     whether it is still running.
+ *     whether it is still running. Since A45 that includes a history whose last
+ *     hook is a `SessionEnd` the machine refused because the record was still
+ *     `launching`: the replay ends in `launching`, exactly where the live record
+ *     stood at that instant, and the exit code that settled it live was never in
+ *     the journal to begin with.
  *   * It does not rename the record. The conversation it follows is tracked so
  *     that events from a session this terminal had left are not applied (§4.6),
  *     but the id is deliberately not returned: only the aggregate may decide
