@@ -220,6 +220,9 @@ const CHECKS: readonly Check[] = [
         setting: 'own',
         mode: 'process',
         location: 'panel',
+        // What the product ships with, because this suite is about the
+        // installed copy rather than about anybody's settings.
+        ideChannel: false,
         // The installed directory, which is the point: this is the `require` of
         // an addon out of an unpacked VSIX.
         extensionPath: extension().extensionPath,

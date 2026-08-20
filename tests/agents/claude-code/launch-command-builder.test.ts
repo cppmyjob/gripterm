@@ -367,6 +367,7 @@ describe('LaunchCommandBuilder: the removals reach the environment', () => {
       host: inherited,
       delta: env,
       editor: { termProgram: 'vscode', termProgramVersion: '1.133.0' },
+      ideChannel: true,
       caseInsensitiveNames: true,
     });
 

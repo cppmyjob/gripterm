@@ -195,6 +195,9 @@ describe('the environment folds case where the platform does', () => {
       host: { Path: 'C:/Windows' },
       delta: { PATH: 'C:/tools' },
       editor: EDITOR,
+      // The channel is not this test's subject, and `true` is the value that
+      // puts nothing of its own into the table.
+      ideChannel: true,
       caseInsensitiveNames: true,
     });
 
@@ -207,6 +210,9 @@ describe('the environment folds case where the platform does', () => {
       host: { Path: 'C:/Windows' },
       delta: { PATH: null },
       editor: EDITOR,
+      // The channel is not this test's subject, and `true` is the value that
+      // puts nothing of its own into the table.
+      ideChannel: true,
       caseInsensitiveNames: true,
     });
 
@@ -219,6 +225,9 @@ describe('the environment folds case where the platform does', () => {
       host: { vscode_pid: '4242' },
       delta: {},
       editor: EDITOR,
+      // The channel is not this test's subject, and `true` is the value that
+      // puts nothing of its own into the table.
+      ideChannel: true,
       caseInsensitiveNames: true,
     });
 
