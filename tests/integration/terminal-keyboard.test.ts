@@ -26,6 +26,15 @@ const SETTLES_WITHIN_MS = 30_000;
 const LOOK_EVERY_MS = 25;
 
 /**
+ * How long a second paste is waited out before one is called one.
+ *
+ * The second road is page -> host -> clipboard read -> page, all of it inside
+ * one window; it is milliseconds when it happens. This is the generous side of
+ * that, because the cost of being wrong is a flaky test either way round.
+ */
+const SECOND_ROAD_MS = 2_000;
+
+/**
  * A process that says what it was given, byte by byte.
  *
  * Three things about it are measurements rather than style, all taken 2026-08-18
@@ -337,6 +346,55 @@ async function untilSeen(
   );
 }
 
+/** `pasted` -- enough of the word to be sure an arrival is ours and not an echo. */
+const PASTED = '112,97,115,116,101,100';
+
+/**
+ * How many times these bytes were given to the process, counting ARRIVALS
+ * rather than answers.
+ *
+ * Not the same thing as the number of answers holding them, and the difference
+ * is the whole defect: two pastes milliseconds apart reach the program as ONE
+ * chunk, so a counter of answers reports one and the double goes unseen. Found
+ * by this suite on 2026-08-20 -- the first counter passed against the code the
+ * defect was in.
+ */
+function timesSeen(bridge: Bridge, codes: string): number {
+  const needle = `,${codes},`;
+  let times = 0;
+  for (const line of sawLines(bridge)) {
+    const haystack = `,${codesOf(line)},`;
+    // The comma between two arrivals belongs to both of them, so the next
+    // search starts on it rather than after it.
+    for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + needle.length - 1)) {
+      times += 1;
+    }
+  }
+  return times;
+}
+
+/**
+ * Keeps looking for a while and says the count did not grow.
+ *
+ * The double paste of 2026-08-20 is a SECOND arrival behind the first, and a
+ * test that counted at the moment the first one landed would pass or fail by
+ * timing. This waits out the second road -- page to host, clipboard read, back
+ * to the page -- which is milliseconds when it happens at all.
+ */
+async function staysAt(bridge: Bridge, codes: string, count: number, ms: number): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    const seen = timesSeen(bridge, codes);
+    assert.ok(
+      seen <= count,
+      `the clipboard arrived ${String(seen)} times where ${String(count)} was the whole promise` +
+        ` -- the process was given ${JSON.stringify(sawLines(bridge).slice(-4))}`
+    );
+    await delay(LOOK_EVERY_MS);
+  }
+  assert.equal(timesSeen(bridge, codes), count, 'the clipboard did not arrive at all');
+}
+
 suite('the keyboard of our own panel', () => {
   test('every chord in the manifest is one this window knows, and hangs on our own key', async () => {
     // The two lists that could drift: the editor reads the manifest, the page
@@ -585,34 +643,47 @@ suite('the keyboard of our own panel', () => {
     }
   });
 
-  test('Shift+Insert pastes, which is the other way people do it', async () => {
+  test('Shift+Insert pastes exactly once, and the once is the editor doing it', async () => {
+    /*
+     * Measured by hand on 2026-08-20, in Cursor with every other extension
+     * switched off: this press put the clipboard in TWICE. The editor pastes it
+     * by itself, exactly as it does `Ctrl+V`, and the page asking the host for
+     * the clipboard on top of that was the second copy.
+     *
+     * That the editor's own paste is visible from HERE was found by this suite
+     * rather than reasoned: a synthetic press is forwarded out of the webview
+     * and the editor dispatches its own keybinding from it -- the same road our
+     * chords travel. So the double IS machine-visible, and the page's whole job
+     * is to add nothing to it.
+     */
     const { workbench } = await api();
     const theirs = await vscode.env.clipboard.readText();
     const stand = await Stand.start('09');
     try {
       const bridge = await attach(stand);
       await vscode.env.clipboard.writeText('pasted by the old way');
-      const before = answersWith(bridge, '112,97,115,116,101,100').length;
 
       workbench.select(false);
       workbench.press('shift+insert');
 
-      // `pasted` -- enough of it to be sure it is ours and not an echo.
-      await untilSeen(bridge, before, 'the paste to reach the process', '112,97,115,116,101,100');
+      await untilSeen(bridge, 0, 'the paste to reach the process', PASTED);
+      await staysAt(bridge, PASTED, 1, SECOND_ROAD_MS);
     } finally {
       await vscode.env.clipboard.writeText(theirs);
       await stand.end();
     }
   });
 
-  test('Ctrl+V pastes, which is the way people reach for first', async () => {
+  test('Ctrl+V pastes exactly once, and nothing of ours goes in front of it', async () => {
     /*
-     * The defect the acceptance run of M3.14 found on 2026-08-20, in a real
-     * panel and by hand: this press did nothing whatever, while the right
-     * button pasted the same clipboard. The page had left it to the document's
-     * own paste event -- reasoned, never measured, and in a webview that event
-     * does not come. What this test holds is the press, not the framing: the
-     * whole-arrival promise belongs to the paste test above.
+     * Two measurements by hand on 2026-08-20, and both are held here.
+     *
+     * The acceptance run of M3.14 found this press doing nothing whatever:
+     * xterm sent `0x16` ahead of the editor's own paste, and `claude` reads
+     * that as quoted-insert -- it swallowed the front of the paste behind it.
+     * The fix that answered the press on the HOST road then put the clipboard
+     * in TWICE, because the editor's paste arrives whatever the page does with
+     * the key event. So this press must paste ONCE and carry no byte with it.
      */
     const { workbench } = await api();
     const theirs = await vscode.env.clipboard.readText();
@@ -620,13 +691,18 @@ suite('the keyboard of our own panel', () => {
     try {
       const bridge = await attach(stand);
       await vscode.env.clipboard.writeText('pasted by the usual way');
-      const before = answersWith(bridge, '112,97,115,116,101,100').length;
 
       workbench.select(false);
       workbench.press('ctrl+v');
 
-      // `pasted` -- enough of it to be sure it is ours and not an echo.
-      await untilSeen(bridge, before, 'the paste to reach the process', '112,97,115,116,101,100');
+      await untilSeen(bridge, 0, 'the paste to reach the process', PASTED);
+      await staysAt(bridge, PASTED, 1, SECOND_ROAD_MS);
+      // 22 is `0x16`, the byte xterm sends for this press when it is left to it.
+      assert.deepEqual(
+        answersWith(bridge, '22'),
+        [],
+        'the quoted-insert byte reached the agent in front of the editor pasting'
+      );
     } finally {
       await vscode.env.clipboard.writeText(theirs);
       await stand.end();

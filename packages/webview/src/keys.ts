@@ -139,23 +139,31 @@ export function isCopyPress(press: KeyPress): boolean {
 }
 
 /**
- * Whether this press means "paste".
+ * Whether this press is a paste -- and the page's whole answer to one is to keep
+ * xterm out of the way and do NOTHING else.
  *
- * Three ways in -- `Ctrl+V`, `Cmd+V` and `Shift+Insert` -- and all three leave
- * for the host, because a webview can neither read nor write a clipboard.
+ * Three presses: `Shift+Insert`, `Ctrl+V` and `Cmd+V`. Every one of them is
+ * pasted by the EDITOR itself, whatever this page does with the key event, and
+ * that is measured rather than reasoned. It took both wrong answers, by hand, on
+ * 2026-08-20:
  *
- * `Ctrl+V` was NOT here until 2026-08-20, on the reasoning that it arrives as
- * the document's own paste event, which xterm answers through `term.paste`, so
- * answering it here as well would paste twice. The reasoning was wrong, and the
- * acceptance run of M3.14 said so: in the panel of VS Code 1.134 `Ctrl+V` does
- * nothing at all, while the right button -- the same road, through the host --
- * pastes. The page cancels the browser's own paste along with this, so a
- * document event on some other platform cannot make a second one.
+ *   * Left to xterm, `Ctrl+V` reached the agent as `0x16`, which `claude` reads
+ *     as quoted-insert: it swallowed the front of the editor's paste arriving
+ *     behind it, and the press looked as though it did nothing at all. That is
+ *     what the acceptance run of M3.14 found.
+ *   * Answered by asking the host for the clipboard, `Ctrl+V` and then
+ *     `Shift+Insert` put the clipboard in TWICE -- the editor's paste plus ours.
+ *     Cancelling the key event does not cancel the editor's paste, and the
+ *     second measurement was taken with every other extension switched off, so
+ *     it is the editor doing it and nobody else.
  *
- * `Cmd+V` is the same rule for macOS, and it is REASONED rather than measured:
- * no machine of that kind has run this build. It is here because a mac without
- * a paste is worse than a mac with one that may be redundant, and the cancel
- * makes a double impossible either way.
+ * The host road did not go away and cannot: a webview can read no clipboard, and
+ * the right button has nothing but that road. What changed is that no KEY takes
+ * it any more.
+ *
+ * `Cmd+V` is REASONED rather than measured -- no machine of that kind has run
+ * this build -- on the reading that an editor which pastes `Ctrl+V` by itself
+ * pastes the mac chord by itself too.
  */
 export function isPastePress(press: KeyPress): boolean {
   if (press.altKey) {

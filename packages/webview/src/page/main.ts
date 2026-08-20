@@ -312,10 +312,11 @@ function start(root: HTMLElement): void {
    *     interrupts, which is the owner's decision and the editor's own rule for
    *     its terminal. With nothing selected this returns false and xterm sends
    *     the interrupt, which is the whole difference;
-   *   * **a paste press** -- `Ctrl+V`, `Cmd+V` or `Shift+Insert`, because only
-   *     the host can read a clipboard. `Ctrl+V` joined the three on 2026-08-20:
-   *     the acceptance run of M3.14 found it doing nothing whatever, the page
-   *     having left it to a document event that never comes.
+   *   * **a paste press** -- `Shift+Insert`, `Ctrl+V` or `Cmd+V` -- for which
+   *     this page does nothing beyond keeping xterm out. The editor pastes all
+   *     three by itself; a page that asked the host for the clipboard as well
+   *     put it in twice, and xterm's `0x16` in front of that paste ate its
+   *     front. Both measured by hand on 2026-08-20, both written in `keys.ts`.
    */
   const answeredHere = (screen: Screen, event: KeyboardEvent): boolean => {
     if (chordFor(event) !== null) {
@@ -335,11 +336,9 @@ function start(root: HTMLElement): void {
       return true;
     }
     if (isPastePress(event)) {
-      // The browser's own paste is cancelled with it: where a document event
-      // does arrive -- which in this panel it does not, measured 2026-08-20 --
-      // it would otherwise put the clipboard in a second time.
-      event.preventDefault();
-      post({ kind: 'wants-paste' });
+      // Nothing at all, and that IS the answer: the editor pastes this press
+      // by itself. The one thing that has to happen is that xterm does not send
+      // `0x16` in front of that paste, which is what returning true does.
       return true;
     }
     return false;

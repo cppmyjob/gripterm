@@ -118,9 +118,9 @@ describe('the two presses that are not chords', () => {
     expect(isPastePress(press('Insert', held))).toBe(false);
   });
 
-  it('reads Ctrl+V as a paste, which the build left to a document event that never came', () => {
-    // The defect the acceptance run of M3.14 found on 2026-08-20: in the panel
-    // this press did nothing at all, while the right button pasted.
+  it('reads Ctrl+V as a paste, so that xterm never sends 0x16 in front of one', () => {
+    // Measured by hand on 2026-08-20: left to xterm this press reached the
+    // agent as quoted-insert and ate the front of the editor's own paste.
     expect(isPastePress(press('KeyV'))).toBe(true);
   });
 
