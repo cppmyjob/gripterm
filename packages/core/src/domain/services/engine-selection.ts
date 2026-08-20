@@ -1,5 +1,8 @@
+import type { Disposable } from '../ports/disposable';
 import type { TerminalEngine } from '../entities/terminal-engine';
 import type { LaunchMode } from './launch-strategy';
+import type { TerminalGateway, TerminalHandle, TerminalSpec } from '../ports/terminal-gateway';
+import type { TerminalId } from '../entities/terminal-id';
 
 /**
  * Which engine runs, out of the one the settings asked for.
@@ -43,4 +46,79 @@ export function chooseEngine(setting: TerminalEngine, mode: LaunchMode): EngineC
     return { engine: 'editor', refusal: SHELL_REFUSAL };
   }
   return { engine: setting, refusal: null };
+}
+
+/**
+ * The same gateway, which says one sentence again the first time it makes a
+ * terminal.
+ *
+ * **Why a second sentence at all.** O5 asks for a fallback that a person can
+ * HEAR, and M3.14 measured that ours could not be heard: in Cursor the engine
+ * fell back exactly as promised and the owner never saw a word of it. The cause
+ * is the editor's, and it is measured rather than guessed --
+ * `workbench.desktop.main.js` carries
+ * `PURGE_TIMEOUT={[Info]:15e3,[Warning]:18e3,...}` and
+ * `get sticky(){...e&&this._severity===Error...}`, so a warning toast is taken
+ * off the screen after eighteen seconds and only an ERROR with buttons stays.
+ * Ours is said from `activate`, which is the same moment a person is answering
+ * the editor's question about trusting the folder. Eighteen seconds later it is
+ * in the bell, and the bell is not a place anybody looks.
+ *
+ * So it is said once more at the one moment the person is certainly watching
+ * this window: a terminal has just appeared and it is not the kind the setting
+ * promised. Nothing else about the port changes -- `engine` above all, because
+ * the record is stamped from it and a wrapper answering for itself would be a
+ * record that lies about which engine made the terminal.
+ *
+ * **The price**, so that it is not discovered later: if the first terminal of
+ * the window is one a RESTORE made during startup, the reminder is spent there,
+ * in the same crowded second as the first sentence. **Removed when** a gateway
+ * can be told who asked for a terminal; `TerminalSpec` carries no intent today,
+ * and inventing one for the sake of a notification would be the wrong way round.
+ */
+class RemindingGateway implements TerminalGateway, Disposable {
+  private _reminded = false;
+
+  constructor(
+    private readonly _gateway: TerminalGateway & Disposable,
+    private readonly _say: (message: string) => void,
+    private readonly _message: string
+  ) {}
+
+  public get engine(): TerminalEngine {
+    return this._gateway.engine;
+  }
+
+  public async create(spec: TerminalSpec): Promise<TerminalHandle> {
+    const handle = await this._gateway.create(spec);
+    // After, and only after: the sentence is about a terminal that is now on the
+    // screen. A create that threw leaves the person with a failure to read, and
+    // a second notification underneath it would bury the one that matters.
+    if (!this._reminded) {
+      this._reminded = true;
+      this._say(this._message);
+    }
+    return handle;
+  }
+
+  public listKnown(): readonly TerminalHandle[] {
+    return this._gateway.listKnown();
+  }
+
+  public handleFor(terminalId: TerminalId): TerminalHandle | undefined {
+    return this._gateway.handleFor(terminalId);
+  }
+
+  public dispose(): void {
+    this._gateway.dispose();
+  }
+}
+
+/** See `RemindingGateway`. A function, because the call site reads as one line of composition. */
+export function remindOnFirstTerminal(
+  gateway: TerminalGateway & Disposable,
+  say: (message: string) => void,
+  message: string
+): TerminalGateway & Disposable {
+  return new RemindingGateway(gateway, say, message);
 }

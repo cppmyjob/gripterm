@@ -159,7 +159,11 @@ export {
   type EditorIdentity,
   type TerminalEnvironmentParams,
 } from './domain/services/terminal-environment';
-export { chooseEngine, type EngineChoice } from './domain/services/engine-selection';
+export {
+  chooseEngine,
+  remindOnFirstTerminal,
+  type EngineChoice,
+} from './domain/services/engine-selection';
 export {
   FRESH_HEARTBEAT_MS,
   HEARTBEAT_INTERVAL_MS,

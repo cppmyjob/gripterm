@@ -1,10 +1,19 @@
 import {
   LAUNCH_MODES,
   TERMINAL_ENGINES,
+  TerminalId,
   chooseEngine,
   isTerminalEngine,
+  remindOnFirstTerminal,
 } from '../../packages/core/src/index';
-import type { LaunchMode, TerminalEngine } from '../../packages/core/src/index';
+import type {
+  Disposable,
+  LaunchMode,
+  TerminalEngine,
+  TerminalGateway,
+  TerminalHandle,
+  TerminalSpec,
+} from '../../packages/core/src/index';
 
 /**
  * Which engine actually runs, out of the one that was asked for.
@@ -90,5 +99,111 @@ describe('the engine names survive the settings file', () => {
 
   it.each(['own-pty', 'Own', '', 'editor '])('refuses %p', (value) => {
     expect(isTerminalEngine(value)).toBe(false);
+  });
+});
+
+/**
+ * The other half of O5, opened by a measurement of the EDITOR rather than of us.
+ *
+ * M3.14 in Cursor (2026-08-20): the fallback happened exactly as promised -- the
+ * terminal came up in the editor's own panel -- and the person never heard it.
+ * The cause is in the workbench bundle and not in a guess:
+ *
+ *   PURGE_TIMEOUT={[Info]:15e3,[Warning]:18e3,[Error]:2e4,[Success]:15e3}
+ *   get sticky(){if(this._sticky)return!0;const e=this.hasActions;
+ *     return!!(e&&this._severity===Error||!e&&this._expanded||this._progress&&...)}
+ *
+ * A warning toast is taken away after eighteen seconds, and only an ERROR with
+ * buttons is sticky -- so a button would not have saved it either. Ours is said
+ * inside `activate`, which is where a person is answering the trust question
+ * about the folder, and eighteen seconds later it is in the bell, unread.
+ *
+ * Hence the second sentence, at the one moment the person is certainly looking
+ * at this window: a terminal they asked for has just appeared, and it is not the
+ * kind the setting promised.
+ *
+ * THE PRICE, named where the rule is: if the first terminal of the window is one
+ * a RESTORE made during startup, the reminder is spent there and lands in the
+ * same crowded second as the first. The bell still holds both. REMOVED WHEN a
+ * gateway can be told who asked for a terminal -- `TerminalSpec` carries no
+ * intent today, and inventing one for a notification would be the tail wagging.
+ */
+
+class GatewayThatCounts implements TerminalGateway, Disposable {
+  public creates = 0;
+  public disposed = false;
+  public readonly engine = 'editor' as const;
+  private readonly _made: TerminalHandle[] = [];
+
+  public async create(spec: TerminalSpec): Promise<TerminalHandle> {
+    this.creates += 1;
+    const handle = { terminalId: spec.terminalId } as unknown as TerminalHandle;
+    this._made.push(handle);
+    return await Promise.resolve(handle);
+  }
+
+  public listKnown(): readonly TerminalHandle[] {
+    return this._made;
+  }
+
+  public handleFor(terminalId: TerminalId): TerminalHandle | undefined {
+    return this._made.find((one) => one.terminalId.value === terminalId.value);
+  }
+
+  public dispose(): void {
+    this.disposed = true;
+  }
+}
+
+const SOME_ID = '3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f';
+const OTHER_ID = '4f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f';
+
+function specFor(raw: string): TerminalSpec {
+  return { terminalId: TerminalId.fromString(raw) } as unknown as TerminalSpec;
+}
+
+describe('a fallback says itself again where the person is looking', () => {
+  it('says nothing until a terminal is actually made', () => {
+    const said: string[] = [];
+    remindOnFirstTerminal(new GatewayThatCounts(), (message) => said.push(message), 'the sentence');
+
+    // Building a gateway is not an event in anybody's day. A window that falls
+    // back and is then left alone has already said its piece in `activate`.
+    expect(said).toStrictEqual([]);
+  });
+
+  it('says it when the first terminal appears, and once', async () => {
+    const said: string[] = [];
+    const gateway = remindOnFirstTerminal(
+      new GatewayThatCounts(),
+      (message) => said.push(message),
+      'the sentence'
+    );
+
+    await gateway.create(specFor(SOME_ID));
+    await gateway.create(specFor(OTHER_ID));
+
+    // Twice would be nagging, and a person who has seen it once and opened a
+    // second terminal anyway has decided.
+    expect(said).toStrictEqual(['the sentence']);
+  });
+
+  it('hands the rest of the port through untouched', async () => {
+    const inner = new GatewayThatCounts();
+    const gateway = remindOnFirstTerminal(inner, () => undefined, 'the sentence');
+    const id = TerminalId.fromString(SOME_ID);
+
+    const handle = await gateway.create(specFor(SOME_ID));
+    gateway.dispose();
+
+    // The engine especially: the record is stamped from `gateway.engine`, so a
+    // wrapper that answered for itself would be a record that lies about which
+    // engine made the terminal -- and reconciliation ends the processes of `own`
+    // and only those.
+    expect(gateway.engine).toBe('editor');
+    expect(gateway.handleFor(id)).toBe(handle);
+    expect(gateway.listKnown()).toStrictEqual([handle]);
+    expect(inner.creates).toBe(1);
+    expect(inner.disposed).toBe(true);
   });
 });

@@ -1,4 +1,4 @@
-import { chooseEngine } from '@gripterm/core';
+import { chooseEngine, remindOnFirstTerminal } from '@gripterm/core';
 import { PtyTerminalGateway } from './adapters/pty-terminal-gateway';
 import { VsCodeTerminalGateway } from './adapters/vscode-terminal-gateway';
 import { loadNodePty } from './adapters/node-pty-module';
@@ -98,7 +98,7 @@ export function terminalGatewayFor(params: TerminalGatewayParams): TerminalGatew
       mode: params.mode,
       using: choice.engine,
     });
-    params.announce?.(choice.refusal);
+    return fallenBackTo(params, choice.refusal);
   }
 
   if (choice.engine === 'editor') {
@@ -112,8 +112,7 @@ export function terminalGatewayFor(params: TerminalGatewayParams): TerminalGatew
     // from the gateway, every terminal this window makes will be recorded as
     // `editor` -- which is what stops reconciliation from ending a `claude` that
     // outlives the extension host on purpose (M2.16).
-    params.announce?.(ADDON_REFUSAL);
-    return new VsCodeTerminalGateway(params.location, params.logger);
+    return fallenBackTo(params, ADDON_REFUSAL);
   }
 
   const audience = params.audience ?? null;
@@ -133,4 +132,28 @@ export function terminalGatewayFor(params: TerminalGatewayParams): TerminalGatew
     logger: params.logger,
     audience,
   });
+}
+
+/**
+ * The gateway a fallback leaves behind, and the sentence said twice.
+ *
+ * Once here, which is inside `activate`, and once more when this window makes
+ * its first terminal. The second one is not belt and braces: M3.14 measured a
+ * fallback in Cursor that worked and that the owner never heard, and the reason
+ * is the editor's own -- `workbench.desktop.main.js` purges a warning toast
+ * after `PURGE_TIMEOUT[Warning] = 18e3` ms and makes only an ERROR with buttons
+ * `sticky`, so the sentence expires while the person is still answering the
+ * question about trusting the folder. The rule and its price live in
+ * `remindOnFirstTerminal`.
+ */
+function fallenBackTo(params: TerminalGatewayParams, refusal: string): TerminalGateway & Disposable {
+  params.announce?.(refusal);
+  // The editor's gateway in both of the two ways a fallback happens, and there
+  // is no third: `chooseEngine` refuses exactly one pair of settings, and the
+  // addon either loads or it does not.
+  return remindOnFirstTerminal(
+    new VsCodeTerminalGateway(params.location, params.logger),
+    (message) => { params.announce?.(message); },
+    refusal
+  );
 }
