@@ -240,7 +240,12 @@
         {
           "command": "gripterm.adoptTerminal",
           "when": "view == gripterm.terminals && viewItem == gripterm.terminal.adoptable",
-          "group": "inline"
+          "group": "inline@1"
+        },
+        {
+          "command": "gripterm.deleteTerminal",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.adoptable",
+          "group": "inline@2"
         },
         {
           "command": "gripterm.adoptTerminal",
@@ -251,6 +256,11 @@
           "command": "gripterm.deleteTerminal",
           "when": "view == gripterm.terminals && viewItem == gripterm.terminal.adoptable",
           "group": "2_act@2"
+        },
+        {
+          "command": "gripterm.deleteTerminal",
+          "when": "view == gripterm.terminals && viewItem == gripterm.terminal.abandoned",
+          "group": "inline"
         },
         {
           "command": "gripterm.deleteTerminal",
