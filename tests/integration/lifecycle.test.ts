@@ -147,9 +147,22 @@ suite('the lifecycle commands', () => {
      * one" -- was true of this window's own records and silent about everybody
      * else's, which is where a row could get stuck for ever.
      */
+    /*
+     * Each row value ONCE for a command in the menu alone, and twice for one a
+     * row also carries as a button -- the same spelling as `resumeTerminal`
+     * below, and the reason the list is entries rather than a set of values: the
+     * button is the fix for the row the owner could not get rid of (M3.14
+     * acceptance), and a set would hide the day somebody deletes it.
+     */
     assert.deepEqual(
       rowsFor('gripterm.deleteTerminal'),
-      [CONTEXT_OVER, CONTEXT_ADOPTABLE, CONTEXT_ABANDONED].sort()
+      [
+        CONTEXT_OVER,
+        CONTEXT_ADOPTABLE,
+        CONTEXT_ADOPTABLE,
+        CONTEXT_ABANDONED,
+        CONTEXT_ABANDONED,
+      ].sort()
     );
     // M2.13, and the same rule: starting over is offered where the terminal is
     // over. On a live row it would be an offer to make a second one (О3).
