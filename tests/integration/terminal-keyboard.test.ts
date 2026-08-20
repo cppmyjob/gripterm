@@ -605,6 +605,34 @@ suite('the keyboard of our own panel', () => {
     }
   });
 
+  test('Ctrl+V pastes, which is the way people reach for first', async () => {
+    /*
+     * The defect the acceptance run of M3.14 found on 2026-08-20, in a real
+     * panel and by hand: this press did nothing whatever, while the right
+     * button pasted the same clipboard. The page had left it to the document's
+     * own paste event -- reasoned, never measured, and in a webview that event
+     * does not come. What this test holds is the press, not the framing: the
+     * whole-arrival promise belongs to the paste test above.
+     */
+    const { workbench } = await api();
+    const theirs = await vscode.env.clipboard.readText();
+    const stand = await Stand.start('10');
+    try {
+      const bridge = await attach(stand);
+      await vscode.env.clipboard.writeText('pasted by the usual way');
+      const before = answersWith(bridge, '112,97,115,116,101,100').length;
+
+      workbench.select(false);
+      workbench.press('ctrl+v');
+
+      // `pasted` -- enough of it to be sure it is ours and not an echo.
+      await untilSeen(bridge, before, 'the paste to reach the process', '112,97,115,116,101,100');
+    } finally {
+      await vscode.env.clipboard.writeText(theirs);
+      await stand.end();
+    }
+  });
+
   test('the right button copies what is selected', async () => {
     const { workbench } = await api();
     const theirs = await vscode.env.clipboard.readText();

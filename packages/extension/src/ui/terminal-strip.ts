@@ -26,11 +26,11 @@ import type { WorkbenchView } from './workbench-view';
  * decision lives.
  *
  * The cross does two different things and says so: a RUNNING terminal is closed
- * -- the process ends, the record is marked -- while one whose process has
- * already gone is only taken off the strip. The second half is the reversible
- * one and it is deliberately so: an agent that died on its own may still be
- * worth resuming, and `closedAt` would take that away for good in order to tidy
- * a tab.
+ * -- the process ends, the record is marked, and the command asks the person
+ * first (M3.14) -- while one whose process has already gone is only taken off
+ * the strip, with no question at all. The second half is the reversible one and
+ * it is deliberately so: an agent that died on its own may still be worth
+ * resuming, and `closedAt` would take that away for good in order to tidy a tab.
  */
 
 export interface TerminalStripOptions {
@@ -113,12 +113,30 @@ export class TerminalStrip implements vscode.Disposable {
     if (this._named(terminalId, 'closed') === null) {
       return;
     }
-    if (this._options.stage.isRunning(terminalId)) {
-      // Through the command, and with the id as its argument so that it acts on
-      // the tab that was clicked rather than asking which terminal was meant.
-      void vscode.commands.executeCommand(CLOSE_TERMINAL_COMMAND, terminalId);
+    if (!this._options.stage.isRunning(terminalId)) {
+      // Nothing to end: the tab of a terminal whose process is gone leaves, and
+      // the record is left alone -- the reversible half (§I.3).
+      this._options.stage.removed(terminalId);
+      return;
     }
-    this._options.stage.removed(terminalId);
+    void this._end(terminalId);
+  }
+
+  /**
+   * A cross on a LIVE terminal: the command decides, and the tab follows it.
+   *
+   * Waited on rather than fired and forgotten, and that is the whole of M3.14
+   * here: the command asks the person whether to end the conversation, and a
+   * strip that took the tab away meanwhile would answer for them -- an agent
+   * still running with no tab to reach it by.
+   */
+  private async _end(terminalId: string): Promise<void> {
+    // With the id as its argument so that it acts on the tab that was clicked
+    // rather than asking which terminal was meant.
+    const closed = await vscode.commands.executeCommand<boolean>(CLOSE_TERMINAL_COMMAND, terminalId);
+    if (closed) {
+      this._options.stage.removed(terminalId);
+    }
   }
 
   /** The id, or a refusal said aloud: a click naming nothing is a defect of ours. */

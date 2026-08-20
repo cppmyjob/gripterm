@@ -141,13 +141,34 @@ export function isCopyPress(press: KeyPress): boolean {
 /**
  * Whether this press means "paste".
  *
- * `Shift+Insert`, which is the second way and the older one. `Ctrl+V` is not
- * here: it arrives as the document's own paste event, which xterm already
- * answers through `term.paste` -- taking it as a key press too would paste
- * twice.
+ * Three ways in -- `Ctrl+V`, `Cmd+V` and `Shift+Insert` -- and all three leave
+ * for the host, because a webview can neither read nor write a clipboard.
+ *
+ * `Ctrl+V` was NOT here until 2026-08-20, on the reasoning that it arrives as
+ * the document's own paste event, which xterm answers through `term.paste`, so
+ * answering it here as well would paste twice. The reasoning was wrong, and the
+ * acceptance run of M3.14 said so: in the panel of VS Code 1.134 `Ctrl+V` does
+ * nothing at all, while the right button -- the same road, through the host --
+ * pastes. The page cancels the browser's own paste along with this, so a
+ * document event on some other platform cannot make a second one.
+ *
+ * `Cmd+V` is the same rule for macOS, and it is REASONED rather than measured:
+ * no machine of that kind has run this build. It is here because a mac without
+ * a paste is worse than a mac with one that may be redundant, and the cancel
+ * makes a double impossible either way.
  */
 export function isPastePress(press: KeyPress): boolean {
-  return press.shiftKey && !press.ctrlKey && !press.altKey && !press.metaKey && press.code === 'Insert';
+  if (press.altKey) {
+    return false;
+  }
+  if (press.code === 'Insert') {
+    return press.shiftKey && !press.ctrlKey && !press.metaKey;
+  }
+  if (press.code !== 'KeyV' || press.shiftKey) {
+    return false;
+  }
+  // Exactly one of the two, so that neither `Ctrl+Cmd+V` nor a bare `V` is one.
+  return press.ctrlKey !== press.metaKey;
 }
 
 /** The chord the editor named when it ran our command, or `null` if it named none of ours. */

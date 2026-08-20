@@ -176,7 +176,7 @@ function keyPress(code: string, held: { readonly ctrlKey?: boolean, readonly shi
   return press;
 }
 
-/** What the press probe is allowed to name: the six chords, and the two that are not chords. */
+/** What the press probe is allowed to name: the six chords, and the three that are not chords. */
 function keyPressFor(id: string): KeyboardEvent | null {
   const chord = chordById(id);
   if (chord !== null) {
@@ -187,6 +187,9 @@ function keyPressFor(id: string): KeyboardEvent | null {
   }
   if (id === 'shift+insert') {
     return keyPress('Insert', { shiftKey: true });
+  }
+  if (id === 'ctrl+v') {
+    return keyPress('KeyV', { ctrlKey: true });
   }
   return null;
 }
@@ -309,7 +312,10 @@ function start(root: HTMLElement): void {
    *     interrupts, which is the owner's decision and the editor's own rule for
    *     its terminal. With nothing selected this returns false and xterm sends
    *     the interrupt, which is the whole difference;
-   *   * **`Shift+Insert`** -- a paste, and only the host can read a clipboard.
+   *   * **a paste press** -- `Ctrl+V`, `Cmd+V` or `Shift+Insert`, because only
+   *     the host can read a clipboard. `Ctrl+V` joined the three on 2026-08-20:
+   *     the acceptance run of M3.14 found it doing nothing whatever, the page
+   *     having left it to a document event that never comes.
    */
   const answeredHere = (screen: Screen, event: KeyboardEvent): boolean => {
     if (chordFor(event) !== null) {
@@ -329,6 +335,10 @@ function start(root: HTMLElement): void {
       return true;
     }
     if (isPastePress(event)) {
+      // The browser's own paste is cancelled with it: where a document event
+      // does arrive -- which in this panel it does not, measured 2026-08-20 --
+      // it would otherwise put the clipboard in a second time.
+      event.preventDefault();
       post({ kind: 'wants-paste' });
       return true;
     }

@@ -106,7 +106,7 @@ describe('the two presses that are not chords', () => {
     expect(isCopyPress(press('KeyV'))).toBe(false);
   });
 
-  it('reads Shift+Insert as a paste, which is the older of the two ways', () => {
+  it('reads Shift+Insert as a paste, which is the older of the three ways', () => {
     expect(isPastePress(press('Insert', { ctrlKey: false, shiftKey: true }))).toBe(true);
   });
 
@@ -118,7 +118,26 @@ describe('the two presses that are not chords', () => {
     expect(isPastePress(press('Insert', held))).toBe(false);
   });
 
-  it('is not a paste on another key', () => {
-    expect(isPastePress(press('KeyV', { ctrlKey: false, shiftKey: true }))).toBe(false);
+  it('reads Ctrl+V as a paste, which the build left to a document event that never came', () => {
+    // The defect the acceptance run of M3.14 found on 2026-08-20: in the panel
+    // this press did nothing at all, while the right button pasted.
+    expect(isPastePress(press('KeyV'))).toBe(true);
+  });
+
+  it('reads Cmd+V as a paste, which is the same rule for a mac nobody has run this on', () => {
+    expect(isPastePress(press('KeyV', { ctrlKey: false, metaKey: true }))).toBe(true);
+  });
+
+  it.each([
+    ['a bare V', { ctrlKey: false }],
+    ['Ctrl+Shift+V', { shiftKey: true }],
+    ['Ctrl+Alt+V', { altKey: true }],
+    ['both modifiers at once', { metaKey: true }],
+  ])('does not read %s as a paste', (_what, held) => {
+    expect(isPastePress(press('KeyV', held))).toBe(false);
+  });
+
+  it('is not a paste on another letter', () => {
+    expect(isPastePress(press('KeyC'))).toBe(false);
   });
 });

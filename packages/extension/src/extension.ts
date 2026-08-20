@@ -81,6 +81,7 @@ import type {
   WatchReport,
   WindowShutdownReport,
 } from '@gripterm/core';
+import { Asker } from './ui/ask';
 import { registerAdoptTerminal } from './commands/adopt-terminal';
 import { registerCleanUpStorage } from './commands/clean-up-storage';
 import { registerCloseTerminal } from './commands/close-terminal';
@@ -338,6 +339,14 @@ export interface GriptermApi {
    * checked by a person watching for a toast.
    */
   readonly said: readonly string[];
+  /**
+   * The modal questions, and the seam that answers them (M3.14).
+   *
+   * Exposed for the reason `said` is, and one more: a modal cannot be clicked
+   * by a run at all, so a promise standing behind one -- ending a live
+   * conversation asks first -- could otherwise be held by nothing.
+   */
+  readonly asker: Asker;
   /** `null` when this window is not reading the shared store. */
   readonly repository: TerminalRepository | null;
   /**
@@ -416,6 +425,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   // Everything this window tells a person goes through here, so that "it said so"
   // is a thing a run can check rather than a thing a screenshot shows (M3.13).
   const announcer = new Announcer(logger);
+  // The modal questions, in one place for the same reason: a run cannot click
+  // a dialog, and a dialog nobody can answer is a run that hangs (M3.14).
+  const asker = new Asker();
 
   const clock = new SystemClock();
   const ids = new SystemIdGenerator();
@@ -779,7 +791,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     )
   );
   context.subscriptions.push(registerFocusTerminal(gateway, logger));
-  context.subscriptions.push(registerCloseTerminal(lifecycle, registry, logger));
+  context.subscriptions.push(registerCloseTerminal(lifecycle, registry, asker, logger));
   context.subscriptions.push(
     registerDeleteTerminal({
       lifecycle,
@@ -942,6 +954,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     get said(): readonly string[] {
       return announcer.said;
     },
+    asker,
     hookToken: token,
     readiness: {
       cliPath: cli.path,

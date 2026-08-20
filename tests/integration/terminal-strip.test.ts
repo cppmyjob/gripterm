@@ -597,7 +597,7 @@ suite('the strip of tabs over our own terminal', () => {
   });
 
   test('the cross on a running terminal closes the conversation and takes the tab away', async () => {
-    const { workbench, registry, identity, readiness, strip } = await api();
+    const { workbench, registry, identity, readiness, strip, asker } = await api();
     const stand = await Stand.start('10');
     const record = recordFor(stand.terminalId, 'idle', identity);
     try {
@@ -605,6 +605,10 @@ suite('the strip of tabs over our own terminal', () => {
       registry.register(record);
       await until('the record to reach the strip', () => namedInStrip(strip, stand.terminalId, TAB_NAME), SETTLES_WITHIN_MS);
 
+      // The question of M3.14, answered here because a run cannot click a modal
+      // at all. That it IS asked is the assertion below.
+      const before = asker.asked.length;
+      asker.answerNext(true);
       workbench.clickClose(stand.terminalId);
 
       // `closedAt` is the mark that keeps a record from ever coming back
@@ -624,6 +628,46 @@ suite('the strip of tabs over our own terminal', () => {
         false,
         'the tab of a closed terminal is still on the strip'
       );
+
+      // Named, so that a build which ends a conversation on one click cannot
+      // pass this by ending it silently.
+      const asked = asker.asked.slice(before);
+      assert.deepEqual(asked, [`End the conversation in "${TAB_NAME}"?`], 'the cross asked nothing');
+    } finally {
+      registry.forget(record.terminalId);
+      await stand.end();
+      await cleanUp(readiness.storageDir, stand.terminalId);
+    }
+  });
+
+  test('a cross the person backs out of ends nothing and leaves the tab where it was', async () => {
+    /*
+     * The other half of the question, and the half a slip needs: saying no has
+     * to leave a running agent reachable. A strip that took the tab away while
+     * the dialog stood would answer for the person -- the conversation would go
+     * on with nothing on the screen to reach it by, which is the state M2.16
+     * measured the cost of.
+     */
+    const { workbench, registry, identity, readiness, strip, stage, asker } = await api();
+    const stand = await Stand.start('12');
+    const record = recordFor(stand.terminalId, 'idle', identity);
+    try {
+      await attach(stand);
+      registry.register(record);
+      await until('the record to reach the strip', () => namedInStrip(strip, stand.terminalId, TAB_NAME), SETTLES_WITHIN_MS);
+
+      asker.answerNext(false);
+      workbench.clickClose(stand.terminalId);
+
+      await until(
+        'the refused close to have been answered',
+        () => asker.asked.some((question) => question.includes(TAB_NAME)),
+        SETTLES_WITHIN_MS
+      );
+      // Both halves, because either alone would pass a build that got it wrong:
+      // the record is not closed, and the tab is still held.
+      assert.equal(registry.get(record.terminalId)?.closedAt, null, 'a refused close closed the record');
+      assert.equal(stage.held.includes(stand.terminalId), true, 'a refused close took the tab away');
     } finally {
       registry.forget(record.terminalId);
       await stand.end();
