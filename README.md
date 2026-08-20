@@ -14,6 +14,8 @@ every conversation when the editor restarts. Gripterm keeps both.
   task and notes, and without you typing a session id.
 - **Every window sees every terminal.** Registry is per machine, so a second
   window — even in another editor — shows the same terminals in read-only mode.
+- **A panel of your own, if you want one.** Gripterm can make the terminal
+  itself and show it beside what is known about it — see below.
 
 ## Requirements
 
@@ -27,6 +29,25 @@ The supported CLI build is pinned. The extension compares it with what is
 actually on your PATH and warns on a mismatch, because a patch release can move
 the behaviour the extension relies on. Check yours with `claude --version`.
 
+## Which engine makes the terminal
+
+`gripterm.terminal.engine` chooses, and the default is **`editor`**.
+
+| | `editor` | `own` |
+|---|---|---|
+| Who makes the terminal | the editor | Gripterm |
+| Where the agent is | wherever `gripterm.launch.location` says: a group of the editor area, an editor tab, or the terminal panel | in the Gripterm panel: the terminal on the left, what is known about it on the right, and a strip of tabs when there are several |
+| Platforms | wherever the editor runs | Windows and macOS. On Linux there is no prebuilt native addon to load, so the editor makes the terminal instead and the log says so |
+| `gripterm.launch.mode: shell` | yes | refused the same way: the editor makes the terminal and the log says so |
+| What other extensions add to a terminal | reaches the agent: the channel from the Claude Code extension to the CLI, the git askpass of the editor | does not reach it. Those arrive through a mechanism the editor applies to its own terminals, and no extension can read another one |
+| History | the editor's own scrollback | 1000 lines, and less if the panel was destroyed and redrawn |
+| Search over the history | the editor's | not built |
+
+Both engines keep the same records, the same restore and the same
+notifications — the difference is who owns the bytes. Every Gripterm setting,
+this one included, is read once when the window loads, so a change needs a
+window reload; the extension says so when you make one.
+
 ## Status
 
 Early development. Nothing here is released yet.
@@ -37,8 +58,9 @@ Early development. Nothing here is released yet.
 pnpm install
 pnpm build          # tsc project references, both packages
 pnpm lint           # eslint, zero warnings allowed
-pnpm test           # unit tests for the domain
-pnpm test:integration   # downloads a real VS Code and runs inside it
+pnpm test           # builds, then unit tests
+pnpm test:integration   # downloads a real VS Code and runs inside it, twice: once per engine
+pnpm test:vsix      # packages, installs the archive into a profile of its own, runs it
 ```
 
 Press <kbd>F5</kbd> to launch an Extension Development Host with the extension
@@ -51,5 +73,6 @@ dependencies. `gripterm` is the extension: the only place that talks to VS Code.
 
 ## License
 
-Apache-2.0. The `LICENSE` and `NOTICE` files are added before the first public
-release; until then the terms above are the stated intent.
+Apache-2.0. The licence text travels with the extension as `LICENSE.txt`, and
+`NOTICE.md` names what else does: `node-pty`, `@xterm/xterm` and the icon font,
+each under its own terms.

@@ -335,7 +335,7 @@
             "launch_failed",
             "resume_failed"
           ],
-          "markdownDescription": "States that raise a notification when a terminal ENTERS them. An empty list turns notifications off."
+          "markdownDescription": "States that raise a notification when a terminal ENTERS them. An empty list turns notifications off. Takes effect when the window reloads."
         },
         "gripterm.launch.mode": {
           "type": "string",
@@ -345,10 +345,10 @@
           ],
           "enumDescriptions": [
             "Claude Code is the terminal's own process. No shell runs, so no shell profile is applied.",
-            "The command is typed into your configured shell. Use this if `claude` is only on your PATH after your shell profile has run."
+            "The command is typed into your configured shell. Use this if `claude` is only on your PATH after your shell profile has run. Gripterm cannot do this in a terminal of its own: with gripterm.terminal.engine: own, this mode falls back to the editor and says so in the log."
           ],
           "default": "process",
-          "markdownDescription": "How a Gripterm terminal is started."
+          "markdownDescription": "How a Gripterm terminal is started. Takes effect when the window reloads."
         },
         "gripterm.launch.location": {
           "type": "string",
@@ -363,7 +363,7 @@
             "In the terminal panel, alongside your ordinary terminals."
           ],
           "default": "group",
-          "markdownDescription": "Where a Gripterm terminal is opened."
+          "markdownDescription": "Where a Gripterm terminal is opened. Not used by `gripterm.terminal.engine: own`, which has one place of its own: the Gripterm panel. Takes effect when the window reloads."
         },
         "gripterm.terminal.engine": {
           "type": "string",
@@ -373,7 +373,7 @@
           ],
           "enumDescriptions": [
             "The editor makes the terminal. Everything you can see and do with a terminal today comes from this: the tab, the scrollback, the selection, the search.",
-            "Gripterm makes the terminal itself, so it can see the bytes going through it. The agent runs in the Gripterm panel: its output, your typing and the size of the panel all reach it. NOT FINISHED: one terminal is on screen at a time (switching between several arrives with the strip), and the keys the editor takes for itself are not yet handed to the terminal. Not available with gripterm.launch.mode: shell, which falls back to the editor and says so in the log."
+            "Gripterm makes the terminal itself, so it can see the bytes going through it. The agent runs in the Gripterm panel: its output, your typing and the size of the panel all reach it, several agents share a strip of tabs above it, and what is known about the one on screen is shown beside it. Windows and macOS only: on Linux there is no prebuilt addon to load, so the editor makes the terminal instead and the log says so. Not available with gripterm.launch.mode: shell, which falls back to the editor the same way. gripterm.launch.location does not apply to this engine. An agent here does not get what other extensions add to the terminals the editor makes: the channel from the Claude Code extension to the CLI (CLAUDE_CODE_SSE_PORT) and the git askpass of the editor are two that it loses."
           ],
           "default": "editor",
           "markdownDescription": "Which engine opens a Gripterm terminal. Takes effect when the window reloads."

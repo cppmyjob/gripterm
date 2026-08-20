@@ -45,7 +45,37 @@ export interface TerminalGatewayParams {
    * an audience is neither an engine nor a reason to choose one.
    */
   readonly audience?: TerminalAudience | null;
+  /**
+   * How the person is told that the engine they asked for is not the one they got.
+   *
+   * O5 asks for the fallback to be audible rather than merely logged, and the
+   * difference is the whole of it: a window that fell back and only wrote a line
+   * looks, from the chair in front of it, exactly like a window that did what it
+   * was told. Both refusals below are silent about everything else -- an engine
+   * that WAS honoured says nothing to anybody.
+   *
+   * Optional because a gateway can be built where there is nobody to tell: the
+   * contract suite makes several per run, and a toast per gateway would be a
+   * test talking to a person.
+   */
+  readonly announce?: (message: string) => void;
 }
+
+/**
+ * What is said when `own` was asked for and the addon would not load.
+ *
+ * Composed here rather than in `loadNodePty`, which says the same thing to the
+ * log with the directory and the error in it. This one is for a person: it names
+ * the setting they set, says which engine is really running, and points at the
+ * log for the cause -- because the causes are several and only one of them is
+ * their doing.
+ */
+const ADDON_REFUSAL =
+  'gripterm.terminal.engine: own could not be used: the native terminal that ships with Gripterm ' +
+  'would not load here, so the editor is making the terminals instead. Run "Gripterm: Show Logs" ' +
+  'for what the load failed with. It is missing on Linux by construction -- node-pty carries builds ' +
+  'for Windows and macOS only -- and elsewhere it is usually a copy that never arrived or one a ' +
+  'security tool has taken away.';
 
 export function terminalGatewayFor(params: TerminalGatewayParams): TerminalGateway & Disposable {
   const choice = chooseEngine(params.setting, params.mode);
@@ -58,6 +88,7 @@ export function terminalGatewayFor(params: TerminalGatewayParams): TerminalGatew
       mode: params.mode,
       using: choice.engine,
     });
+    params.announce?.(choice.refusal);
   }
 
   if (choice.engine === 'editor') {
@@ -66,11 +97,12 @@ export function terminalGatewayFor(params: TerminalGatewayParams): TerminalGatew
 
   const pty = loadNodePty(params.extensionPath, params.logger);
   if (pty === null) {
-    // `loadNodePty` has already said why. The engine that answers is the editor's,
-    // and because the record is stamped from the gateway, every terminal this
-    // window makes will be recorded as `editor` -- which is what stops
-    // reconciliation from ending a `claude` that outlives the extension host on
-    // purpose (M2.16).
+    // `loadNodePty` has already said why to the LOG; this says it to the person.
+    // The engine that answers is the editor's, and because the record is stamped
+    // from the gateway, every terminal this window makes will be recorded as
+    // `editor` -- which is what stops reconciliation from ending a `claude` that
+    // outlives the extension host on purpose (M2.16).
+    params.announce?.(ADDON_REFUSAL);
     return new VsCodeTerminalGateway(params.location, params.logger);
   }
 

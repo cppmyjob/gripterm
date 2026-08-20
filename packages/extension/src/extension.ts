@@ -103,7 +103,8 @@ import { terminalGatewayFor } from './terminal-gateway-factory';
 import { UnavailableAgentCommandFactory } from './adapters/unavailable-agent-command-factory';
 import { VsCodeLogger } from './adapters/vscode-logger';
 import { windowIdentity } from './adapters/vscode-window-identity';
-import { say } from './ui/say';
+import { reloadNotices } from './ui/reload-notice';
+import { Announcer } from './ui/say';
 import { StatusBarPresenter } from './ui/status-bar-presenter';
 import { VsCodeAttentionPresenter } from './ui/vscode-attention-presenter';
 import { TerminalDecorationProvider } from './ui/terminal-decorations';
@@ -118,9 +119,6 @@ import type { TerminalTreeNode } from './ui/terminal-tree';
 
 /** The agent this build knows how to start, by the name it goes by on a PATH. */
 const CLAUDE_CLI = 'claude';
-
-/** The setting whose change needs a reload, because the whole store moves with it. */
-const STORAGE_PATH_SETTING = 'gripterm.storage.path';
 
 /** The interpreter the `SessionStart` forwarder is run with (C5-2: never a bare name). */
 const FORWARDER_INTERPRETER = 'node';
@@ -329,6 +327,17 @@ export interface GriptermApi {
    */
   readonly tree: TerminalTreeDataProvider;
   readonly readiness: Readiness;
+  /**
+   * What this window has told the person, latest last.
+   *
+   * Exposed because a notification cannot be read back through the editor API
+   * and cannot be intercepted from a suite either (measured 2026-08-18 --
+   * `ui/say.ts`). Several promises of this build are sentences: the fallback
+   * from `own` to the editor engine (O5), the settings that need a reload
+   * (M3.13), the terminal nobody is tracking. Without this they could only be
+   * checked by a person watching for a toast.
+   */
+  readonly said: readonly string[];
   /** `null` when this window is not reading the shared store. */
   readonly repository: TerminalRepository | null;
   /**
@@ -404,6 +413,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   const output = vscode.window.createOutputChannel('Gripterm', { log: true });
   context.subscriptions.push(output);
   const logger = new VsCodeLogger(output);
+  // Everything this window tells a person goes through here, so that "it said so"
+  // is a thing a run can check rather than a thing a screenshot shows (M3.13).
+  const announcer = new Announcer(logger);
 
   const clock = new SystemClock();
   const ids = new SystemIdGenerator();
@@ -489,6 +501,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     editor: editorIdentity(),
     logger,
     audience: stage,
+    // O5: a fallback nobody hears is a setting that reads `own` over a terminal
+    // that is not one. The window says it once, here, and never again for an
+    // engine that was honoured.
+    announce: (message) => { announcer.say('warning', message); },
   });
   // Still a subscription as well, and deliberately: `deactivate` covers the
   // ordinary way out, this covers the extension being disabled under a window
@@ -649,7 +665,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
       scheduler: new SystemScheduler(),
       logger,
       announce: (report) => {
-        say('warning', sentenceFor(report), logger);
+        announcer.say('warning', sentenceFor(report));
       },
     })
   );
@@ -809,20 +825,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
       output.show(true);
     })
   );
-  // The one configuration key this build listens to, and it listens in order to
-  // say that listening is not enough. Everything downstream of the storage path
-  // -- this window's presence file, the watcher, the journal, and the
-  // `settings.json` the running CLIs have already read -- is built once at
-  // activation, so a change that silently moved only the watcher would leave
-  // this window observing a directory nothing writes to.
+  // The configuration keys this build listens to, and it listens in order to say
+  // that listening is not enough. Everything downstream of them -- this window's
+  // presence file, the watcher, the journal, the `settings.json` the running
+  // CLIs have already read, the gateway that makes terminals -- is built once at
+  // activation, so a change that silently moved half of it would leave this
+  // window part in the new world and part in the old. The names and the
+  // sentences are `reloadNotices`, where they can be read without a host.
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration(STORAGE_PATH_SETTING)) {
-        say(
-          'info',
-          'Gripterm reads its storage path once, when the window loads. Reload the window to move the store.',
-          logger
-        );
+      for (const notice of reloadNotices(event)) {
+        announcer.say('info', notice);
       }
     })
   );
@@ -926,6 +939,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
      * way "it follows a signal rather than a clock" can be measured.
      */
     details,
+    get said(): readonly string[] {
+      return announcer.said;
+    },
     hookToken: token,
     readiness: {
       cliPath: cli.path,

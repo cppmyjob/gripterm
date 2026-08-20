@@ -41,12 +41,24 @@ const DEFAULT_LAUNCH_MODE: LaunchMode = 'process';
 const DEFAULT_LAUNCH_LOCATION: LaunchLocation = 'group';
 
 /**
- * `editor`, and it stays that way until the measurements say otherwise (M3.13).
+ * `editor`, and the measurements of M3.1-M3.12 are why it stays that way -- the
+ * owner's decision of 2026-08-20 (M3.13).
  *
- * The other engine exists and works, but everything a person sees of a terminal
- * -- the view, the tabs, the switching -- is still the editor's until M3.6 and
- * M3.9. A default that changed before those would hand somebody a working agent
- * with nothing to watch it in.
+ * Not because the other engine is unfinished: it makes terminals, brings them
+ * back after a restart and draws them beside what is known about them. Because
+ * of what a person would lose without having asked for it.
+ *
+ * An `environmentVariableCollection` belonging to another extension reaches the
+ * terminals the EDITOR makes and cannot reach a pty of ours -- measured
+ * 2026-08-20 (A42): a terminal of ours under this engine carries the Claude Code
+ * extension's `CLAUDE_CODE_SSE_PORT` and the editor's `GIT_ASKPASS`, and under
+ * `own` neither is gettable, because the stable API exposes only our own
+ * collection. node-pty carries no Linux build at all, so `own` there is a
+ * fallback and nothing else. And the acceptance a person has to walk by hand is
+ * finished in one editor of the two.
+ *
+ * Changing this is four lines and a test. The default is not the direction the
+ * work is going; it is the direction the loss is.
  */
 const DEFAULT_TERMINAL_ENGINE: TerminalEngine = 'editor';
 

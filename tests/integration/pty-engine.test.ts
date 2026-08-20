@@ -108,12 +108,17 @@ async function api(): Promise<GriptermApi> {
   return await extension.activate();
 }
 
-/** The engine choice, made the way the window makes it. `where` is the extension directory. */
+/**
+ * The engine choice, made the way the window makes it. `where` is the extension
+ * directory; `told` collects what a person would have been shown, because O5
+ * asks for the fallback to be heard and not merely logged.
+ */
 async function gatewayFor(
   setting: 'editor' | 'own',
   mode: 'process' | 'shell',
   where: string,
-  log: CollectedLog
+  log: CollectedLog,
+  told: string[] = []
 ): Promise<MadeGateway> {
   return (await api()).makeGateway({
     setting,
@@ -122,6 +127,7 @@ async function gatewayFor(
     extensionPath: where,
     editor: { termProgram: 'vscode', termProgramVersion: vscode.version },
     logger: log,
+    announce: (message) => told.push(message),
   });
 }
 
@@ -465,11 +471,13 @@ suite('the own engine: the fallback a person has to be able to hear', () => {
      * away from the engine rather than by breaking the build that makes it.
      */
     const log = new CollectedLog();
+    const told: string[] = [];
     const gateway = await gatewayFor(
       'own',
       'process',
       join(os.tmpdir(), 'gripterm-no-such-extension'),
-      log
+      log,
+      told
     );
     try {
       assert.equal(gateway.engine, 'editor');
@@ -477,16 +485,29 @@ suite('the own engine: the fallback a person has to be able to hear', () => {
         log.said('editor'),
         `the fallback was silent, and a silent fallback is a suite that runs one engine twice: ${log.lines.join(' | ')}`
       );
+      // O5, the half a log cannot keep (M3.13): the person is TOLD, and the
+      // sentence names the setting they set -- otherwise they are left looking
+      // for a switch that is already where they put it.
+      assert.equal(told.length, 1, `the person was told ${told.length} things: ${told.join(' | ')}`);
+      assert.ok(
+        told.some((message) => message.includes('gripterm.terminal.engine: own')),
+        `the sentence shown to the person named no setting: ${told.join(' | ')}`
+      );
     } finally {
       gateway.dispose();
     }
   });
 
-  test('gives the own engine when the addon is there', async () => {
+  test('gives the own engine when the addon is there, and says nothing to anybody', async () => {
     const log = new CollectedLog();
-    const gateway = await gatewayFor('own', 'process', extensionPath(), log);
+    const told: string[] = [];
+    const gateway = await gatewayFor('own', 'process', extensionPath(), log, told);
     try {
       assert.equal(gateway.engine, 'own');
+      // The other half of a refusal that can be heard: an engine that WAS
+      // honoured interrupts nobody. A window that toasted every activation would
+      // teach people to dismiss the one that matters.
+      assert.deepEqual(told, []);
     } finally {
       gateway.dispose();
     }
@@ -494,12 +515,22 @@ suite('the own engine: the fallback a person has to be able to hear', () => {
 
   test('refuses own together with the shell mode, out loud, and opens on the editor instead', async () => {
     const log = new CollectedLog();
-    const gateway = await gatewayFor('own', 'shell', extensionPath(), log);
+    const told: string[] = [];
+    const gateway = await gatewayFor('own', 'shell', extensionPath(), log, told);
     try {
       assert.equal(gateway.engine, 'editor');
       assert.ok(
         log.said('gripterm.terminal.engine') && log.said('gripterm.launch.mode'),
         `the refusal named neither setting: ${log.lines.join(' | ')}`
+      );
+      // Both settings in the sentence the PERSON sees, not only in the line the
+      // log keeps: this refusal is the one where either setting alone looks
+      // innocent (M3.13, O5).
+      assert.ok(
+        told.some((message) =>
+          message.includes('gripterm.terminal.engine') && message.includes('gripterm.launch.mode')
+        ),
+        `the person was told: ${told.join(' | ')}`
       );
     } finally {
       gateway.dispose();
