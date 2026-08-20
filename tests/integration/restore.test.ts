@@ -120,18 +120,6 @@ async function stateWithin(gripterm: GriptermApi, wanted: string): Promise<strin
   return seen;
 }
 
-/** Waits until this window no longer holds the terminal it was told to close. */
-async function gone(gripterm: GriptermApi): Promise<void> {
-  const deadline = Date.now() + SETTLES_WITHIN_MS;
-  while (Date.now() < deadline) {
-    if (!gripterm.gateway.listKnown().some((one) => one.terminalId.value === RESTORED_TERMINAL)) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-  }
-  throw new Error('the terminal was still held after it was closed');
-}
-
 /** Everything this test put in the person's store, including what deletion left behind. */
 async function cleanUp(storageDir: string): Promise<void> {
   await rm(join(storageDir, 'terminals', RESTORED_TERMINAL), { recursive: true, force: true });
@@ -209,60 +197,58 @@ suite('bringing conversations back', () => {
       );
 
       /*
-       * **A26 IS REOPENED, and this test is the place it was found** (2026-08-17,
-       * during M3.5). It used to assert `degraded`, on a measurement that no
-       * longer holds: `claude --resume <a conversation that is not there>` was
-       * observed in M2.11 to print its refusal and STAY under a pty, so the end of
-       * a failed resume was the twenty-second wait rather than an exit.
+       * **This line has been three different states, and each move was a
+       * measurement rather than an opinion.** It is worth reading in order,
+       * because the register entries it belongs to are A26, A44 and A45.
        *
-       * Re-measured today, three ways, because this test failing is not by itself
-       * evidence of anything: under our own pty the CLI prints `No conversation
-       * found with session ID: <id>` and EXITS WITH 1 after some 3.4 s (A44); the
-       * editor reports that exit as `{code: 1, reason: 'user'}`, which is A29's
-       * own row and needs nothing new; and the run above was proved not to be
-       * this step's doing by stashing every change of M3.5 and watching a clean
-       * tree fail identically.
+       * `degraded` (M2.11): `claude --resume <a conversation that is not there>`
+       * was observed to print its refusal and STAY under a pty, so the end of a
+       * failed resume was the twenty-second wait rather than an exit.
        *
-       * **Why the record says `ended` and not `resume_failed`, which is the part
-       * worth reading.** Measured by instrumenting the lifecycle in that same
-       * run: a `SessionEnd` hook arrives BEFORE the editor reports the close, so
-       * by the time `deathEvent` asks, the record is already at a witnessed end
-       * and the exit code that would have made it `resume_failed` is never read.
+       * `ended` (2026-08-17, M3.5): re-measured three ways, because this test
+       * failing is not by itself evidence of anything. Under our own pty the CLI
+       * prints `No conversation found with session ID: <id>` and EXITS WITH 1
+       * after some 3.4 s (A44); the editor reports that exit as
+       * `{code: 1, reason: 'user'}`, which is A29's own row; and the run was
+       * proved not to be that step's doing by stashing every change of M3.5 and
+       * watching a clean tree fail identically. Why `ended` and not
+       * `resume_failed` was measured too, by instrumenting the lifecycle: a
+       * `SessionEnd` hook arrives BEFORE the editor reports the close, so by the
+       * time `deathEvent` asked, the record was already at a witnessed end and
+       * the exit code that would have made it `resume_failed` was never read.
+       * The cost was stated here rather than left green: `resume_failed` is the
+       * state M2.13 turns into an offer to start the conversation over, and this
+       * path did not reach it.
        *
-       * **What that costs, stated rather than left green:** `resume_failed` is
-       * the state M2.13 turns into an offer to start the conversation over, and
-       * this path does not reach it. The row says the terminal ended -- true, and
-       * not the whole truth. It is A45 in the register, unfixed on purpose: the
-       * fix is a decision about which piece of first-hand evidence outranks
-       * which, and that belongs to a step of its own rather than to the one that
-       * happened to find it.
-       *
-       * **It is not a regression, and writing that down is the point.** This path
-       * did not reach `resume_failed` yesterday either -- the process did not
-       * exit at all, and the row read `degraded`, which is "running, phase
-       * unknown" about a CLI that had already refused. `ended` is the truer of
-       * the two. And `resume_failed` itself is alive and covered:
-       * `resume-failed.test.ts` reaches it with a real `claude` refused by a
-       * `--mcp-config` whose file is gone (A27).
+       * `resume_failed` (2026-08-20, A45 closed): the order was measured on CLI
+       * 2.1.233 with every hook name pointed at one sink -- `SessionEnd` at
+       * about 1.6 s carrying `reason: "other"`, which is also the value an
+       * unrecognised one collapses into, and the exit at about 3.15 s with code
+       * 1. Since the payload cannot tell this end from an ordinary one, the
+       * ORDER is all there is, and the state machine now refuses `SessionEnd`
+       * while a record is still `launching`: there and only there, "the CLI shut
+       * down" and "the start got going" are different questions. So the exit
+       * code arrives at a record that is still asking, and the offer to start
+       * over exists on the path that needs it most.
        */
-      assert.equal(await stateWithin(gripterm, 'ended'), 'ended');
+      assert.equal(await stateWithin(gripterm, 'resume_failed'), 'resume_failed');
 
-      // And the pane STAYS, which did not change with the CLI: the editor keeps
-      // a terminal whose process has exited, wearing the exit code, so the
-      // person can read the CLI's own refusal in the place it was printed. It is
-      // also why the close event this record's state could have been read from
-      // does not arrive until somebody closes that pane -- which is the next line.
-      assert.ok(
+      // And the terminal went with the process. This is the other half of what
+      // the A45 fix moved, and it is asserted rather than assumed: the record
+      // now settles on the EXIT CODE, and the exit code reaches us as the editor
+      // saying the terminal object is gone -- so `resume_failed` and "there is
+      // no pane any more" are one instant by construction. It is why the toast
+      // for this signal leads to the ROW and not to a pane (M2.13), and it is
+      // the same assertion `resume-failed.test.ts` makes on its own path.
+      //
+      // Until 2026-08-20 this line said the OPPOSITE and was honest then: the
+      // record settled on the `SessionEnd` hook some 1.5 s before the process
+      // exited, so the check ran while the pane was still up.
+      assert.equal(
         gripterm.gateway.listKnown().some((one) => one.terminalId.value === RESTORED_TERMINAL),
-        'the pane with the CLI\'s refusal in it was taken away'
+        false,
+        'the terminal outlived the process that exited'
       );
-
-      gripterm.lifecycle.close(entry.terminalId);
-      // Waited for by the thing that actually has to have happened, rather than
-      // by the state: the record was `ended` before this line -- the CLI's own
-      // `SessionEnd` put it there -- so a wait on the state would return at once
-      // and `discard` would meet a terminal this window is still holding.
-      await gone(gripterm);
       assert.equal(gripterm.lifecycle.discard(entry.terminalId), 'discarded');
     } finally {
       // Reversible by construction: everything here is of this test's making.
