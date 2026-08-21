@@ -189,6 +189,7 @@ export class VsCodeTerminalGateway implements TerminalGateway, Disposable {
   public dispose(): void {
     this._closeSubscription.dispose();
     this._activeSubscription.dispose();
+    this._strip.dispose();
     // The terminals themselves are NOT disposed. Deactivation is not a reason
     // to kill a conversation, and the editor closing takes them anyway --
     // that is what `isTransient` is for.

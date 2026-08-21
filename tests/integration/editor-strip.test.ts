@@ -1,6 +1,8 @@
 import * as assert from 'node:assert/strict';
 import * as os from 'node:os';
 import * as vscode from 'vscode';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { GriptermApi } from '../../packages/extension/src/extension';
 
 type Spec = Parameters<GriptermApi['gateway']['create']>[0];
@@ -105,10 +107,14 @@ function shareOf(layout: { readonly groups: readonly LayoutNode[] }, index: numb
   return measured === null || measured.span === 0 ? null : measured.size / measured.span;
 }
 
-async function layoutNow(): Promise<{ readonly groups: readonly LayoutNode[] }> {
-  return await vscode.commands.executeCommand<{ readonly groups: readonly LayoutNode[] }>(
-    'vscode.getEditorLayout'
-  );
+async function layoutNow(): Promise<{
+  readonly orientation: number,
+  readonly groups: readonly LayoutNode[],
+}> {
+  return await vscode.commands.executeCommand<{
+    readonly orientation: number,
+    readonly groups: readonly LayoutNode[],
+  }>('vscode.getEditorLayout');
 }
 
 /**
@@ -346,6 +352,96 @@ suite('the strip of our own', () => {
     } finally {
       handle.dispose();
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    }
+  });
+
+  /*
+   * The other half of the customer's sixth complaint, 2026-08-21: "панель с
+   * терминалами открывается на весь экран... если открыть файл то слева
+   * окажется окно терминала на всю высоту а справа файл. Неудобно и непонятно
+   * как выйти из этой ситуации."
+   *
+   * Measured the same day. When the person closes their last file the editor
+   * takes the empty group away, our strip is left holding the whole editor
+   * area, and it is LOCKED -- so the next file cannot go into it and the editor
+   * makes a group beside it instead, turning the area horizontal:
+   *
+   *   strip alone     [1*] terminal              orientation 1, [743]
+   *   file landed in  2
+   *   after the file  [1] terminal | [2*] file   orientation 0, [426, 426]
+   *
+   * The owner chose the cure on 2026-08-21: keep a group above, so that a file
+   * has somewhere to land. This asserts the whole scenario -- the strip left
+   * alone, the group that appears, and the file going where a person expects.
+   */
+  test('never stays the only group, so a file has somewhere to land', async () => {
+    const { gateway } = await api();
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+
+    /*
+     * A file on disk and not an untitled one: closing an untitled document
+     * asks whether to save it, and a dialog is the one thing a suite cannot
+     * answer. The first build of this test used an untitled document, the close
+     * was refused, and the editor merged the file into our group instead --
+     * which the failure message printed in full.
+     */
+    const folder = await mkdtemp(join(os.tmpdir(), 'gripterm-strip-'));
+    const path = join(folder, 'the-last-file.txt');
+    await writeFile(path, 'the last file the person had open', 'utf8');
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(path), {
+      viewColumn: vscode.ViewColumn.One,
+    });
+
+    const handle = await gateway.create({
+      terminalId: TERMINAL_ID,
+      name: 'gripterm-m224-alone',
+      cwd: os.tmpdir(),
+      env: {},
+      shellPath: null,
+      shellArgs: [],
+    });
+    try {
+      await waitFor('the terminal to get a tab', () => columnOf('gripterm-m224-alone') !== undefined);
+
+      // The person closes their last file, and the editor takes the emptied
+      // group away by itself (`workbench.editor.closeEmptyGroups`, on by
+      // default). That is the whole of how the strip is left alone.
+      await vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
+      await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+
+      const until = Date.now() + 10000;
+      while (vscode.window.tabGroups.all.length !== 2 && Date.now() < until) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      assert.equal(
+        vscode.window.tabGroups.all.length,
+        2,
+        `no group appeared above the strip: ${describeGroups()}`
+      );
+      const strip = columnOf('gripterm-m224-alone');
+      assert.ok(strip !== undefined, `the terminal lost its group: ${describeGroups()}`);
+      const above = vscode.window.tabGroups.all.find((group) => group.viewColumn !== strip);
+      assert.ok(above, `there is no group but ours: ${describeGroups()}`);
+      assert.deepEqual(above.tabs, [], `the group made above is not empty: ${describeGroups()}`);
+      assert.ok(above.viewColumn < strip, `the group was made below the terminals: ${describeGroups()}`);
+
+      // And the file goes where a person expects: above, not beside.
+      const second = await vscode.workspace.openTextDocument({
+        content: 'the file opened after the terminals were left alone',
+        language: 'plaintext',
+      });
+      const landed = (await vscode.window.showTextDocument(second)).viewColumn;
+
+      assert.equal(landed, above.viewColumn, `the file landed beside the terminals: ${describeGroups()}`);
+      assert.equal(
+        (await layoutNow()).orientation,
+        1,
+        'the editor area went sideways, which is the shape the customer could not get out of'
+      );
+    } finally {
+      handle.dispose();
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await rm(folder, { recursive: true, force: true });
     }
   });
 

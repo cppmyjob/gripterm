@@ -21,6 +21,7 @@ const A_THIRD = 0.3333;
  * says what was being asked for.
  */
 const NEW_GROUP_BELOW = 'workbench.action.newGroupBelow';
+const NEW_GROUP_ABOVE = 'workbench.action.newGroupAbove';
 const LOCK_GROUP = 'workbench.action.lockEditorGroup';
 const GET_LAYOUT = 'vscode.getEditorLayout';
 const SET_LAYOUT = 'vscode.setEditorLayout';
@@ -62,10 +63,88 @@ const SET_LAYOUT = 'vscode.setEditorLayout';
  */
 export class VsCodeEditorStrip {
   private readonly _logger: Logger;
+  private readonly _watch: vscode.Disposable;
   private _column: vscode.ViewColumn | null = null;
+  /** True while this object is making a group, so its own change is not answered. */
+  private _arranging = false;
 
   constructor(logger: Logger) {
     this._logger = logger;
+    this._watch = vscode.window.tabGroups.onDidChangeTabGroups(() => {
+      void this._keepCompany();
+    });
+  }
+
+  public dispose(): void {
+    this._watch.dispose();
+  }
+
+  /**
+   * The strip is never the only group of the editor area.
+   *
+   * **The other half of the customer's sixth complaint, 2026-08-21**, and it is
+   * the same lock that makes the strip a strip. When the person closes their
+   * last file the editor takes the emptied group away; our group is left
+   * holding the whole area, and a locked group that has no neighbour leaves the
+   * editor nowhere to put the next file but BESIDE it. Measured: the area turns
+   * horizontal, `[1] terminal | [2] file`, which is the "слева терминал на всю
+   * высоту, справа файл" they could not get out of.
+   *
+   * So a group is made above, and the picture the person set up comes back --
+   * measured on the same stand: with a group above, the next file lands in it.
+   * The owner chose this over the two alternatives on 2026-08-21, with the
+   * price in front of them: the terminals shrink at the moment the last file
+   * closes, and there is empty space above them until something is opened.
+   *
+   * The height asked for is the same third the strip is made with, and for the
+   * same reason -- the size it has at this instant is the whole area, which is
+   * not a size anybody chose.
+   */
+  private async _keepCompany(): Promise<void> {
+    if (this._arranging || vscode.window.tabGroups.all.length !== 1) {
+      return;
+    }
+    const only = vscode.window.tabGroups.all[0];
+    /*
+     * Ours, and holding something. Asked as "a strip was made in this window
+     * and the one group left holds terminals and nothing else" -- NOT as "its
+     * column is the one we remember", which is the trap this file already warns
+     * about twice: closing the group above renumbers ours, so by the time this
+     * runs the remembered number names nothing. The first build of this rule
+     * compared the number and never fired.
+     *
+     * A single EMPTY group is an editor area with nothing in it, which is how
+     * every window starts and is nobody's problem.
+     */
+    const held =
+      only !== undefined &&
+      this._column !== null &&
+      only.tabs.length > 0 &&
+      only.tabs.every((tab) => tab.input instanceof vscode.TabInputTerminal);
+    if (!held || only === undefined) {
+      return;
+    }
+    this._column = only.viewColumn;
+
+    this._arranging = true;
+    try {
+      await vscode.commands.executeCommand(NEW_GROUP_ABOVE);
+      // Making a group above renumbers ours: the new one takes the column we
+      // had. Read it back rather than assumed -- the whole file turns on that
+      // number being right.
+      const strip = vscode.window.tabGroups.all.find((group) =>
+        group.tabs.some((tab) => tab.input instanceof vscode.TabInputTerminal)
+      );
+      this._column = strip?.viewColumn ?? null;
+      if (this._column !== null) {
+        await this._askForAThird(this._column);
+      }
+      this._logger.info('a group was made above the terminals, which had the editor area to themselves', {
+        column: this._column,
+      });
+    } finally {
+      this._arranging = false;
+    }
   }
 
   /** The column our terminals open in, making it if there is not one. */
