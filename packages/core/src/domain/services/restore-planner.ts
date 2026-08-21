@@ -37,6 +37,15 @@ export type RestoreRefusal =
   /** Two records name one conversation, and choosing between them is not ours. */
   | 'duplicate-session';
 
+/**
+ * What a person's own window may do with a record they asked to resume: refuse
+ * with a reason written for them, or start -- and `intent` says which of the two
+ * starts it is, in the same words `RestoreStep` uses.
+ */
+export type ResumeDecision =
+  | { readonly kind: 'refused', readonly reason: RestoreRefusal }
+  | { readonly kind: 'start', readonly intent: LaunchIntent };
+
 export interface RestoreStep {
   readonly entry: TerminalEntry;
   /**
@@ -377,11 +386,23 @@ function conversationRefusal(
  * The duplicate check is kept, because it is about the conversation: another
  * record that could still be resumed and names the same session is the О3 hazard
  * whoever asks.
+ *
+ * **`no-transcript` is not a refusal but the second answer, and the customer
+ * had to find that for us (2026-08-21).** The owner decided the same day that a
+ * record nothing was said in comes back with a NEW conversation, and
+ * `planRestore` has answered that way since -- but only when a window starts up.
+ * The green button on the row went on refusing, so a terminal opened, never
+ * typed in and closed came back by itself at the next start and would not come
+ * back when asked for. One rule, asked twice, must not give two answers.
  */
-export function resumeRefusal(entry: TerminalEntry, inputs: RestoreInputs): RestoreRefusal | null {
+export function resumeIntent(entry: TerminalEntry, inputs: RestoreInputs): ResumeDecision {
   const refusal = conversationRefusal(entry, inputs, listedSessions(inputs.agents));
-  if (refusal !== null) {
-    return refusal;
+  // The same reading `planRestore` makes of the same refusal (owner's decision
+  // 2026-08-21): nothing was ever said, so there is nothing to resume -- and the
+  // answer to that is a new conversation in the same record, not a closed door.
+  const startsFresh = refusal === 'no-transcript';
+  if (refusal !== null && !startsFresh) {
+    return { kind: 'refused', reason: refusal };
   }
   const contested = inputs.entries.some(
     (other) =>
@@ -389,7 +410,10 @@ export function resumeRefusal(entry: TerminalEntry, inputs: RestoreInputs): Rest
       other.isRestorable() &&
       other.sessionId.equals(entry.sessionId)
   );
-  return contested ? 'duplicate-session' : null;
+  if (contested) {
+    return { kind: 'refused', reason: 'duplicate-session' };
+  }
+  return { kind: 'start', intent: startsFresh ? 'launch' : 'resume' };
 }
 
 /**

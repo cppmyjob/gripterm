@@ -1,11 +1,10 @@
 import * as vscode from 'vscode';
-import { explainRefusal, isGriptermError, presentTerminal, resumeRefusal } from '@gripterm/core';
+import { explainRefusal, isGriptermError, presentTerminal, resumeIntent } from '@gripterm/core';
 import { FINISHED_ROWS, whichTerminal } from './pick-terminal';
 import { say } from '../ui/say';
 import type {
   Logger,
   RestoreInputs,
-  RestoreRefusal,
   SessionRegistry,
   TerminalEntry,
   TerminalLifecycleService,
@@ -57,6 +56,13 @@ export interface ResumeTerminalParts {
  * author is the one asking. Refusing them would leave a terminal closed by
  * mistake with no way back at all -- and the alternative, hiding the entry on
  * those rows, is a menu that changes shape for a reason nobody can see.
+ *
+ * **A record nothing was ever said in comes back too, with a NEW conversation**
+ * (customer, 2026-08-21: "если открыть новый терминал и туда ничего не вводить
+ * и закрыть терминал принудительно, то это окно нельзя восстановить через
+ * зелёную кнопку"). The rule is the owner's, taken the same day for the
+ * automatic path; the button simply had not followed it. The difference from a
+ * resume is said out loud, because the button promised one.
  *
  * No dialog otherwise: the terminal opening IS the answer, and it can be closed
  * again by whoever asked.
@@ -120,27 +126,48 @@ async function resume(parts: {
 }): Promise<void> {
   const { entry, label, lifecycle, gather, logger } = parts;
 
-  const refusal = resumeRefusal(entry, await gather());
-  if (refusal !== null) {
+  const decision = resumeIntent(entry, await gather());
+  if (decision.kind === 'refused') {
     // The predicate said no and it says why -- in the union's own words, so
     // that the sentence a person reads here is the sentence they would read
     // about the same record at activation.
-    say('warning', `Gripterm: "${label}" was not resumed — ${explainRefusal(refusal)}.${wayOut(refusal)}`, logger);
+    say('warning', `Gripterm: "${label}" was not resumed — ${explainRefusal(decision.reason)}.`, logger);
     return;
   }
 
   if (!entry.isRestorable() && !(await confirmReopen(label))) {
     return;
   }
+  const fresh = decision.intent === 'launch';
   logger.info('a person asked this window to resume a terminal it holds', {
     terminalId: entry.terminalId.value,
     sessionId: entry.sessionId.value,
     reopened: !entry.isRestorable(),
+    intent: decision.intent,
   });
-  // `reopened()` answers itself when there was no close, so the ordinary path
-  // carries no special case. `start` registers what it stamps, which is how the
-  // cleared `closedAt` reaches the store.
-  await lifecycle.start(entry.reopened(), 'resume');
+  /*
+   * `reopened()` answers itself when there was no close, so the ordinary path
+   * carries no special case. `start` registers what it stamps, which is how the
+   * cleared `closedAt` reaches the store.
+   *
+   * `startAgain` is the other of the two ways back, and the record chooses it
+   * rather than the person: nothing was ever said in this conversation, so
+   * `--resume` on it is measured to fail and a new one is drawn instead. The
+   * record -- its name, its task, its notes -- is what a person wanted back, and
+   * it is kept whole; only the conversation id, which pointed at nothing, moves
+   * into the history.
+   */
+  await (fresh ? lifecycle.startAgain(entry.reopened()) : lifecycle.start(entry.reopened(), 'resume'));
+  if (fresh) {
+    // Said aloud, because the button promised a resume and this is not one. A
+    // person who is not told will look for their conversation in an empty
+    // terminal and conclude the tool lost it.
+    say(
+      'info',
+      `Gripterm: nothing had been said in "${label}", so there was no conversation to resume — it is back with a new one.`,
+      logger
+    );
+  }
 }
 
 /**
@@ -166,21 +193,6 @@ async function confirmReopen(label: string): Promise<boolean> {
   );
   // Anything but the button -- Cancel, Escape, the dialog closing -- is no.
   return answer === CONFIRM_CLOSED;
-}
-
-/**
- * The one refusal that has an answer on the same row.
- *
- * `no-transcript` means the conversation never got started, so there is nothing
- * to continue -- and what the person wanted, a terminal here with this record's
- * name and task on it, is exactly what `Start Over` makes. The other refusals
- * are about a moment (a process still running, a CLI that could not be asked)
- * and their answer is to try again, which needs no sentence.
- */
-function wayOut(refusal: RestoreRefusal): string {
-  return refusal === 'no-transcript'
-    ? ' Start Over opens a new conversation with its name, task and notes.'
-    : '';
 }
 
 /** Our own refusals carry a sentence written for a person; anything else does not. */

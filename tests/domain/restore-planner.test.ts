@@ -7,7 +7,7 @@ import {
   explainRefusal,
   planRestore,
   restoreNotice,
-  resumeRefusal,
+  resumeIntent,
 } from '../../packages/core/src/index';
 import { makeEntry, makeMetadata } from '../helpers/domain-fixtures';
 import type {
@@ -15,6 +15,7 @@ import type {
   RestoreInputs,
   RestorePlan,
   RestoreRefusal,
+  ResumeDecision,
   TerminalEntry,
   TranscriptIndex,
 } from '../../packages/core/src/index';
@@ -567,10 +568,18 @@ describe('explaining a refusal to the person who asked', () => {
  * rather than in a copy of it (О3).
  */
 describe('a record its own window asks to resume', () => {
+  /** Why it was refused, or `null` when it was not. */
+  function refusedBecause(decision: ResumeDecision): RestoreRefusal | null {
+    return decision.kind === 'refused' ? decision.reason : null;
+  }
+
   it('is allowed when nothing says its conversation is running', () => {
     const entry = sketch();
 
-    expect(resumeRefusal(entry, inputsFor([entry]))).toBeNull();
+    expect(resumeIntent(entry, inputsFor([entry]))).toStrictEqual<ResumeDecision>({
+      kind: 'start',
+      intent: 'resume',
+    });
   });
 
   it('is allowed although its own window is the live owner', () => {
@@ -582,42 +591,82 @@ describe('a record its own window asks to resume', () => {
     });
 
     expect(planRestore(world).skipped.map((skip) => skip.reason)).toStrictEqual(['owner-live']);
-    expect(resumeRefusal(entry, world)).toBeNull();
+    expect(refusedBecause(resumeIntent(entry, world))).toBeNull();
   });
 
   it('is allowed although the record belongs to another project', () => {
     // A person looking at the row is standing where they want it opened.
     const entry = sketch({ folder: 'D:/Projects/elsewhere' });
 
-    expect(resumeRefusal(entry, inputsFor([entry]))).toBeNull();
+    expect(refusedBecause(resumeIntent(entry, inputsFor([entry])))).toBeNull();
   });
 
   it('refuses while our own evidence leaves its process possibly running', () => {
     const entry = sketch({ pid: 4242 });
 
-    expect(resumeRefusal(entry, inputsFor([entry]))).toBe<RestoreRefusal>('session-running');
+    expect(refusedBecause(resumeIntent(entry, inputsFor([entry])))).toBe<RestoreRefusal>('session-running');
   });
 
   it('refuses while the CLI names its conversation among the running ones', () => {
     const entry = sketch();
 
-    expect(resumeRefusal(entry, inputsFor([entry], { agents: listing(SESSION_A) }))).toBe<RestoreRefusal>(
-      'session-listed'
-    );
+    expect(
+      refusedBecause(resumeIntent(entry, inputsFor([entry], { agents: listing(SESSION_A) })))
+    ).toBe<RestoreRefusal>('session-listed');
   });
 
   it('refuses when the CLI could not be asked at all', () => {
     const entry = sketch();
     const world = inputsFor([entry], { agents: { kind: 'unavailable', reason: 'no claude' } });
 
-    expect(resumeRefusal(entry, world)).toBe<RestoreRefusal>('agents-unavailable');
+    expect(refusedBecause(resumeIntent(entry, world))).toBe<RestoreRefusal>('agents-unavailable');
   });
 
-  it('refuses when nothing was ever said in the conversation', () => {
+  /*
+   * The customer's second complaint, 2026-08-21: "если открыть новый терминал и
+   * туда ничего не вводить и закрыть терминал принудительно, то это окно нельзя
+   * восстановить через зелёную кнопку в treeview".
+   *
+   * They are right, and the answer was already decided -- for the other door.
+   * The owner ruled on 2026-08-21 that a record nothing was said in comes back
+   * with a NEW conversation ("нужно всегда восстанавливать окна, даже если в них
+   * ничего не было сказано"), and `planRestore` has done exactly that since. The
+   * button a person actually presses was left refusing, so the same record came
+   * back by itself at the next start and would not come back when asked.
+   */
+  it('brings back a record nothing was ever said in, with a new conversation', () => {
     const entry = sketch({ sessionId: SESSION_B });
     const world = inputsFor([entry], { transcripts: transcriptsFor(SESSION_A) });
 
-    expect(resumeRefusal(entry, world)).toBe<RestoreRefusal>('no-transcript');
+    expect(resumeIntent(entry, world)).toStrictEqual<ResumeDecision>({
+      kind: 'start',
+      intent: 'launch',
+    });
+  });
+
+  it('answers a record nothing was said in exactly as the unasked plan does', () => {
+    // THE INVARIANT: one rule, asked twice. A person pressing the button and a
+    // window starting up must not disagree about the same record.
+    const entry = sketch({ sessionId: SESSION_B });
+    const world = inputsFor([entry], { transcripts: transcriptsFor(SESSION_A) });
+
+    const planned = planRestore(world).steps;
+
+    expect(planned.map((step) => step.intent)).toStrictEqual(['launch']);
+    expect(resumeIntent(entry, world)).toStrictEqual<ResumeDecision>({
+      kind: 'start',
+      intent: 'launch',
+    });
+  });
+
+  it('still refuses a record nothing was said in when another record claims its conversation', () => {
+    // A fresh start would answer "which of these two is real" by accident, and
+    // the answer belongs to a person.
+    const mine = sketch({ sessionId: SESSION_B });
+    const twin = sketch({ terminalId: TERMINAL_B, sessionId: SESSION_B });
+    const world = inputsFor([mine, twin], { transcripts: transcriptsFor(SESSION_A) });
+
+    expect(refusedBecause(resumeIntent(mine, world))).toBe<RestoreRefusal>('duplicate-session');
   });
 
   it('refuses when another record still claims the same conversation', () => {
@@ -626,14 +675,14 @@ describe('a record its own window asks to resume', () => {
     const mine = sketch();
     const twin = sketch({ terminalId: TERMINAL_B });
 
-    expect(resumeRefusal(mine, inputsFor([mine, twin]))).toBe<RestoreRefusal>('duplicate-session');
+    expect(refusedBecause(resumeIntent(mine, inputsFor([mine, twin])))).toBe<RestoreRefusal>('duplicate-session');
   });
 
   it('is not stopped by a twin that nobody can resume any more', () => {
     const mine = sketch();
     const closed = sketch({ terminalId: TERMINAL_B, closedAt: new Date(NOW - MINUTE_MS) });
 
-    expect(resumeRefusal(mine, inputsFor([mine, closed]))).toBeNull();
+    expect(refusedBecause(resumeIntent(mine, inputsFor([mine, closed])))).toBeNull();
   });
 
   it('says nothing about a record the person closed, because that is theirs to undo', () => {
@@ -643,7 +692,7 @@ describe('a record its own window asks to resume', () => {
     // this function is about whether the conversation may be started at all.
     const entry = sketch({ closedAt: new Date(NOW - MINUTE_MS) });
 
-    expect(resumeRefusal(entry, inputsFor([entry]))).toBeNull();
+    expect(refusedBecause(resumeIntent(entry, inputsFor([entry])))).toBeNull();
   });
 });
 

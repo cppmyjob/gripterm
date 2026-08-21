@@ -69,13 +69,14 @@ export {
   explainRefusal,
   restoreNotice,
   planRestore,
-  resumeRefusal,
+  resumeIntent,
   refusalAnywhere,
   type RestoreInputs,
   type RestorePlan,
   type RestoreRefusal,
   type RestoreSkip,
   type RestoreStep,
+  type ResumeDecision,
 } from './domain/services/restore-planner';
 
 export {
