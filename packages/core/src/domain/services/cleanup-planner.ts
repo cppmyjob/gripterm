@@ -32,7 +32,7 @@ export interface CleanupPlan {
 const CLEANUP_WORDS: Readonly<Record<CleanupReason, string>> = {
   'closed': 'its terminal was closed and the window that owned it is gone',
   'never-spoken':
-    'nothing was ever said in its conversation, so no window can resume it, and the one that opened it is gone',
+    'nothing was ever said in its conversation, and the window that opened it is gone -- a window that opens its project again would start it in a NEW conversation',
 };
 
 /** The sentence a person reads before confirming, per record. */
@@ -67,13 +67,20 @@ export function explainCleanup(reason: CleanupReason): string {
  *   2. Then the refusal EVERY window would give (`refusalAnywhere`), never the
  *      one this window gives. "Not this project" and "that window is asleep"
  *      are facts about the asker.
- *   3. Then the two reasons that are permanent. `closed` is a person's own act,
+ *   3. Then the two reasons that are settled. `closed` is a person's own act,
  *      and no listing of running conversations can make it untrue -- which is
  *      why a store may be cleaned on a machine with no `claude` on it at all.
  *      `no-transcript` is measured (2026-08-10): `claude --resume` on a
- *      conversation nothing was ever said in exits 1, so no window can bring it
- *      back, no demand lifts that refusal (M2.14), and starting it over belongs
- *      to the window that owns it -- which is the one that is gone.
+ *      conversation nothing was ever said in exits 1, so that conversation is
+ *      not coming back whatever anybody does.
+ *
+ *      **What it no longer means, since the owner's decision of 2026-08-21:**
+ *      that the RECORD is beyond saving. A window that opens its project brings
+ *      it back with a new conversation in it (`RestoreStep.intent`), name, task
+ *      and notes included. So this stays a reason a PERSON may sweep -- they
+ *      asked, they are reading the list, and they may not want that record
+ *      starting again -- and it stays out of `UNASKED` below, where it always
+ *      was. The sentence they read says which of the two it is.
  */
 export function planCleanup(inputs: RestoreInputs): CleanupPlan {
   const sweep: CleanupItem[] = [];
@@ -102,7 +109,9 @@ export function planCleanup(inputs: RestoreInputs): CleanupPlan {
  * already said it. `never-spoken` is the opposite kind of record -- a terminal
  * they may have named, written a task on, meant to come back to, and never got
  * to say anything in -- and a build that swept those on its own would be
- * deleting an intention rather than honouring one.
+ * deleting an intention rather than honouring one. Since 2026-08-21 it is more
+ * than an intention: such a record is one a window will BRING BACK, so sweeping
+ * it unasked would take away a terminal the person was about to get.
  */
 const UNASKED: Readonly<Record<CleanupReason, boolean>> = {
   'closed': true,
