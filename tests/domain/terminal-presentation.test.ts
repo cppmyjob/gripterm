@@ -210,6 +210,63 @@ describe('presentTerminal marks what a menu may offer', () => {
   });
 });
 
+/*
+ * The customer's seventh complaint, 2026-08-21: a click on the row itself
+ * should open that terminal, rather than the small icon being the only way in.
+ * A click is the cheapest thing a list can answer, and this list answered it
+ * with nothing.
+ *
+ * `opens` is the whole of the rule, and it is here rather than in the view
+ * because a row that offers a click it cannot honour is worse than a row that
+ * offers none: `packages/extension` is outside the coverage thresholds (3.5),
+ * so a comparison written there is a decision nothing checks.
+ */
+describe('presentTerminal says which rows open their terminal on a click', () => {
+  it.each(['launching', 'idle', 'working', 'waiting_permission', 'waiting_input', 'turn_failed', 'degraded'] as const)(
+    'opens %s, which is a terminal this window has',
+    (state) => {
+      expect(presentTerminal(inState(state)).opens).toBe(true);
+    }
+  );
+
+  it.each(['ended', 'orphaned', 'resume_failed'] as const)('does not open %s', (state) => {
+    // There is no terminal to show. A click that did nothing would teach a
+    // person that clicking rows does nothing.
+    expect(presentTerminal(inState(state)).opens).toBe(false);
+  });
+
+  it('does not open a terminal the person closed', () => {
+    expect(presentTerminal(makeEntry({ closedAt: new Date(CREATED_AT.getTime() + 1000) })).opens).toBe(
+      false
+    );
+  });
+
+  it('does not open a terminal that lives in another window', () => {
+    // The one row that is alive and still unopenable: `show` would raise
+    // nothing here, because the terminal is not in this window at all.
+    expect(presentTerminal(inState('working'), { ours: false }).opens).toBe(false);
+  });
+
+  it.each(['dead', 'unknown'] as const)('does not open a row whose window is %s', (liveness) => {
+    expect(presentTerminal(inState('working'), { ours: false, liveness }).opens).toBe(false);
+    expect(presentTerminal(inState('working'), { liveness }).opens).toBe(false);
+  });
+
+  it('opens exactly the rows a menu can act on', () => {
+    // THE INVARIANT, and the reason this is one field and not a second table:
+    // a click is the same offer the buttons make, made without hovering.
+    for (const entry of [inState('working'), makeEntry({ closedAt: new Date(CREATED_AT.getTime() + 1000) })]) {
+      for (const ours of [true, false]) {
+        for (const liveness of ['live', 'dead', 'unknown'] as const) {
+          const shown = presentTerminal(entry, { ours, liveness });
+
+          expect(shown.opens).toBe(shown.contextValue === CONTEXT_LIVE);
+        }
+      }
+    }
+  });
+});
+
 describe('presentTerminal lays the owner\'s liveness over the stored state', () => {
   it('shows a dead owner as detached without touching the record', () => {
     const entry = inState('working');

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { dropInTree, groupTerminals, presentTerminal } from '@gripterm/core';
+import { FOCUS_TERMINAL_COMMAND, dropInTree, groupTerminals, presentTerminal } from '@gripterm/core';
 import { terminalUri } from './terminal-decorations';
 import type {
   Disposable,
@@ -324,6 +324,23 @@ implements
       shown.iconId,
       shown.colorId === null ? undefined : new vscode.ThemeColor(shown.colorId)
     );
+    if (shown.opens) {
+      /*
+       * The row itself opens its terminal (customer, 2026-08-21): the icon at
+       * the end of the row was the only way in, and a list whose rows do
+       * nothing when clicked teaches that its rows do nothing.
+       *
+       * The id and not the entry: `terminalTargetOf` reads either, and a string
+       * is the one of the two that survives the bundle boundary -- the tests
+       * beside `dist/extension.js` hold a second copy of every core class, and
+       * `instanceof` across the two is false (M3).
+       */
+      item.command = {
+        command: FOCUS_TERMINAL_COMMAND,
+        title: 'Show Terminal',
+        arguments: [entry.terminalId.value],
+      };
+    }
     return item;
   }
 }

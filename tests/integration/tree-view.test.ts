@@ -13,6 +13,7 @@ import {
   ownerRefFor,
   terminalTargetOf,
   type OwnerIdentity,
+  type PersistedTerminalState,
 } from '../../packages/core/src/index';
 import type { GriptermApi } from '../../packages/extension/src/extension';
 import type {
@@ -35,6 +36,11 @@ async function api(): Promise<GriptermApi> {
  * may act on -- and the button is about acting on it.
  */
 function failedRestore(identity: OwnerIdentity): TerminalEntry {
+  return rowInState(identity, 'resume_failed');
+}
+
+/** The same record in whatever state the test is about. */
+function rowInState(identity: OwnerIdentity, state: PersistedTerminalState): TerminalEntry {
   const now = new Date();
   return TerminalEntry.create({
     terminalId: TerminalId.fromString(ROW_TERMINAL),
@@ -59,7 +65,7 @@ function failedRestore(identity: OwnerIdentity): TerminalEntry {
       extraEnv: {},
     }),
     observed: ObservedState.create({
-      state: 'resume_failed',
+      state,
       lastEventAt: now,
       currentTool: null,
       lastAssistantMessage: null,
@@ -176,6 +182,58 @@ suite('the terminals view', () => {
    * beneath them. A provider that returned rows at the root would look right in
    * every unit test and wrong in the sidebar.
    */
+  /*
+   * The seventh thing the customer asked for, 2026-08-21: a click on the row
+   * should open that terminal, rather than the small icon at the end of it
+   * being the only way in.
+   *
+   * WHICH rows open is settled in `tests/domain/terminal-presentation.test.ts`
+   * against the pure presenter. What only a host answers is that the tree item
+   * the workbench receives carries the command at all -- a `command` set on the
+   * wrong object, or an argument the resolver cannot read, looks right in every
+   * unit test and does nothing in the sidebar.
+   */
+  test('carries the command that opens a live terminal, and carries none on a row that is over', async () => {
+    const { registry, tree, identity, readiness } = await api();
+
+    for (const [state, expected] of [
+      ['working', 'gripterm.focusTerminal'],
+      ['resume_failed', undefined],
+    ] as const) {
+      const entry = rowInState(identity, state);
+      registry.register(entry);
+      try {
+        const row = tree
+          .getChildren()
+          .flatMap((heading) => tree.getChildren(heading))
+          .find((node) => named(tree, node) === ROW_TERMINAL);
+        assert.ok(row, `the ${state} row is not in the list at all`);
+
+        const item = tree.getTreeItem(row);
+
+        assert.equal(
+          item.command?.command,
+          expected,
+          `a ${state} row offered ${String(item.command?.command)} on a click`
+        );
+        if (expected !== undefined) {
+          // The id and not the entry: a string is what crosses the bundle
+          // boundary, and what `terminalTargetOf` reads on the other side.
+          const carried = item.command?.arguments;
+          assert.deepEqual(carried, [ROW_TERMINAL], 'the click names no terminal');
+          assert.equal(
+            terminalTargetOf(carried[0]).kind,
+            'terminal',
+            'the argument of the click is not one the command can read'
+          );
+        }
+      } finally {
+        registry.forget(entry.terminalId);
+        await cleanUp(readiness.storageDir);
+      }
+    }
+  });
+
   test('draws headings at the root and the rows underneath them', async () => {
     const { registry, tree, identity, readiness } = await api();
     const entry = failedRestore(identity);

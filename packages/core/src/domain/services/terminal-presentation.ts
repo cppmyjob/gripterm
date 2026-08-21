@@ -37,6 +37,16 @@ export interface TerminalPresentation {
   readonly labelColorId: string | null;
   /** What a menu's `when` clause tests. See `CONTEXT_LIVE`. */
   readonly contextValue: string;
+  /**
+   * Whether a click on the row itself should open this terminal.
+   *
+   * True for exactly the rows a menu can act on, and that identity is the rule:
+   * a click is the same offer the buttons make, made without having to hover.
+   * Everything else -- a terminal that is over, one that lives in another
+   * window, one whose window has gone -- has nothing to show, and a click that
+   * did nothing would teach a person that clicking rows does nothing.
+   */
+  readonly opens: boolean;
 }
 
 /**
@@ -207,6 +217,7 @@ export function presentTerminal(
   const ours = context.ours ?? true;
   const state = displayedState(entry, liveness);
   const appearance = APPEARANCE[state];
+  const contextValue = contextValueFor(entry, appearance, ours, liveness);
 
   return {
     state,
@@ -216,7 +227,8 @@ export function presentTerminal(
     iconId: appearance.iconId,
     colorId: appearance.colorId,
     labelColorId: entry.metadata.color,
-    contextValue: contextValueFor(entry, appearance, ours, liveness),
+    contextValue,
+    opens: contextValue === CONTEXT_LIVE,
   };
 }
 
