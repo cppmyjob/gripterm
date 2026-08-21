@@ -75,6 +75,26 @@ export class VsCodeEditorStrip {
       return kept;
     }
 
+    const empty = this._emptyAtTheEnd();
+    if (empty !== null) {
+      this._column = empty;
+      // Locked only if it is already the group the editor is on -- the command
+      // names no target and takes the active group, and moving the focus to lock
+      // something would be a worse trade than the lock is worth. At the start of
+      // a window the restored strip IS the active group (measured 2026-08-21),
+      // which is the case this exists for; anywhere else the editor's own
+      // `autoLockGroups.terminalEditor` locks it when our terminal opens.
+      const active = vscode.window.tabGroups.activeTabGroup.viewColumn === empty;
+      if (active) {
+        await vscode.commands.executeCommand(LOCK_GROUP);
+      }
+      this._logger.info('the terminals went into the empty group at the end of the editor area', {
+        column: empty,
+        locked: active,
+      });
+      return empty;
+    }
+
     await vscode.commands.executeCommand(NEW_GROUP_BELOW);
     const column = vscode.window.tabGroups.activeTabGroup.viewColumn;
     // Both act on the group that is active, which is the one just made -- the
@@ -85,6 +105,45 @@ export class VsCodeEditorStrip {
     this._column = column;
     this._logger.info('a group of our own was opened below the editors', { column });
     return column;
+  }
+
+  /**
+   * A group at the END of the editor area with nothing in it: where the
+   * terminals go rather than beside it.
+   *
+   * **The customer's first complaint, 2026-08-21:** "терминалы открываются в
+   * отдельной панели. Однако если перезапустить приложение они откроются в новой
+   * панели а старая панель останется пустой". Measured the same day in a real
+   * editor, two sittings on one user data directory: the window comes back
+   * holding `[1] (empty) | [2] (empty)` -- the editor restores the grid, our
+   * strip among it, and the terminals in it are not restored because their
+   * processes are gone -- and the restore then made a THIRD group. Every restart
+   * added one, and the ones above shrank to slivers.
+   *
+   * The end of the area and nothing else, because that is where a strip is: it
+   * is made below the editors, so it is the last leaf of the grid. A group in
+   * the middle with nothing in it is somebody else's.
+   *
+   * **Never the ONLY group**, and that is the other half of the same defect
+   * (complaint 6). A strip that fills the editor area is locked and alone, so
+   * the editor has nowhere to put the person's next file but BESIDE it --
+   * measured: opening a file then turns the area horizontal, `[1] terminal |
+   * [2] file`, which is the "слева терминал на всю высоту, справа файл" they
+   * could not get out of. With a group left above, the file lands in it.
+   *
+   * The size is NOT asked for here. The group the editor brought back has the
+   * height the person left it at, and a third would be us undoing their drag on
+   * every start.
+   */
+  private _emptyAtTheEnd(): vscode.ViewColumn | null {
+    const groups = vscode.window.tabGroups.all;
+    if (groups.length < 2) {
+      return null;
+    }
+    const last = groups.reduce((furthest, group) =>
+      group.viewColumn > furthest.viewColumn ? group : furthest
+    );
+    return last.tabs.length === 0 ? last.viewColumn : null;
   }
 
   /**

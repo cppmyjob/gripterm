@@ -279,6 +279,77 @@ suite('the strip of our own', () => {
   });
 
   /*
+   * The customer's first complaint, 2026-08-21: "терминалы открываются в
+   * отдельной панели. Однако если перезапустить приложение они откроются в новой
+   * панели а старая панель останется пустой".
+   *
+   * Measured in a real editor the same day, two sittings on one user data
+   * directory: the second window came back holding `[1] (empty) | [2] (empty)`
+   * -- the editor restores the grid with our strip in it, and the terminals are
+   * not restored because their processes are gone -- and the restore then made a
+   * THIRD group. Every restart added one.
+   *
+   * A restart cannot be had inside a test host: measured the same day, this host
+   * starts with a single empty group whatever the run before it left. What CAN
+   * be had is the shape the restart produces -- an empty group at the end of the
+   * area that we did not make -- and that is what the rule is written against.
+   *
+   * Three groups rather than two, deliberately: with the empty group second, a
+   * strip remembered from an earlier test in this same window would answer the
+   * same column and the test would pass without the rule existing.
+   */
+  test('takes an empty group at the end of the area instead of making another one', async () => {
+    const { gateway } = await api();
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+
+    for (const column of [vscode.ViewColumn.One, vscode.ViewColumn.Two]) {
+      const file = await vscode.workspace.openTextDocument({
+        content: `a file of the person's, in column ${String(column)}`,
+        language: 'plaintext',
+      });
+      await vscode.window.showTextDocument(file, { viewColumn: column });
+    }
+    // The shape a restart leaves: a group at the end with nothing in it.
+    await vscode.commands.executeCommand('workbench.action.newGroupBelow');
+    const restored = vscode.window.tabGroups.activeTabGroup.viewColumn;
+    assert.equal(vscode.window.tabGroups.all.length, 3, `the stand is not three groups: ${describeGroups()}`);
+    const before = sizeAndSpanOf(await layoutNow(), restored - 1);
+    assert.ok(before !== null);
+
+    const handle = await gateway.create({
+      terminalId: TERMINAL_ID,
+      name: 'gripterm-m224-adopted',
+      cwd: os.tmpdir(),
+      env: {},
+      shellPath: null,
+      shellArgs: [],
+    });
+    try {
+      await waitFor('the terminal to get a tab', () => columnOf('gripterm-m224-adopted') !== undefined);
+
+      assert.equal(
+        columnOf('gripterm-m224-adopted'),
+        restored,
+        `the terminal did not go into the empty group: ${describeGroups()}`
+      );
+      assert.equal(
+        vscode.window.tabGroups.all.length,
+        3,
+        `a group was made although one was standing empty: ${describeGroups()}`
+      );
+
+      // And the person's height is left alone: a third would undo the drag they
+      // made in the sitting before this one.
+      const after = sizeAndSpanOf(await layoutNow(), restored - 1);
+      assert.ok(after !== null);
+      assert.equal(after.size, before.size, 'the adopted group was resized');
+    } finally {
+      handle.dispose();
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    }
+  });
+
+  /*
    * The button the customer asked for on 2026-08-21: a chevron that throws the
    * terminals over the whole editor area and puts them back at the second
    * click, the way Cursor's terminal panel does it.

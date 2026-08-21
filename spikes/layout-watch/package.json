@@ -1,0 +1,15 @@
+{
+  "name": "spike-layout-watch",
+  "displayName": "Spike: layout watch (throwaway)",
+  "description": "Measurement stand for the customer's complaints 1 and 6 (2026-08-21): what a restart does to the group our terminals live in. Not a product.",
+  "private": true,
+  "version": "0.0.0",
+  "publisher": "gripterm-spike",
+  "engines": {
+    "vscode": "^1.94.0"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ]
+}
