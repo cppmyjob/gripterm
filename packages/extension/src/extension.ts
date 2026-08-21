@@ -57,6 +57,7 @@ import {
   readClaudeSessionName,
   readClaudeSettings,
   readTranscriptIndex,
+  restoreNotice,
   reviewHookPolicies,
   shellKindFor,
   TerminalId,
@@ -875,7 +876,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
 
   // One reading for both of the decisions below -- see `surveyTheMachine`.
   const world = await surveyTheMachine({ context, gather, logger });
-  const restore = await bringTerminalsBack({ world, orchestrator, readiness, logger });
+  const restore = await bringTerminalsBack({
+    world,
+    orchestrator,
+    readiness,
+    logger,
+    // Out loud, and once (owner's decision 2026-08-21). Before this, a window
+    // that brought nothing back wrote the reason to the log in the same second
+    // and said nothing at all -- and from the chair that reads as terminals
+    // silently vanishing. What is said and what is kept quiet is decided in
+    // `restoreNotice`, in the domain, because it is a decision.
+    announce: (message) => { announcer.say('warning', message); },
+  });
   // After the restore and against the SAME reading: the two plans are disjoint
   // by construction (M2.15), and a record this window has just adopted is one
   // whose owner is now alive, which no cleanup touches.
@@ -1012,8 +1024,10 @@ async function bringTerminalsBack(parts: {
   readonly orchestrator: RestoreOrchestrator | null;
   readonly readiness: ReturnType<typeof launchReadiness>;
   readonly logger: Logger;
+  /** How the person is told which terminals did not come back. */
+  readonly announce: (message: string) => void;
 }): Promise<RestoreSummary> {
-  const { world, readiness, orchestrator, logger } = parts;
+  const { world, readiness, orchestrator, logger, announce } = parts;
   if (world.kind === 'unread') {
     return refuse(world.reason, logger);
   }
@@ -1027,6 +1041,10 @@ async function bringTerminalsBack(parts: {
   try {
     const plan = planRestore(world.inputs);
     const report = await orchestrator.run(plan);
+    const notice = restoreNotice(report.skipped);
+    if (notice !== null) {
+      announce(notice);
+    }
     return {
       kind: 'ran',
       planned: plan.steps.length,

@@ -199,7 +199,7 @@ suite('a restore the CLI refuses to start', () => {
       assert.ok(entry, 'the record this test wrote is not readable');
 
       const report = await restore.run({
-        steps: [{ entry, expectedRevision: entry.revision, force: false }],
+        steps: [{ entry, expectedRevision: entry.revision, force: false, intent: 'resume' }],
         skipped: [],
       });
       assert.equal(report.started, 1, JSON.stringify(report.attempts));

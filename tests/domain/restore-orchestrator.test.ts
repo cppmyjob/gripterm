@@ -211,7 +211,12 @@ function abandoned(stand_: Stand, overrides: Parameters<typeof makeEntry>[0] = {
 
 function planFor(...entries: readonly TerminalEntry[]): RestorePlan {
   return {
-    steps: entries.map((entry) => ({ entry, expectedRevision: entry.revision, force: false })),
+    steps: entries.map((entry) => ({
+      entry,
+      expectedRevision: entry.revision,
+      force: false,
+      intent: 'resume' as const,
+    })),
     skipped: [],
   };
 }
@@ -245,7 +250,7 @@ describe('carrying out a restore plan', () => {
     const entry = abandoned(here);
 
     await here.orchestrator.run({
-      steps: [{ entry, expectedRevision: 4, force: false }],
+      steps: [{ entry, expectedRevision: 4, force: false, intent: 'resume' }],
       skipped: [],
     });
 
@@ -262,17 +267,19 @@ describe('carrying out a restore plan', () => {
     const entry = abandoned(here);
 
     await here.orchestrator.run({
-      steps: [{ entry, expectedRevision: entry.revision, force: true }],
+      steps: [{ entry, expectedRevision: entry.revision, force: true, intent: 'resume' }],
       skipped: [],
     });
 
     expect(here.base.adoptions.map((one) => one.forced)).toStrictEqual([true]);
   });
 
-  it('asks the agent for a restore, never for a launch', async () => {
-    // `--session-id` on this path is refused by the CLI's own validator, so a
-    // restore that asked for a launch would die at start every single time
-    // (§4.4).
+  it('asks the agent for a restore when there is a conversation to continue', async () => {
+    // `--session-id` naming a conversation the CLI already knows is refused by
+    // its own validator, so a restore that asked for a launch on THIS record --
+    // one with a transcript behind it -- would die at start every single time
+    // (§4.4). The record with nothing behind it is the test below, and it comes
+    // back carrying a new id precisely so that this rule is not broken.
     const here = stand();
     const entry = abandoned(here);
 
@@ -281,6 +288,31 @@ describe('carrying out a restore plan', () => {
     expect(here.commands.asked).toStrictEqual([
       { terminalId: entry.terminalId.value, intent: 'resume' },
     ]);
+  });
+
+  it('brings a record whose conversation was never spoken in back in a NEW one', async () => {
+    /*
+     * The owner's decision of 2026-08-21, and the half of it that cannot be a
+     * plain `--resume`: a conversation nothing was ever said in has no
+     * transcript, and the CLI refuses to resume it. It also refuses
+     * `--session-id` naming a conversation it already knows -- which is what the
+     * test above is about -- so the record comes back carrying a NEW id, with
+     * the old one moved into the history exactly as `/clear` moves it.
+     */
+    const here = stand();
+    const entry = abandoned(here);
+
+    await here.orchestrator.run({
+      steps: [{ entry, expectedRevision: entry.revision, force: false, intent: 'launch' }],
+      skipped: [],
+    });
+
+    expect(here.commands.asked).toStrictEqual([
+      { terminalId: entry.terminalId.value, intent: 'launch' },
+    ]);
+    const back = here.registry.get(entry.terminalId);
+    expect(back?.sessionId.value).not.toBe(entry.sessionId.value);
+    expect(back?.sessionIdHistory.map((past) => past.value)).toStrictEqual([entry.sessionId.value]);
   });
 
   it('creates the terminal without taking the screen', async () => {

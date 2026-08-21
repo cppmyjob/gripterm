@@ -6,9 +6,10 @@ import {
   TerminalId,
   explainRefusal,
   planRestore,
+  restoreNotice,
   resumeRefusal,
 } from '../../packages/core/src/index';
-import { makeEntry } from '../helpers/domain-fixtures';
+import { makeEntry, makeMetadata } from '../helpers/domain-fixtures';
 import type {
   AgentListing,
   RestoreInputs,
@@ -123,7 +124,9 @@ describe('deciding what this window may bring back by itself', () => {
     const plan = planRestore(inputsFor([entry]));
 
     expect(plan.skipped).toStrictEqual([]);
-    expect(plan.steps).toStrictEqual([{ entry, expectedRevision: 7, force: false }]);
+    expect(plan.steps).toStrictEqual([
+      { entry, expectedRevision: 7, force: false, intent: 'resume' },
+    ]);
   });
 
   it('carries the revision the decision was made on, for the adoption to compare', () => {
@@ -318,13 +321,28 @@ describe('establishing that the conversation is not running', () => {
 });
 
 describe('establishing that there is something to resume', () => {
-  it('refuses a conversation nothing was ever said in', () => {
-    // Measured 2026-08-10: a session with no prompt leaves no transcript, and
-    // `--resume` on it exits 1 at once. Without this every restart would show a
-    // batch of failures for terminals somebody opened and never typed into.
+  it('starts a conversation nothing was ever said in again, rather than refusing it', () => {
+    // Owner's decision, 2026-08-21: a terminal comes back even when its
+    // conversation was never spoken in. It cannot come back the same way --
+    // measured 2026-08-10 and again in A45, `--resume` on a conversation with no
+    // transcript prints "No conversation found" and exits 1 -- so the record
+    // comes back with a NEW conversation in it, name, task and notes included.
+    //
+    // The owner met this on 2026-08-21: four terminals opened, nothing typed
+    // into any of them, the editor restarted, and their own log said
+    // `records this window did not bring back, by reason {"no-transcript":4}`.
     const plan = planRestore(inputsFor([sketch()], { transcripts: transcriptsFor(SESSION_B) }));
 
-    expect(refusals(plan)).toStrictEqual(['no-transcript']);
+    expect(refusals(plan)).toStrictEqual([]);
+    expect(plan.steps.map((step) => step.intent)).toStrictEqual(['launch']);
+  });
+
+  it('continues the conversation of a record that HAS one', () => {
+    // The ordinary path, spelled next to the new one: a record whose transcript
+    // is there is resumed, and nothing about this decision moved.
+    expect(planRestore(inputsFor([sketch()])).steps.map((step) => step.intent)).toStrictEqual([
+      'resume',
+    ]);
   });
 
   it('refuses when the transcripts could not be listed at all', () => {
@@ -339,12 +357,14 @@ describe('establishing that there is something to resume', () => {
 
   it('asks about the current id and not about the ones it drifted from', () => {
     // `/clear` starts a conversation with a new id, and the old transcript says
-    // nothing about whether the new one can be resumed.
+    // nothing about whether the new one can be resumed. The record still comes
+    // back -- with a new conversation, as above.
     const plan = planRestore(
       inputsFor([sketch({ history: [SESSION_PAST] })], { transcripts: transcriptsFor(SESSION_PAST) })
     );
 
-    expect(refusals(plan)).toStrictEqual(['no-transcript']);
+    expect(refusals(plan)).toStrictEqual([]);
+    expect(plan.steps.map((step) => step.intent)).toStrictEqual(['launch']);
   });
 });
 
@@ -485,12 +505,13 @@ describe('a record a person asked this window to take', () => {
     expect(refusals(plan)).toStrictEqual(['session-listed']);
   });
 
-  it('still refuses a conversation nothing was ever said in', () => {
+  it('starts a demanded record over too, when its conversation was never spoken in', () => {
     const plan = planRestore(
       inputsFor([sketch()], { transcripts: transcriptsFor(SESSION_B), ...demand(TERMINAL_A) })
     );
 
-    expect(refusals(plan)).toStrictEqual(['no-transcript']);
+    expect(refusals(plan)).toStrictEqual([]);
+    expect(plan.steps.map((step) => step.intent)).toStrictEqual(['launch']);
   });
 
   it('still refuses when another record names the same conversation', () => {
@@ -623,5 +644,63 @@ describe('a record its own window asks to resume', () => {
     const entry = sketch({ closedAt: new Date(NOW - MINUTE_MS) });
 
     expect(resumeRefusal(entry, inputsFor([entry]))).toBeNull();
+  });
+});
+
+/**
+ * What a person is told when their terminals did not come back.
+ *
+ * The gap the owner met on 2026-08-21: four records were refused, the reason was
+ * written to the log in the same second, and nothing reached the screen. From
+ * the chair it read as "my terminals silently vanished". The refusals have had a
+ * sentence apiece since M2.14 -- they simply were not said out loud unless the
+ * person went and ASKED, through Adopt or Resume.
+ *
+ * Three refusals stay quiet, and none of them is a slip. `foreign-folder` is
+ * every terminal of every other project on the machine and would drown the
+ * sentence that matters; `closed` is the person's own decision from an hour ago;
+ * `owner-live` is a record another window is holding and showing right now.
+ */
+describe('telling a person which terminals did not come back', () => {
+  const skip = (
+    reason: RestoreRefusal,
+    name = 'a terminal'
+  ): { entry: TerminalEntry, reason: RestoreRefusal } => ({
+    entry: makeEntry({ metadata: makeMetadata().withDisplayName(name) }),
+    reason,
+  });
+
+  it('says nothing when nothing was refused', () => {
+    expect(restoreNotice([])).toBeNull();
+  });
+
+  it.each<RestoreRefusal>(['foreign-folder', 'closed', 'owner-live'])(
+    'says nothing about %s, which is a state the person made or is looking at',
+    (reason) => {
+      expect(restoreNotice([skip(reason)])).toBeNull();
+    }
+  );
+
+  it('names the terminal when exactly one was refused', () => {
+    const said = restoreNotice([skip('session-running', 'the one with the migration')]);
+
+    expect(said).toContain('the one with the migration');
+    expect(said).toContain(explainRefusal('session-running'));
+  });
+
+  it('counts them and gives each distinct reason once', () => {
+    const said = restoreNotice([
+      skip('session-running', 'first'),
+      skip('session-running', 'second'),
+      skip('duplicate-session', 'third'),
+      // Quiet, and therefore not counted either: a count that included the other
+      // project's terminals would be a number the person cannot act on.
+      skip('foreign-folder', 'a terminal of another project'),
+    ]);
+
+    expect(said).toContain('3 terminals');
+    expect(said).toContain(explainRefusal('session-running'));
+    expect(said).toContain(explainRefusal('duplicate-session'));
+    expect(said?.match(/has not been established to have stopped/gu)).toHaveLength(1);
   });
 });

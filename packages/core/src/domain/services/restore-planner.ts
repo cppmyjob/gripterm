@@ -1,5 +1,6 @@
 import { belongsHere } from './folder-path';
 import { precedesBoot } from './boot-window';
+import type { LaunchIntent } from '../entities/launch-intent';
 import type { AgentListing } from '../entities/agent-record';
 import type { OwnerLiveness } from '../ports/owner-presence';
 import type { TerminalEntry } from '../entities/terminal-entry';
@@ -38,6 +39,24 @@ export type RestoreRefusal =
 
 export interface RestoreStep {
   readonly entry: TerminalEntry;
+  /**
+   * How this record comes back: continuing the conversation it names, or
+   * starting a new one inside the same record.
+   *
+   * `launch` is the owner's decision of 2026-08-21 and it has exactly one cause:
+   * a conversation nothing was ever said in leaves no transcript, and
+   * `--resume` on it prints "No conversation found" and exits 1 (measured
+   * 2026-08-10, and again in A45 on 2.1.233). Such a record used to be refused,
+   * and the owner met what that costs -- four terminals opened, nothing typed
+   * into them, the editor restarted, and their own log reading
+   * `records this window did not bring back, by reason {"no-transcript":4}`.
+   *
+   * The record itself is kept, not archived: its id, name, task and notes are
+   * the reason a person wanted it back, and the conversation id it holds points
+   * at nothing, so there is nothing to lose by replacing it. The `SessionStart`
+   * hook writes the new id in when the CLI reports it.
+   */
+  readonly intent: LaunchIntent;
   /**
    * Whether the adoption may displace an owner the store calls `unknown`.
    *
@@ -179,7 +198,14 @@ export function planRestore(inputs: RestoreInputs): RestorePlan {
   for (const entry of considered) {
     const reason = refusalFor(entry, inputs, listed, demanded !== null);
     const contested = (claims.get(entry.sessionId.value) ?? 0) > 1;
-    if (reason !== null) {
+    // `no-transcript` is the one refusal that became an ANSWER instead (owner's
+    // decision 2026-08-21): there is nothing to resume, so the record comes back
+    // with a new conversation rather than not at all. Every other refusal is
+    // still a refusal, and the duplicate check below still applies -- two
+    // records naming one conversation is a question about which of them is real,
+    // and starting one of them fresh would answer it by accident.
+    const startsFresh = reason === 'no-transcript';
+    if (reason !== null && !startsFresh) {
       skipped.push({ entry, reason });
     } else if (contested) {
       // Two records naming one conversation is either a copied base or a defect
@@ -188,7 +214,12 @@ export function planRestore(inputs: RestoreInputs): RestorePlan {
       // real, which belongs to a person and not to a predicate.
       skipped.push({ entry, reason: 'duplicate-session' });
     } else {
-      steps.push({ entry, expectedRevision: entry.revision, force: demanded !== null });
+      steps.push({
+        entry,
+        expectedRevision: entry.revision,
+        force: demanded !== null,
+        intent: startsFresh ? 'launch' : 'resume',
+      });
     }
   }
   return { steps, skipped };
@@ -386,4 +417,47 @@ function mayBeRunning(entry: TerminalEntry, inputs: RestoreInputs): boolean {
     return true;
   }
   return !inputs.deadPids.has(observed.pid);
+}
+
+/**
+ * The refusals a person is NOT told about out loud, and why each one is quiet.
+ *
+ * Silence here is not politeness: every one of these three is a state the person
+ * either created or is already looking at, and a notification about it would be
+ * a window that interrupts on every start.
+ */
+const QUIET_REFUSALS: ReadonlySet<RestoreRefusal> = new Set<RestoreRefusal>([
+  /** Every terminal of every other project on the machine. It would drown the rest. */
+  'foreign-folder',
+  /** The person's own decision, from an hour ago. */
+  'closed',
+  /** Another window is holding that record and showing it right now. */
+  'owner-live',
+]);
+
+/**
+ * One sentence about the terminals that did not come back, or `null`.
+ *
+ * **The gap this closes, met by the owner on 2026-08-21.** Four records were
+ * refused, the reason was written to the log in the same second, and nothing at
+ * all reached the screen -- so from the chair it read as terminals silently
+ * vanishing. The refusals have carried a sentence apiece since M2.14; they were
+ * simply never said unless the person went and ASKED, through Adopt or Resume.
+ *
+ * A sentence rather than a line per record: a machine with several projects open
+ * refuses by the dozen, and a person reading twelve toasts reads none of them.
+ * WHICH records is the log's business, and the sentence says so.
+ */
+export function restoreNotice(skipped: readonly RestoreSkip[]): string | null {
+  const loud = skipped.filter((skip) => !QUIET_REFUSALS.has(skip.reason));
+  const [first] = loud;
+  if (first === undefined) {
+    return null;
+  }
+  if (loud.length === 1) {
+    // Named, because with one record the name is the most useful thing there is.
+    return `Gripterm did not bring "${first.entry.metadata.displayName}" back — ${explainRefusal(first.reason)}. See the Gripterm log.`;
+  }
+  const reasons = [...new Set(loud.map((skip) => skip.reason))].map(explainRefusal);
+  return `Gripterm did not bring ${String(loud.length)} terminals back — ${reasons.join('; ')}. See the Gripterm log for which.`;
 }

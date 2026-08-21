@@ -217,7 +217,15 @@ export class RestoreOrchestrator implements Disposable {
     // being waited for.
     this._waiting.set(entry.terminalId.value, { timer: null });
     try {
-      await this._options.lifecycle.start(adopted, 'resume', 'hidden');
+      // Two ways back, and the step says which (owner's decision 2026-08-21).
+      // `launch` is for a record whose conversation was never spoken in: there
+      // is nothing to resume, so the same record comes back holding a new
+      // conversation. Everything after this line is identical for both -- the
+      // record is `launching` either way, and it is the exit code that separates
+      // a failed restore from a failed launch (§4.3).
+      await (step.intent === 'launch'
+        ? this._options.lifecycle.startAgain(adopted, 'hidden')
+        : this._options.lifecycle.start(adopted, 'resume', 'hidden'));
     } catch (cause: unknown) {
       this._forget(entry.terminalId);
       this._options.registry.register(adopted);

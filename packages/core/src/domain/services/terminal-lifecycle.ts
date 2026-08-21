@@ -198,6 +198,34 @@ export class TerminalLifecycleService implements Disposable {
    * `launch_failed` from `resume_failed` when the process exits non-zero, since
    * both happen in `launching` (§4.3).
    */
+  /**
+   * Starts a record again in a NEW conversation, keeping the record itself.
+   *
+   * The owner's decision of 2026-08-21, and the one way a terminal whose
+   * conversation was never spoken in can come back at all. `--resume` on it is
+   * measured to fail -- there is no transcript, the CLI prints "No conversation
+   * found" and exits 1 (2026-08-10, and again in A45 on 2.1.233) -- and
+   * `--session-id` naming the SAME id would be the CLI's other refusal, the one
+   * `restore-orchestrator` has a test about. So a new id is drawn here and the
+   * old one moves into the history, exactly as it does when somebody types
+   * `/clear` (`withSessionId`).
+   *
+   * The RECORD is kept: its id, name, task and notes are what a person wanted
+   * back, and the conversation id it held pointed at nothing. That is the whole
+   * difference from `startOver`, which archives the record because there IS a
+   * conversation being walked away from.
+   */
+  public async startAgain(
+    entry: TerminalEntry,
+    visibility: StartVisibility = 'focus'
+  ): Promise<TerminalEntry> {
+    return await this.start(
+      entry.withSessionId(SessionId.fromString(this._options.ids.newUuid())),
+      'launch',
+      visibility
+    );
+  }
+
   public async start(
     entry: TerminalEntry,
     intent: LaunchIntent,

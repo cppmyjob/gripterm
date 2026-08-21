@@ -67,6 +67,7 @@ export {
 
 export {
   explainRefusal,
+  restoreNotice,
   planRestore,
   resumeRefusal,
   refusalAnywhere,
