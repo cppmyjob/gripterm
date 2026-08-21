@@ -108,12 +108,12 @@ function shareOf(layout: { readonly groups: readonly LayoutNode[] }, index: numb
 }
 
 async function layoutNow(): Promise<{
-  readonly orientation: number,
-  readonly groups: readonly LayoutNode[],
+  readonly orientation: number;
+  readonly groups: readonly LayoutNode[];
 }> {
   return await vscode.commands.executeCommand<{
-    readonly orientation: number,
-    readonly groups: readonly LayoutNode[],
+    readonly orientation: number;
+    readonly groups: readonly LayoutNode[];
   }>('vscode.getEditorLayout');
 }
 
