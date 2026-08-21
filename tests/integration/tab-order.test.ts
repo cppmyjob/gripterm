@@ -43,7 +43,6 @@ const LOOK_EVERY_MS = 25;
 const MINUTE_MS = 60_000;
 
 type Gateway = ReturnType<GriptermApi['makeGateway']>;
-type Handle = Awaited<ReturnType<Gateway['create']>>;
 type Spec = Parameters<Gateway['create']>[0];
 
 async function api(): Promise<GriptermApi> {
@@ -155,7 +154,6 @@ async function forgetOnDisk(): Promise<void> {
 
 suite('the order of the tabs, and a hand that changes it', () => {
   let gateway: Gateway | null = null;
-  let handles: Handle[] = [];
 
   suiteSetup(async () => {
     const { makeGateway, stage, registry, identity, workbench } = await api();
@@ -194,16 +192,14 @@ suite('the order of the tabs, and a hand that changes it', () => {
       [FIRST_TERMINAL, 'gripterm-order-one'],
       [SECOND_TERMINAL, 'gripterm-order-two'],
     ] as const) {
-      handles.push(
-        await gateway.create({
-          terminalId: { value: terminalId } as unknown as Spec['terminalId'],
-          name,
-          cwd: os.tmpdir(),
-          env: {},
-          shellPath: process0.path,
-          shellArgs: [...process0.args],
-        })
-      );
+      await gateway.create({
+        terminalId: { value: terminalId } as unknown as Spec['terminalId'],
+        name,
+        cwd: os.tmpdir(),
+        env: {},
+        shellPath: process0.path,
+        shellArgs: [...process0.args],
+      });
     }
 
     await vscode.commands.executeCommand('gripterm.workbench.focus');
@@ -212,11 +208,12 @@ suite('the order of the tabs, and a hand that changes it', () => {
 
   suiteTeardown(async () => {
     const { stage, registry } = await api();
-    // The gateway ends them, once. Disposing the handles here as well is the
-    // double kill that crashed a live run on 2026-08-21 -- guarded in the
-    // adapter now, and deliberately exercised in `terminal-gateway-contract`
-    // rather than left in every teardown that happens to do it.
-    handles = [];
+    // The gateway ends the terminals, once, and this suite keeps no handles of
+    // its own for that reason: disposing a handle AND its gateway is the double
+    // kill that crashed a live run on 2026-08-21. It is guarded in the adapter
+    // now and exercised on purpose in `terminal-gateway-contract`, which is
+    // where a rule of the port belongs -- not in every teardown that happens to
+    // do it.
     for (const terminalId of [FIRST_TERMINAL, SECOND_TERMINAL]) {
       // Taken off the strip by this suite, or the tabs live for the rest of the
       // run and turn up in somebody else's counts (M3.9).
