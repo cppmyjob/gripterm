@@ -242,6 +242,7 @@ function start(root: HTMLElement): void {
     onChose: (terminalId) => { post({ kind: 'chose', terminalId }); },
     onClose: (terminalId) => { post({ kind: 'wants-close', terminalId }); },
     onRefused: (what) => { post({ kind: 'refused', what }); },
+    onReorder: (terminalId, toIndex) => { post({ kind: 'reorder', terminalId, toIndex }); },
   });
   const details = new PageDetails(layout.detailsHost, (what) => { post({ kind: 'refused', what }); });
 
@@ -446,6 +447,12 @@ function start(root: HTMLElement): void {
       case 'click-close': {
         if (!strip.click(action.terminalId, action.kind === 'click-close')) {
           post({ kind: 'refused', what: `a click on a tab this strip does not have: ${action.terminalId}` });
+        }
+        return;
+      }
+      case 'drag-tab': {
+        if (!strip.dragTab(action.terminalId, action.over, action.afterMidpoint)) {
+          post({ kind: 'refused', what: `a drag between tabs this strip does not have: ${action.terminalId} onto ${action.over}` });
         }
         return;
       }

@@ -89,6 +89,26 @@ body {
   border-bottom-color: var(--vscode-focusBorder);
 }
 
+/*
+ * A tab being dragged, and the side of the tab it would land on (2026-08-21).
+ *
+ * A line rather than a gap that opens up: the strip is redrawn whole on every
+ * change, and a layout that moved under the pointer would fight the redraw. The
+ * line is drawn INSIDE the tab (`inset`), so nothing about the strip's size
+ * changes while a person is deciding.
+ */
+.gripterm-tab-dragging {
+  opacity: 0.4;
+}
+
+.gripterm-tab-drop-before {
+  box-shadow: inset 2px 0 0 0 var(--vscode-focusBorder);
+}
+
+.gripterm-tab-drop-after {
+  box-shadow: inset -2px 0 0 0 var(--vscode-focusBorder);
+}
+
 /* The process behind this one is gone. It stays until the cross is clicked. */
 .gripterm-tab-over {
   opacity: 0.5;

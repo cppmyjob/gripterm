@@ -1,4 +1,5 @@
 import { codiconClasses, themeColorVariable } from '../tab-look';
+import { insertionIndex } from '../drop-rule';
 import type { TabOrder, TabReport } from '../protocol';
 
 /**
@@ -37,6 +38,19 @@ const ACTIVE_CLASS = 'gripterm-tab-active';
 const OVER_CLASS = 'gripterm-tab-over';
 const MARK_CLASS = 'gripterm-tab-mark';
 
+/*
+ * What a drag looks like while it is happening. Three classes and no state
+ * anywhere else: the strip is redrawn whole on every change (see `draw`), so a
+ * flag kept beside the DOM would be a second truth that outlives the elements it
+ * described.
+ */
+/** How far into the target half the probe puts its pointer: a quarter of the tab. */
+const QUARTER_TAB = 4;
+
+const DRAGGING_CLASS = 'gripterm-tab-dragging';
+const BEFORE_CLASS = 'gripterm-tab-drop-before';
+const AFTER_CLASS = 'gripterm-tab-drop-after';
+
 export interface StripOptions {
   /** The person clicked a tab: they want this terminal on screen. */
   readonly onChose: (terminalId: string) => void;
@@ -44,6 +58,14 @@ export interface StripOptions {
   readonly onClose: (terminalId: string) => void;
   /** Something could not be drawn, in words -- an icon id this page cannot read. */
   readonly onRefused: (what: string) => void;
+  /**
+   * The person dragged a tab and let go of it (owner's decision 2026-08-21).
+   *
+   * `toIndex` is where the tab will stand once it has moved, which is what the
+   * store takes. The page does that arithmetic once, through `insertionIndex`,
+   * and nothing on the host's side repeats it.
+   */
+  readonly onReorder: (terminalId: string, toIndex: number) => void;
 }
 
 interface DrawnTab {
@@ -60,6 +82,15 @@ export class PageStrip {
   private readonly _host: HTMLElement;
   private readonly _options: StripOptions;
   private _drawn: DrawnTab[] = [];
+  /**
+   * The tab a hand is holding right now, or `null`.
+   *
+   * Kept here rather than in `dataTransfer`, and that is what makes a drag from
+   * OUTSIDE the page -- a file dragged onto the strip -- an ordinary no-op: this
+   * is null then, nothing is prevented, and the editor does whatever it does
+   * with dropped files.
+   */
+  private _dragging: string | null = null;
 
   constructor(host: HTMLElement, options: StripOptions) {
     this._host = host;
@@ -122,6 +153,35 @@ export class PageStrip {
     return true;
   }
 
+  /**
+   * Drags one tab onto another, the way a person's hand does.
+   *
+   * Real events on the real elements, so what runs afterwards is the handler
+   * below, the rule it calls and the message it posts -- not a second
+   * implementation of any of them. The pointer is put on the half of the target
+   * the caller asked for, by measuring the element, because "which half" is the
+   * whole of what decides before or after.
+   *
+   * `false` when either tab is missing, said out loud for the reason `click`
+   * says it: a probe aimed at a tab the strip does not have is a defect in the
+   * suite or in the host, and a silent no-op would look like one in the page.
+   */
+  public dragTab(terminalId: string, over: string, afterMidpoint: boolean): boolean {
+    const source = this._drawn.find((drawn) => drawn.terminalId === terminalId);
+    const target = this._drawn.find((drawn) => drawn.terminalId === over);
+    if (source === undefined || target === undefined) {
+      return false;
+    }
+    const box = target.root.getBoundingClientRect();
+    const quarter = box.width / QUARTER_TAB;
+    const clientX = afterMidpoint ? box.right - quarter : box.left + quarter;
+    source.root.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true }));
+    target.root.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, clientX }));
+    target.root.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, clientX }));
+    source.root.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true }));
+    return true;
+  }
+
   private _tab(tab: TabOrder): DrawnTab {
     const root = document.createElement('div');
     root.className = 'gripterm-tab';
@@ -149,6 +209,7 @@ export class PageStrip {
     root.append(close);
 
     root.addEventListener('click', () => { this._options.onChose(tab.terminalId); });
+    this._makeDraggable(root, tab.terminalId);
     this._host.append(root);
     return {
       terminalId: tab.terminalId,
@@ -158,6 +219,73 @@ export class PageStrip {
       close,
       colourVariable,
     };
+  }
+
+  /**
+   * What makes one tab draggable, and what happens when another is let go on it.
+   *
+   * The owner asked for this on 2026-08-21, in the same breath as the order that
+   * kept changing by itself: an order a person cannot correct is worse than no
+   * order at all, because they can see it is wrong and can do nothing about it.
+   */
+  private _makeDraggable(root: HTMLElement, terminalId: string): void {
+    root.draggable = true;
+    root.addEventListener('dragstart', (event) => {
+      this._dragging = terminalId;
+      root.classList.add(DRAGGING_CLASS);
+      // Some editors refuse to start a drag whose transfer carries nothing.
+      event.dataTransfer?.setData('text/plain', terminalId);
+    });
+    root.addEventListener('dragend', () => {
+      this._dragging = null;
+      this._clearDropMarks();
+      root.classList.remove(DRAGGING_CLASS);
+    });
+    root.addEventListener('dragover', (event) => {
+      if (this._dragging === null) {
+        // Somebody dragged something that is not a tab -- a file, most likely.
+        // Nothing is prevented, so the editor does whatever it does with it.
+        return;
+      }
+      // Without this the browser refuses the drop outright, and the whole
+      // gesture ends in the "no" cursor.
+      event.preventDefault();
+      this._clearDropMarks();
+      root.classList.add(this._afterMidpoint(event, root) ? AFTER_CLASS : BEFORE_CLASS);
+    });
+    root.addEventListener('dragleave', () => {
+      root.classList.remove(BEFORE_CLASS, AFTER_CLASS);
+    });
+    root.addEventListener('drop', (event) => {
+      const moved = this._dragging;
+      if (moved === null) {
+        return;
+      }
+      event.preventDefault();
+      this._clearDropMarks();
+      this._dragging = null;
+      const from = this._drawn.findIndex((drawn) => drawn.terminalId === moved);
+      const onto = this._drawn.findIndex((drawn) => drawn.terminalId === terminalId);
+      if (from === -1 || onto === -1) {
+        return;
+      }
+      this._options.onReorder(
+        moved,
+        insertionIndex({ from, over: onto, afterMidpoint: this._afterMidpoint(event, root) })
+      );
+    });
+  }
+
+  /** Which half of the tab the pointer is over. The middle counts as the left one. */
+  private _afterMidpoint(event: DragEvent, root: HTMLElement): boolean {
+    const box = root.getBoundingClientRect();
+    return event.clientX > box.left + box.width / 2;
+  }
+
+  private _clearDropMarks(): void {
+    for (const drawn of this._drawn) {
+      drawn.root.classList.remove(BEFORE_CLASS, AFTER_CLASS);
+    }
   }
 
   private _icon(iconId: string): HTMLElement {

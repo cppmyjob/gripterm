@@ -414,6 +414,20 @@ export class WorkbenchView implements vscode.WebviewViewProvider, vscode.Disposa
     this._post({ kind: 'probe', action: { kind: 'click-tab', terminalId } });
   }
 
+  /**
+   * Drags one tab onto another, and says which half of it the pointer was over.
+   *
+   * The seam for the drag the owner asked for on 2026-08-21, and the same rule
+   * as the clicks above: the events are dispatched on the elements a hand would
+   * hit, so what runs afterwards is the page's own handler, the rule it calls,
+   * the message it posts and the record this window writes -- not a second copy
+   * of any of them. What it does not stand in for is the mouse itself and the
+   * operating system's own drag layer.
+   */
+  public dragTab(terminalId: string, over: string, afterMidpoint: boolean): void {
+    this._post({ kind: 'probe', action: { kind: 'drag-tab', terminalId, over, afterMidpoint } });
+  }
+
   public clickClose(terminalId: string): void {
     this._post({ kind: 'probe', action: { kind: 'click-close', terminalId } });
   }

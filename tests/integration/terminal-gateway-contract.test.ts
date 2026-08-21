@@ -192,6 +192,46 @@ for (const engine of ENGINES) {
       }
     });
 
+    test('is disposed twice without taking the window with it', async () => {
+      /*
+       * A real crash, and the reason this is in the CONTRACT rather than beside
+       * one adapter: both engines are disposed the same two ways -- a person
+       * closing a terminal, and the window going away a moment later -- and
+       * nothing anywhere promises those two do not overlap.
+       *
+       * Measured 2026-08-21, in the live run of the drag suite: the extension
+       * host died with `code -1073740940` (`STATUS_HEAP_CORRUPTION`) right after
+       * a teardown that disposed a handle and then its gateway. Our own pty was
+       * guarded against the SECOND kill by "has it ended yet", and the exit
+       * event had not arrived yet, so both reached `kill()` on one `IPty`.
+       *
+       * The test is what it is because of what failing looks like: not a red
+       * line, but a run with no summary at all.
+       */
+      const gateway = await gatewayOf(engine, log);
+      const process0 = exiting(0);
+      try {
+        const handle = await gateway.create({
+          terminalId: idFor('40009'),
+          name: `gripterm-double-dispose-${engine.engine}`,
+          cwd: os.tmpdir(),
+          env: {},
+          shellPath: process0.path,
+          shellArgs: process0.args,
+        });
+
+        handle.dispose();
+        // Immediately, with no wait: the whole point is the gap before the exit
+        // event arrives, which is where the second kill used to land.
+        gateway.dispose();
+        handle.dispose();
+
+        await waitFor('the terminal to be forgotten', () => gateway.listKnown().length === 0);
+      } finally {
+        gateway.dispose();
+      }
+    });
+
     test('creates a terminal it then lists and can be asked for by id', async () => {
       const gateway = await gatewayOf(engine, log);
       const terminalId = idFor('40001');

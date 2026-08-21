@@ -301,6 +301,44 @@ describe('what the host accepts from the page', () => {
   });
 });
 
+/**
+ * The tab a person dragged, and where they let go of it (owner's decision
+ * 2026-08-21).
+ *
+ * The page sends the place in the units the store speaks -- the index the tab
+ * will have once it has moved -- because the arithmetic that gets there is a
+ * rule with a test of its own (`drop-rule.ts`), and doing it twice is how the
+ * two sides of a channel come to disagree.
+ */
+describe('what the host accepts about a dragged tab', () => {
+  it('takes a tab and the place it landed in', () => {
+    expect(parseViewMessage({ kind: 'reorder', terminalId: 'a', toIndex: 2 })).toEqual({
+      kind: 'reorder',
+      terminalId: 'a',
+      toIndex: 2,
+    });
+  });
+
+  it('takes the front of the strip, which is where a drag most often ends', () => {
+    expect(parseViewMessage({ kind: 'reorder', terminalId: 'a', toIndex: 0 })).toEqual({
+      kind: 'reorder',
+      terminalId: 'a',
+      toIndex: 0,
+    });
+  });
+
+  it.each([-1, 1.5, Number.NaN, '2', null])('refuses a place of %p', (toIndex) => {
+    // A place that is not a whole number at least zero is not a slip of the
+    // hand: it is a page that has lost count, and acting on it would move a
+    // person's tabs somewhere neither of us chose.
+    expect(parseViewMessage({ kind: 'reorder', terminalId: 'a', toIndex })).toBeNull();
+  });
+
+  it('refuses a drag with no terminal on it', () => {
+    expect(parseViewMessage({ kind: 'reorder', toIndex: 1 })).toBeNull();
+  });
+});
+
 describe('what the page accepts from the host', () => {
   it('takes the order to repaint', () => {
     expect(parseHostMessage({ kind: 'restyle', fontFamily: 'Cascadia Mono', fontSize: 13 })).toEqual({
@@ -308,6 +346,21 @@ describe('what the page accepts from the host', () => {
       fontFamily: 'Cascadia Mono',
       fontSize: 13,
     });
+  });
+
+  it('takes the order to drag a tab onto another one', () => {
+    // The probe of this feature, and the same rule as every probe beside it: it
+    // dispatches the events a mouse would, so what runs afterwards is the page's
+    // own drag handler and the message it posts -- not a second copy of either.
+    const action = { kind: 'drag-tab', terminalId: 'a', over: 'b', afterMidpoint: true };
+
+    expect(parseHostMessage({ kind: 'probe', action })).toEqual({ kind: 'probe', action });
+  });
+
+  it('refuses a drag that names no tab to let go on', () => {
+    expect(
+      parseHostMessage({ kind: 'probe', action: { kind: 'drag-tab', terminalId: 'a', afterMidpoint: false } })
+    ).toBeNull();
   });
 
   it('takes the order to report where things are', () => {

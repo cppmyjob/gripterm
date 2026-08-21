@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { CLOSE_TERMINAL_COMMAND } from '../commands/close-terminal';
-import { TerminalId, stripTabs } from '@gripterm/core';
+import { TerminalId, reorderTerminals, stripTabs } from '@gripterm/core';
 import type { Logger, SessionRegistry, StripTab } from '@gripterm/core';
 import type { TerminalStage } from './terminal-stage';
 import type { ViewMessage } from '@gripterm/webview';
@@ -96,7 +96,49 @@ export class TerminalStrip implements vscode.Disposable {
     }
     if (message.kind === 'wants-close') {
       this._close(message.terminalId);
+      return;
     }
+    if (message.kind === 'reorder') {
+      this._reorder(message.terminalId, message.toIndex);
+    }
+  }
+
+  /**
+   * The person dragged a tab somewhere (owner's decision 2026-08-21).
+   *
+   * Applied over THE LIST THE PAGE WAS LOOKING AT and not over everything this
+   * window holds, which is the one thing that could go wrong here quietly: the
+   * index arrives counted in tabs, and a record with no tab -- a terminal taken
+   * off the strip whose record is still here -- would shift every number by one
+   * and move the wrong terminal.
+   *
+   * Nothing is written from here. `amend` publishes and `BaseWriter` stores
+   * (M2.6), which is the one road from a change to the disk, and it is what
+   * makes a drag survive a store that is unreachable for a moment.
+   */
+  private _reorder(terminalId: string, toIndex: number): void {
+    const moved = this._named(terminalId, 'dragged');
+    if (moved === null) {
+      return;
+    }
+    const { registry, logger } = this._options;
+    const drawn = new Set(this._drawn.map((tab) => tab.terminalId));
+    const changed = reorderTerminals({
+      entries: registry.own().filter((entry) => drawn.has(entry.terminalId.value)),
+      moved,
+      toIndex,
+    });
+    for (const entry of changed) {
+      registry.amend(entry);
+    }
+    logger.info('a tab was dragged', {
+      terminalId,
+      toIndex,
+      // Zero when the tab was let go where it already was, one for an ordinary
+      // move, and more than one only when the arrangement had run out of room
+      // between two neighbours and was written out again (`reorderTerminals`).
+      records: changed.length,
+    });
   }
 
   private _chose(terminalId: string): void {

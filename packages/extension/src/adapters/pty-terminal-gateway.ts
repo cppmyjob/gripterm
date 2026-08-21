@@ -268,6 +268,22 @@ export class PtyTerminalHandle implements TerminalHandle {
   private _name: string;
   private _shownPreservingFocus: boolean | null = null;
   private _over = false;
+  /**
+   * Whether this pty has already been told to die.
+   *
+   * Separate from `_over`, which means the exit has been HEARD, and the gap
+   * between them is where a real crash lived: `dispose()` on a handle and
+   * `dispose()` on the gateway a moment later both reached `kill()` on the same
+   * `IPty`, because the exit event had not arrived yet. Measured 2026-08-21 in a
+   * live run -- the extension host died with `code -1073740940`, which is
+   * `STATUS_HEAP_CORRUPTION`, immediately after a suite disposed a terminal and
+   * then its gateway.
+   *
+   * Killing twice is not a retry either way: node-pty's `kill` is asynchronous
+   * by construction (M3.5), and the second, SYNCHRONOUS attempt this build makes
+   * is by pid in `deactivate` -- not through this object.
+   */
+  private _killed = false;
   private _cause: TerminalExitCause = 'exited';
   /** Whether this pty has produced anything yet. See `resize`. */
   private _spoke = false;
@@ -566,9 +582,10 @@ export class PtyTerminalHandle implements TerminalHandle {
   }
 
   private _kill(cause: TerminalExitCause): void {
-    if (this._over) {
+    if (this._over || this._killed) {
       return;
     }
+    this._killed = true;
     // Recorded BEFORE the kill: the exit event can arrive inside `kill()`, and a
     // cause written afterwards would be written after it had been read.
     this._cause = cause;

@@ -299,6 +299,17 @@ export type ViewMessage =
    */
   | { readonly kind: 'chose', readonly terminalId: string }
   /**
+   * The person dragged a tab and let go of it somewhere (owner's decision
+   * 2026-08-21).
+   *
+   * `toIndex` is in the units the STORE speaks -- the place this tab will have
+   * in the strip once it has moved -- and not "the tab it was dropped on plus a
+   * half". The arithmetic that gets from a pointer to that number is a rule with
+   * a test of its own (`drop-rule.ts`); doing it again on the host's side is how
+   * two sides of a channel come to disagree about the same drop.
+   */
+  | { readonly kind: 'reorder', readonly terminalId: string, readonly toIndex: number }
+  /**
    * The person clicked the cross on a tab.
    *
    * Also a wish, and this one has to be: closing a terminal is what writes
@@ -432,7 +443,22 @@ export type ProbeAction =
    * and the operating system's own layer (M3.14).
    */
   | { readonly kind: 'click-tab', readonly terminalId: string }
-  | { readonly kind: 'click-close', readonly terminalId: string };
+  | { readonly kind: 'click-close', readonly terminalId: string }
+  /**
+   * Drags one tab onto another, the way a person's hand does.
+   *
+   * The seam for the drag of 2026-08-21, and the same rule as every probe above
+   * it: the events are dispatched on the elements a mouse would hit, so what
+   * runs afterwards is the page's own drag handler, its rule and its message --
+   * not a second implementation of any of them. `afterMidpoint` is which half of
+   * the target tab the pointer was over, which is what decides before or after.
+   */
+  | {
+    readonly kind: 'drag-tab';
+    readonly terminalId: string;
+    readonly over: string;
+    readonly afterMidpoint: boolean;
+  };
 
 /**
  * The chord table, from the one file that holds it.
@@ -874,6 +900,16 @@ export function parseViewMessage(value: unknown): ViewMessage | null {
       const terminalId = text(source, 'terminalId');
       return terminalId === null ? null : { kind: 'wants-close', terminalId };
     }
+    case 'reorder': {
+      const terminalId = text(source, 'terminalId');
+      const toIndex = count(source, 'toIndex');
+      // A whole number, at least zero. Anything else is a page that has lost
+      // count rather than a hand that slipped, and acting on it would move a
+      // person's tabs to a place neither of us chose.
+      return terminalId === null || toIndex === null || !Number.isInteger(toIndex) || toIndex < 0
+        ? null
+        : { kind: 'reorder', terminalId, toIndex };
+    }
     default:
       return null;
   }
@@ -991,6 +1027,14 @@ function parseProbe(value: unknown): ProbeAction | null {
     case 'click-close': {
       const terminalId = text(source, 'terminalId');
       return terminalId === null ? null : { kind: 'click-close', terminalId };
+    }
+    case 'drag-tab': {
+      const terminalId = text(source, 'terminalId');
+      const over = text(source, 'over');
+      const afterMidpoint = flag(source, 'afterMidpoint');
+      return terminalId === null || over === null || afterMidpoint === null
+        ? null
+        : { kind: 'drag-tab', terminalId, over, afterMidpoint };
     }
     default:
       return null;
