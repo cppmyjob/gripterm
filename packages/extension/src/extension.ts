@@ -653,11 +653,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     // The folders of THIS window, which is what puts its own project at the top
     // of a list that shows every project on the machine (П4).
     windowFolders: identity.workspaceFolders,
+    logger,
   });
   context.subscriptions.push(tree);
   // Held, not just disposed of: `gripterm.showRecord` reveals a row through it,
   // and a data provider alone cannot select anything (M2.13).
-  const view = vscode.window.createTreeView(TERMINALS_VIEW_ID, { treeDataProvider: tree });
+  const view = vscode.window.createTreeView(TERMINALS_VIEW_ID, {
+    treeDataProvider: tree,
+    // The same object: a row is dragged out of the list the provider drew, and
+    // where it lands is decided against that same list (owner, 2026-08-21).
+    dragAndDropController: tree,
+  });
   context.subscriptions.push(view);
   // The person's own colour, on the row's label. The icon's colour belongs to
   // the state, and the two must not be confusable (M2.7).

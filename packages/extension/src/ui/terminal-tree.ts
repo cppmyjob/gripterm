@@ -1,16 +1,28 @@
 import * as vscode from 'vscode';
-import { groupTerminals, presentTerminal } from '@gripterm/core';
+import { dropInTree, groupTerminals, presentTerminal } from '@gripterm/core';
 import { terminalUri } from './terminal-decorations';
 import type {
   Disposable,
+  Logger,
   Reconciler,
   SessionRegistry,
   TerminalEntry,
   TerminalGroup,
   TerminalId,
+  TreeDropTarget,
 } from '@gripterm/core';
 
 export const TERMINALS_VIEW_ID = 'gripterm.terminals';
+
+/**
+ * What a row of THIS list is, on the way from a hand to a drop.
+ *
+ * The platform names a tree drag after the view, in lower case, and both ends
+ * of the drag have to agree on the string. Ours carries the terminal id and
+ * nothing else: an id is a string, and a string is the only thing that crosses
+ * from the bundle the host runs to a suite compiled beside it (M2.21).
+ */
+const ROW_MIME = 'application/vnd.code.tree.gripterm.terminals';
 
 /** What a `when` clause on a heading would test. Nothing is offered on one yet. */
 export const CONTEXT_PROJECT = 'gripterm.project';
@@ -75,6 +87,8 @@ export interface TerminalTreeOptions {
   readonly reconciler: Reconciler | null;
   /** The folders THIS window has open, which is what puts its own project first. */
   readonly windowFolders: readonly string[];
+  /** Where a drag that moved nothing says why. */
+  readonly logger: Logger;
 }
 
 /**
@@ -106,8 +120,22 @@ export interface TerminalTreeOptions {
  *     quiet: the list opens and the row is simply not selected (M2.13).
  */
 export class TerminalTreeDataProvider
-implements vscode.TreeDataProvider<TerminalTreeNode>, Disposable {
+implements
+  vscode.TreeDataProvider<TerminalTreeNode>,
+  vscode.TreeDragAndDropController<TerminalTreeNode>,
+  Disposable {
   public readonly onDidChangeTreeData: vscode.Event<void>;
+
+  /**
+   * What this list offers a drag, and what it accepts from one -- itself, both
+   * times.
+   *
+   * Nothing else is accepted, and that is the whole of it: a file dropped on
+   * the list would be a file the editor was about to open, and answering it
+   * here is taking something away from the person rather than giving it.
+   */
+  public readonly dragMimeTypes: readonly string[] = [ROW_MIME];
+  public readonly dropMimeTypes: readonly string[] = [ROW_MIME];
 
   private readonly _options: TerminalTreeOptions;
   private readonly _changed = new vscode.EventEmitter<void>();
@@ -160,6 +188,86 @@ implements vscode.TreeDataProvider<TerminalTreeNode>, Disposable {
    * copied onto it, so a record whose window moved folder is revealed under the
    * heading it is in now.
    */
+  /**
+   * A person picked a row up (owner, 2026-08-21).
+   *
+   * One row, or nothing. The view is made without `canSelectMany`, so the
+   * platform hands over exactly one -- and the guard is not for that: a drag
+   * carrying two ids is a drag whose second one this code would silently drop,
+   * which is worse than a drag that does nothing.
+   *
+   * A heading carries nothing. Projects are not ours to rearrange: their order
+   * is this window's own folders first and then the machine's, which is what
+   * makes two windows read one list the same way.
+   */
+  public handleDrag(source: readonly TerminalTreeNode[], transfer: vscode.DataTransfer): void {
+    const rows = source.filter((node): node is TerminalEntry => !isHeading(node));
+    const only = rows.length === 1 ? rows[0] : undefined;
+    if (only === undefined) {
+      return;
+    }
+    transfer.set(ROW_MIME, new vscode.DataTransferItem(only.terminalId.value));
+  }
+
+  /**
+   * A person let a row go (owner, 2026-08-21: "не реализован drag and drop в
+   * tree view где список всех терминалов").
+   *
+   * Everything decided here is decided in `dropInTree`, on the other side of a
+   * port, for the reason par. 3.5 gives. What is left below is reading the
+   * transfer and writing the records, and the ONE thing worth reading twice is
+   * that nothing is written unless every record the move needs is this
+   * window's: a list showing the whole machine (par. 0) is mostly rows this
+   * window may not write (par. 4.8).
+   *
+   * Nothing redraws the list from here either. `amend` publishes, the registry
+   * notifies, and this provider is one of its listeners -- the same road a
+   * change from anywhere else takes (M2.6).
+   */
+  public handleDrop(target: TerminalTreeNode | undefined, transfer: vscode.DataTransfer): void {
+    const carried: unknown = transfer.get(ROW_MIME)?.value;
+    if (typeof carried !== 'string') {
+      // Anything else in the workbench, dropped on our list. Not ours to answer.
+      return;
+    }
+    const { registry, logger } = this._options;
+    const groups = this._groups();
+    const moved = groups
+      .flatMap((group) => group.entries)
+      .find((entry) => entry.terminalId.value === carried);
+    if (moved === undefined) {
+      // The row went while the hand was moving -- a window closing under it.
+      // Looked up rather than parsed back into an id, because a record that is
+      // in the list is the only proof the id was ever one of ours.
+      logger.info('a row was dropped after its record had gone', { terminalId: carried });
+      return;
+    }
+
+    const { changed, refusal } = dropInTree({
+      groups,
+      moved: moved.terminalId,
+      target: targetOf(target),
+      owns: (terminalId) => registry.knows(terminalId),
+    });
+    if (refusal !== null) {
+      // Silent on screen and loud in the journal. A refused drop leaves the row
+      // where the person can see it did not move, and a toast per clumsy drag
+      // would be the noisier half of that. It is removable the day the owner
+      // says a refusal was not obvious -- the sentences are already named.
+      logger.info('a row was dropped and did not move', { terminalId: carried, refusal });
+      return;
+    }
+    for (const entry of changed) {
+      registry.amend(entry);
+    }
+    logger.info('a row was dragged', {
+      terminalId: carried,
+      // One for an ordinary move, none when it was let go where it already was,
+      // and more only when the arrangement had run out of room (`terminal-order`).
+      records: changed.length,
+    });
+  }
+
   public getParent(node: TerminalTreeNode): TerminalTreeNode | undefined {
     if (isHeading(node)) {
       return undefined;
@@ -218,6 +326,16 @@ implements vscode.TreeDataProvider<TerminalTreeNode>, Disposable {
     );
     return item;
   }
+}
+
+/** What the pointer was over, in the units the rule speaks. */
+function targetOf(node: TerminalTreeNode | undefined): TreeDropTarget | null {
+  if (node === undefined) {
+    return null;
+  }
+  return isHeading(node)
+    ? { kind: 'heading', key: node.group.key }
+    : { kind: 'row', terminalId: node.terminalId };
 }
 
 /**

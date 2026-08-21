@@ -621,6 +621,14 @@ export {
 } from './domain/services/terminal-grouping';
 
 export {
+  dropInTree,
+  type TreeDrop,
+  type TreeDropRefusal,
+  type TreeDropRequest,
+  type TreeDropTarget,
+} from './domain/services/tree-drop';
+
+export {
   SessionRegistry,
   type EntryChange,
   type IngestOutcome,
