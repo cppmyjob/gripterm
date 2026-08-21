@@ -172,6 +172,22 @@ export class HookEventParser implements HookEventReader {
           lastAssistantMessage: readString(payload, 'last_assistant_message'),
         });
 
+      case 'SubagentStart':
+        return parsed({
+          ...context,
+          kind: 'SubagentStart',
+          agentId: readToken(payload, 'agent_id'),
+          agentType: readToken(payload, 'agent_type'),
+        });
+
+      case 'SubagentStop':
+        return parsed({
+          ...context,
+          kind: 'SubagentStop',
+          agentId: readToken(payload, 'agent_id'),
+          agentType: readToken(payload, 'agent_type'),
+        });
+
       case 'StopFailure':
         return parsed({
           ...context,

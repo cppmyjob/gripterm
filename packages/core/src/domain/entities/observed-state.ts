@@ -11,6 +11,14 @@ export interface ObservedStateParams {
   readonly cost: CostSnapshot | null;
   readonly contextWindow: ContextWindowSnapshot | null;
   readonly pid: number | null;
+  /**
+   * Who is working in this conversation right now, or nothing.
+   *
+   * Optional so that every caller that has no opinion says nothing rather than
+   * guessing: an absent list is an empty one, and an empty one means the only
+   * thing this build ever knew before -- that `Stop` settles the record.
+   */
+  readonly running?: readonly string[];
 }
 
 /**
@@ -35,6 +43,17 @@ export class ObservedState {
   public readonly cost: CostSnapshot | null;
   public readonly contextWindow: ContextWindowSnapshot | null;
   public readonly pid: number | null;
+  /**
+   * The names of everything still running in this conversation: `MAIN_AGENT`
+   * for the agent the person is talking to, and one agent id per subagent it
+   * started that has not reported its end.
+   *
+   * Observed, cheap to lose and rebuilt from the journal like everything else
+   * here. What it buys is the one thing `Stop` cannot say: the customer's
+   * agent, measured on 2026-08-21, went on working for eighty seconds after the
+   * hook that this build read as "idle".
+   */
+  public readonly running: readonly string[];
 
   private readonly _lastEventAtMs: number;
 
@@ -46,6 +65,7 @@ export class ObservedState {
     this.cost = params.cost;
     this.contextWindow = params.contextWindow;
     this.pid = params.pid;
+    this.running = Object.freeze([...params.running ?? []]);
     Object.freeze(this);
   }
 
@@ -83,6 +103,7 @@ export class ObservedState {
       cost: this.cost,
       contextWindow: this.contextWindow,
       pid,
+      running: this.running,
     });
   }
 }

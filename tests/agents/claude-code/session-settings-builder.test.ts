@@ -45,6 +45,8 @@ const EXPECTED_EVENTS = [
   'Notification',
   'Stop',
   'StopFailure',
+  'SubagentStart',
+  'SubagentStop',
   'CwdChanged',
 ];
 
@@ -53,7 +55,15 @@ const EXPECTED_EVENTS = [
  * life would leave the tree lying; these three are the ones П1 is written on,
  * so they are named rather than left to the count above.
  */
-const LOAD_BEARING_EVENTS = ['UserPromptSubmit', 'PermissionRequest', 'Stop'];
+const LOAD_BEARING_EVENTS = [
+  'UserPromptSubmit',
+  'PermissionRequest',
+  'Stop',
+  // The fourth since 2026-08-21: without it `Stop` is read as the end of the
+  // work, and the customer watched a green tick for the eighty seconds their
+  // subagents went on running.
+  'SubagentStart',
+];
 
 function build(overrides: Partial<Parameters<SessionSettingsBuilder['build']>[0]> = {}): SessionSettingsDocument {
   return new SessionSettingsBuilder().build({

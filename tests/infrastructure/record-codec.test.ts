@@ -280,6 +280,51 @@ describe('the observed half, which is allowed to be lost', () => {
     ).toStrictEqual({ kind: 'stored' });
   });
 
+  it('carries who was running through a round trip', () => {
+    // The field the fifth complaint needed (2026-08-21). It is cheap and it is
+    // rebuilt from the journal, but losing it on every window reload would put
+    // the green tick back on a terminal whose subagents are still going.
+    const document = encodeObserved(
+      ObservedState.create({
+        state: 'working',
+        lastEventAt: OBSERVED_AT,
+        currentTool: null,
+        lastAssistantMessage: null,
+        cost: null,
+        contextWindow: null,
+        pid: null,
+        running: ['main', 'a0f2051a530b4c7a2'],
+      })
+    );
+
+    const decode = loaded(record, document);
+
+    expect(document.running).toStrictEqual(['main', 'a0f2051a530b4c7a2']);
+    expect(decode.kind === 'ok' ? [...decode.entry.observed.running] : null).toStrictEqual([
+      'main',
+      'a0f2051a530b4c7a2',
+    ]);
+  });
+
+  it.each([
+    ['a file written before the field existed', undefined, []],
+    ['a list that is not one', 'main', []],
+    ['names that are not names', [1, 'main', null], ['main']],
+  ])('reads %s as %j running, and keeps the rest of the snapshot', (_what, running, expected) => {
+    // The one lenient field in this file, and deliberately so: refusing the
+    // whole `observed.json` over it would throw away the state, the last
+    // message and the cost -- all of which cost something to lose.
+    const decode = loaded(record, {
+      state: 'working',
+      lastEventAt: OBSERVED_AT.getTime(),
+      currentTool: 'Bash',
+      running,
+    });
+
+    expect(decode.kind === 'ok' ? [...decode.entry.observed.running] : null).toStrictEqual(expected);
+    expect(decode.kind === 'ok' ? decode.entry.observed.state : null).toBe('working');
+  });
+
   /*
    * A terminal whose statusline has not fired yet has no cost at all, which is
    * a different thing from a cost of zero -- so the absence has to survive the
@@ -298,6 +343,7 @@ describe('the observed half, which is allowed to be lost', () => {
 
     expect(encodeObserved(empty)).toStrictEqual({
       state: 'launching',
+      running: [],
       lastEventAt: OBSERVED_AT.getTime(),
       currentTool: null,
       lastAssistantMessage: null,

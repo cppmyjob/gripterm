@@ -115,7 +115,11 @@ const SHUTDOWN_BEFORE_START = 'the CLI shutting down says nothing about whether 
  * and checked against a copy of that table proves nothing at all.
  */
 export class TerminalStateMachine {
-  public apply(current: PersistedTerminalState, event: TerminalEvent): StateTransition {
+  public apply(
+    current: PersistedTerminalState,
+    event: TerminalEvent,
+    running: readonly string[] = []
+  ): StateTransition {
     switch (event.kind) {
       // Note the missing `phase()` guard: this is the resurrection edge. After
       // `/clear` the CLI sends `SessionEnd(reason: clear)` and then a
@@ -173,11 +177,31 @@ export class TerminalStateMachine {
 
       case 'Notification': {
         const named = NOTIFICATION_PHASE[event.notificationType];
-        return named === undefined ? proofOfLife(current) : phase(current, named);
+        if (named === undefined) {
+          return proofOfLife(current);
+        }
+        // `idle_prompt` and `agent_completed` are the main agent back at its
+        // prompt, and measured to arrive while its subagents are still going
+        // (85.7 s against subagents that finished at 107 s). Same rule as
+        // `Stop`: they are the truth about the agent, not about the terminal.
+        return phase(current, named === 'idle' && running.length > 0 ? 'working' : named);
       }
 
+      // Settling events, and what they settle INTO is the whole of the
+      // customer's fifth complaint (2026-08-21). `Stop` is the main agent
+      // saying it has finished speaking, and measured against a real CLI that
+      // happens the moment it has LAUNCHED its background subagents -- the two
+      // in that run went on working for eighty seconds afterwards. So idle is
+      // "nobody is running", not "the main agent stopped", and who is running
+      // is counted outside this machine and handed in.
       case 'Stop':
-        return phase(current, 'idle');
+      case 'SubagentStop':
+        return phase(current, running.length === 0 ? 'idle' : 'working');
+
+      // A subagent beginning is first-hand evidence of work, exactly as a tool
+      // starting is.
+      case 'SubagentStart':
+        return phase(current, 'working');
 
       case 'StopFailure':
         return phase(current, 'turn_failed');

@@ -25,6 +25,8 @@ export type HookEvent =
   | NotificationEvent
   | StopEvent
   | StopFailureEvent
+  | SubagentStartEvent
+  | SubagentStopEvent
   | CwdChangedEvent;
 
 /** Produced by the runner from its own observation. */
@@ -149,6 +151,30 @@ export interface StopFailureEvent extends HookEventContext {
   readonly errorMessage: string | null;
 }
 
+/**
+ * A subagent the main agent started has begun.
+ *
+ * Registered because of what `Stop` turned out NOT to mean (customer, measured
+ * 2026-08-21): the CLI runs Task subagents in the background, so the main
+ * agent's turn ENDS the moment it has launched them -- `Stop` at 25.7 s while
+ * two subagents ran until 109 s -- and a terminal that showed `idle` for those
+ * eighty seconds was answering the wrong question. `agentId` is what makes the
+ * pairing possible: the same run produced five `SubagentStop`s for ids nothing
+ * ever started, so a counter would have gone to zero with the work still going.
+ */
+export interface SubagentStartEvent extends HookEventContext {
+  readonly kind: 'SubagentStart';
+  readonly agentId: string | null;
+  readonly agentType: string | null;
+}
+
+/** One of those subagents has finished. Ignored unless it names one we saw start. */
+export interface SubagentStopEvent extends HookEventContext {
+  readonly kind: 'SubagentStop';
+  readonly agentId: string | null;
+  readonly agentType: string | null;
+}
+
 export interface CwdChangedEvent extends HookEventContext {
   readonly kind: 'CwdChanged';
   /** Field names measured on 2.1.225: `old_cwd` / `new_cwd`. `previous_cwd` occurs zero times in the binary. */
@@ -198,6 +224,8 @@ const HOOK_EVENT_KINDS: ReadonlySet<string> = new Set<HookEvent['kind']>([
   'Notification',
   'Stop',
   'StopFailure',
+  'SubagentStart',
+  'SubagentStop',
   'CwdChanged',
 ]);
 

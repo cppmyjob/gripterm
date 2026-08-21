@@ -65,6 +65,104 @@ function project(...events: readonly ProjectedEvent[]): ReturnType<typeof projec
   return projectObserved({ from: launching(), sessionId: SESSION, events, machine });
 }
 
+/*
+ * The customer's fifth complaint, replayed from the measurement that explains
+ * it (2026-08-21, a real CLI with all thirty-one hooks registered):
+ *
+ *   17.77  SubagentStart a0f2   19.22  SubagentStart a1e4
+ *   25.69  Stop                 <- the main agent, done launching them
+ *   85.71  Notification idle_prompt
+ *  107.42  SubagentStop  a1e4  109.18  SubagentStop a0f2
+ *
+ * Read as this build read it before that day, the terminal was idle from 25.69
+ * -- a green tick over eighty seconds of work.
+ */
+describe('a turn whose subagents outlive it', () => {
+  const ONE = 'a0f2051a530b4c7a2';
+  const TWO = 'a1e499b3f0c990cc8';
+
+  function subagent(kind: 'SubagentStart' | 'SubagentStop', agentId: string, minute: number): ProjectedEvent {
+    return moment({ kind, sessionId: SESSION, agentId, agentType: 'general-purpose', ...CONTEXT }, minute);
+  }
+
+  it('is working while its subagents are, and idle only when the last of them is done', () => {
+    const prompt = moment({ kind: 'UserPromptSubmit', sessionId: SESSION, userInput: 'go', ...CONTEXT }, 1);
+    const started = [subagent('SubagentStart', ONE, 2), subagent('SubagentStart', TWO, 3)];
+    const stopped = moment({ kind: 'Stop', sessionId: SESSION, lastAssistantMessage: 'they are running', ...CONTEXT }, 4);
+    const idlePrompt = moment(
+      { kind: 'Notification', sessionId: SESSION, notificationType: 'idle_prompt', message: 'waiting', ...CONTEXT },
+      5
+    );
+
+    expect(project(prompt, ...started, stopped).observed.state).toBe('working');
+    expect(project(prompt, ...started, stopped, idlePrompt).observed.state).toBe('working');
+    expect(
+      project(prompt, ...started, stopped, idlePrompt, subagent('SubagentStop', TWO, 6)).observed.state
+    ).toBe('working');
+    expect(
+      project(
+        prompt,
+        ...started,
+        stopped,
+        idlePrompt,
+        subagent('SubagentStop', TWO, 6),
+        subagent('SubagentStop', ONE, 7)
+      ).observed.state
+    ).toBe('idle');
+  });
+
+  it('keeps the names of what is running, and drops them as they finish', () => {
+    const running = project(
+      moment({ kind: 'UserPromptSubmit', sessionId: SESSION, userInput: 'go', ...CONTEXT }, 1),
+      subagent('SubagentStart', ONE, 2),
+      subagent('SubagentStart', TWO, 3)
+    ).observed.running;
+
+    expect([...running]).toStrictEqual(['main', ONE, TWO]);
+  });
+
+  it('ignores a subagent finishing that nobody saw start', () => {
+    // Measured in the same run: five `SubagentStop`s named ids that had never
+    // been started. A count would have reached zero with the work still going.
+    const projection = project(
+      moment({ kind: 'UserPromptSubmit', sessionId: SESSION, userInput: 'go', ...CONTEXT }, 1),
+      subagent('SubagentStart', ONE, 2),
+      subagent('SubagentStop', 'a463b3e885b0d0335', 3),
+      moment({ kind: 'Stop', sessionId: SESSION, lastAssistantMessage: null, ...CONTEXT }, 4)
+    );
+
+    expect([...projection.observed.running]).toStrictEqual([ONE]);
+    expect(projection.observed.state).toBe('working');
+  });
+
+  it('forgets everything that was running when the conversation starts again', () => {
+    const projection = project(
+      moment({ kind: 'UserPromptSubmit', sessionId: SESSION, userInput: 'go', ...CONTEXT }, 1),
+      subagent('SubagentStart', ONE, 2),
+      moment({ kind: 'SessionStart', sessionId: SESSION, source: 'clear', ...CONTEXT }, 3)
+    );
+
+    expect([...projection.observed.running]).toStrictEqual([]);
+  });
+
+  it('carries nothing running into a start of its own', () => {
+    // A record being launched or resumed: whoever was running was running in a
+    // process that is gone.
+    const before = ObservedState.create({
+      state: 'working',
+      lastEventAt: START,
+      currentTool: null,
+      lastAssistantMessage: null,
+      cost: null,
+      contextWindow: null,
+      pid: null,
+      running: ['main', ONE],
+    });
+
+    expect([...observedAtStart(before, at(1)).running]).toStrictEqual([]);
+  });
+});
+
 describe('folding a history back into a state', () => {
   it('answers with what it was given when there is nothing to fold', async () => {
     const projection = project();

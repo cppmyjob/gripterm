@@ -331,6 +331,10 @@ function wordsFor(event: TerminalEvent | null): string {
       return 'turn finished';
     case 'StopFailure':
       return event.errorType === null ? 'turn failed' : `turn failed (${event.errorType})`;
+    case 'SubagentStart':
+      return event.agentType === null ? 'a subagent started' : `a ${event.agentType} subagent started`;
+    case 'SubagentStop':
+      return event.agentType === null ? 'a subagent finished' : `a ${event.agentType} subagent finished`;
     case 'CwdChanged':
       return 'working directory changed';
     case 'ResumeTimedOut':

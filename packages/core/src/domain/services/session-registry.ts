@@ -1,5 +1,5 @@
 import { isHookEvent } from '../events/terminal-event';
-import { observedAfter } from './observed-projection';
+import { observedAfter, runningAfter } from './observed-projection';
 import type { Clock } from '../ports/clock';
 import type { Disposable } from '../ports/disposable';
 import type { HookDelivery } from '../entities/hook-delivery';
@@ -401,7 +401,11 @@ export class SessionRegistry implements HookEventSink {
       return { kind: 'foreign-session' };
     }
 
-    const transition = this._options.stateMachine.apply(entry.observed.state, event);
+    const transition = this._options.stateMachine.apply(
+      entry.observed.state,
+      event,
+      runningAfter(entry.observed.running, event)
+    );
     if (transition.kind === 'ignored') {
       // `ignored` is the machine saying it DROPPED the event -- which is why it
       // is a separate answer from `stayed`. Nothing is written, including

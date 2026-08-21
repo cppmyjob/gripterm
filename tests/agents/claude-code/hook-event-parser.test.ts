@@ -250,8 +250,36 @@ describe('UserPromptSubmit', () => {
   });
 });
 
+/*
+ * The two events that stopped being ignorable on 2026-08-21, and the field that
+ * is the whole reason for reading them. Measured against a real CLI: five
+ * `SubagentStop`s arrived naming ids nothing had ever started, so what is kept
+ * is a set of names and never a count.
+ */
+describe('SubagentStart and SubagentStop', () => {
+  it.each(['SubagentStart', 'SubagentStop'] as const)('carries the agent of %s', (hookEventName) => {
+    const event = parseOrFail(
+      payload({ hook_event_name: hookEventName, agent_id: 'a0f2051a530b4c7a2', agent_type: 'general-purpose' })
+    );
+
+    expect(event.kind).toBe(hookEventName);
+    expect(event.kind === 'SubagentStart' || event.kind === 'SubagentStop' ? event.agentId : null).toBe(
+      'a0f2051a530b4c7a2'
+    );
+    expect(event.kind === 'SubagentStart' || event.kind === 'SubagentStop' ? event.agentType : null).toBe(
+      'general-purpose'
+    );
+  });
+
+  it('reads an unnamed agent as no agent rather than refusing the event', () => {
+    const event = parseOrFail(payload({ hook_event_name: 'SubagentStop' }));
+
+    expect(event.kind === 'SubagentStop' ? event.agentId : 'unset').toBeNull();
+  });
+});
+
 describe('an event we do not model', () => {
-  it.each(['PreCompact', 'FileChanged', 'TaskCreated', 'SubagentStop', 'Setup'])(
+  it.each(['PreCompact', 'FileChanged', 'TaskCreated', 'TeammateIdle', 'Setup'])(
     'is ignored rather than fatal: %s',
     (hookEventName) => {
       const result = parser.parse(payload({ hook_event_name: hookEventName }));

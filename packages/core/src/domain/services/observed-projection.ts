@@ -18,6 +18,8 @@ import type { TerminalEvent } from '../events/terminal-event';
 const TOOL_RULES: Readonly<Record<TerminalEvent['kind'], 'clear' | 'keep' | 'name'>> = {
   SessionStart: 'clear',
   SessionEnd: 'clear',
+  SubagentStart: 'keep',
+  SubagentStop: 'keep',
   UserPromptSubmit: 'clear',
   PreToolUse: 'name',
   PostToolUse: 'clear',
@@ -38,6 +40,90 @@ const TOOL_RULES: Readonly<Record<TerminalEvent['kind'], 'clear' | 'keep' | 'nam
   LaunchExitedNonZero: 'clear',
   ResumeExitedNonZero: 'clear',
 };
+
+/**
+ * The name the main agent goes under in `ObservedState.running` -- the one the
+ * person is talking to, as opposed to the subagents it starts.
+ *
+ * A name and not a flag because the question every rule asks is the same one:
+ * "is anybody still working here". Measured agent ids are seventeen hex
+ * characters (`a0f2051a530b4c7a2`), so this cannot collide with one.
+ */
+export const MAIN_AGENT = 'main';
+
+/**
+ * Who is running after this event -- the answer `Stop` alone cannot give.
+ *
+ * **Measured 2026-08-21, against a real CLI with all thirty-one hooks
+ * registered.** The main agent's turn ends when it has LAUNCHED its background
+ * subagents, not when they finish: `Stop` at 25.7 s, `Notification idle_prompt`
+ * at 85.7 s, and the two `SubagentStop`s at 107 and 109 s. For eighty seconds
+ * this build showed a green tick on a terminal that was working, which is the
+ * fifth thing the customer reported.
+ *
+ * Ids and not a count, and that is measured too: the same run produced five
+ * `SubagentStop`s naming ids nothing had ever started. A counter would have
+ * reached zero halfway through the work; a set simply ignores a name it does
+ * not hold.
+ *
+ * The main agent joins on its prompt and leaves on anything that says it has
+ * finished speaking. It is deliberately NOT added by the tool events: those
+ * arrive for subagents too, carrying an `agent_id` this build does not read, so
+ * adding it there would put the main agent back into the list every time a
+ * subagent touched a tool.
+ */
+export function runningAfter(
+  previous: readonly string[],
+  event: TerminalEvent
+): readonly string[] {
+  switch (event.kind) {
+    // A beginning and four ends. Whatever was running, it is not running now.
+    case 'SessionStart':
+    case 'SessionEnd':
+    case 'ProcessGone':
+    case 'TerminalClosed':
+    case 'LaunchExitedNonZero':
+    case 'ResumeExitedNonZero':
+      return [];
+
+    case 'UserPromptSubmit':
+      return withName(previous, MAIN_AGENT);
+
+    case 'Stop':
+    case 'StopFailure':
+      return withoutName(previous, MAIN_AGENT);
+
+    case 'Notification':
+      // The two that say the main agent is back at its prompt. Everything else
+      // a notification can be says nothing about who is working.
+      return event.notificationType === 'idle_prompt' || event.notificationType === 'agent_completed'
+        ? withoutName(previous, MAIN_AGENT)
+        : previous;
+
+    case 'SubagentStart':
+      return event.agentId === null ? previous : withName(previous, event.agentId);
+
+    case 'SubagentStop':
+      return event.agentId === null ? previous : withoutName(previous, event.agentId);
+
+    case 'PreToolUse':
+    case 'PostToolUse':
+    case 'PostToolUseFailure':
+    case 'PermissionRequest':
+    case 'CwdChanged':
+    case 'ResumeTimedOut':
+    case 'WentQuiet':
+      return previous;
+  }
+}
+
+function withName(previous: readonly string[], name: string): readonly string[] {
+  return previous.includes(name) ? previous : [...previous, name];
+}
+
+function withoutName(previous: readonly string[], name: string): readonly string[] {
+  return previous.includes(name) ? previous.filter((one) => one !== name) : previous;
+}
 
 export interface ObservedAfterParams {
   readonly previous: ObservedState;
@@ -73,6 +159,7 @@ export function observedAfter(params: ObservedAfterParams): ObservedState {
     cost: previous.cost,
     contextWindow: previous.contextWindow,
     pid: previous.pid,
+    running: runningAfter(previous.running, event),
   });
 }
 
@@ -105,6 +192,10 @@ export function observedAtStart(previous: ObservedState, at: Date): ObservedStat
     cost: previous.cost,
     contextWindow: previous.contextWindow,
     pid: null,
+    // Nothing is running: whoever was, was running in the process that has just
+    // been replaced. A list carried across a start would hold a terminal in
+    // `working` for a subagent of a conversation that is over.
+    running: [],
   });
 }
 
@@ -179,7 +270,7 @@ export function projectObserved(params: ProjectionParams): Projection {
       }
     }
 
-    const transition = params.machine.apply(observed.state, event);
+    const transition = params.machine.apply(observed.state, event, runningAfter(observed.running, event));
     if (transition.kind === 'ignored') {
       // Nothing is written, not even the time. A record whose clock moved for
       // events it refused makes "nothing has happened here for ten minutes"

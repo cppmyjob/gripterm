@@ -406,6 +406,62 @@ suite('the details half of the panel', () => {
   });
 
   /*
+   * The customer's fifth complaint, end to end over the real endpoint
+   * (2026-08-21): "основной агент запускает агентов и ждёт тихо -- в этот
+   * момент иконка состояния показывает не спиннер а зелёную галку."
+   *
+   * WHICH state each event names is settled in the domain, over the whole
+   * table. What only a live window answers is the path: the CLI posts these two
+   * events to the endpoint like any other, and if the parser or the settings
+   * builder had missed them they would arrive as `ignored` and the record would
+   * settle exactly as it did before -- which is a defect no unit test can see,
+   * because every unit test hands the event over already parsed.
+   */
+  test('goes on saying working when the turn ends and a subagent it started has not', async () => {
+    const { registry } = await api();
+    const id = TerminalId.fromString(TERMINAL_UUID);
+    const agent = 'a0f2051a530b4c7a2';
+
+    await deliver({ hook_event_name: 'UserPromptSubmit', session_id: SESSION_UUID, user_input: 'go' });
+    await deliver({
+      hook_event_name: 'SubagentStart',
+      session_id: SESSION_UUID,
+      agent_id: agent,
+      agent_type: 'general-purpose',
+    });
+    await until(
+      'the record to hear that a subagent started',
+      () => registry.get(id)?.observed.running.includes(agent) === true
+    );
+
+    // The hook that used to end it. Measured against a real CLI: it arrives
+    // while the subagents go on working for another eighty seconds.
+    await deliver({ hook_event_name: 'Stop', session_id: SESSION_UUID, last_assistant_message: 'they are running' });
+    await until(
+      'the stop to be applied',
+      () => registry.get(id)?.observed.lastAssistantMessage === 'they are running'
+    );
+
+    assert.equal(
+      registry.get(id)?.observed.state,
+      'working',
+      'the terminal went idle with a subagent of its own still running'
+    );
+
+    await deliver({
+      hook_event_name: 'SubagentStop',
+      session_id: SESSION_UUID,
+      agent_id: agent,
+      agent_type: 'general-purpose',
+    });
+    await until(
+      'the last subagent to finish',
+      () => registry.get(id)?.observed.state === 'idle'
+    );
+    assert.deepEqual([...(registry.get(id)?.observed.running ?? ['unread'])], []);
+  });
+
+  /*
    * The empty state this suite can reach, and it is not the empty PANEL: the
    * gates run every suite in one window, and the terminals other suites have
    * ended keep their tabs until somebody closes them (M3.9). "The panel holds

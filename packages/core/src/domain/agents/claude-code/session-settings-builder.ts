@@ -138,6 +138,11 @@ export class SessionSettingsBuilder {
         Notification: httpRegistration(url),
         Stop: httpRegistration(url),
         StopFailure: httpRegistration(url),
+        // The two that say what `Stop` does not: the main agent's turn ends the
+        // moment it has launched a background subagent, and the work goes on
+        // without it (measured 2026-08-21).
+        SubagentStart: httpRegistration(url),
+        SubagentStop: httpRegistration(url),
         CwdChanged: httpRegistration(url),
       },
     };

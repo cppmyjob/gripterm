@@ -59,6 +59,8 @@ const EVENT_CASES = {
   'Notification:agent_completed': notification('agent_completed'),
   'Notification:other': notification('auth_success'),
   Stop: { kind: 'Stop', lastAssistantMessage: null, ...CONTEXT },
+  SubagentStart: { kind: 'SubagentStart', agentId: 'a0f2051a530b4c7a2', agentType: 'general-purpose', ...CONTEXT },
+  SubagentStop: { kind: 'SubagentStop', agentId: 'a0f2051a530b4c7a2', agentType: 'general-purpose', ...CONTEXT },
   StopFailure: { kind: 'StopFailure', errorType: null, errorMessage: null, ...CONTEXT },
   CwdChanged: { kind: 'CwdChanged', oldCwd: null, newCwd: null, ...CONTEXT },
   ResumeTimedOut: resumeTimedOut(),
@@ -86,6 +88,8 @@ const EVENT_KINDS: Record<TerminalEvent['kind'], true> = {
   PermissionRequest: true,
   Notification: true,
   Stop: true,
+  SubagentStart: true,
+  SubagentStop: true,
   StopFailure: true,
   CwdChanged: true,
   ResumeTimedOut: true,
@@ -150,6 +154,8 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     'Notification:agent_completed': 'idle',
     'Notification:other': 'launching',
     Stop: 'idle',
+    SubagentStart: 'working',
+    SubagentStop: 'idle',
     StopFailure: 'turn_failed',
     CwdChanged: 'launching',
     ResumeTimedOut: 'degraded',
@@ -172,6 +178,8 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     'Notification:agent_completed': 'idle',
     'Notification:other': 'idle',
     Stop: 'idle',
+    SubagentStart: 'working',
+    SubagentStop: 'idle',
     StopFailure: 'turn_failed',
     CwdChanged: 'idle',
     ResumeTimedOut: NOT_APPLIED,
@@ -194,6 +202,8 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     'Notification:agent_completed': 'idle',
     'Notification:other': 'working',
     Stop: 'idle',
+    SubagentStart: 'working',
+    SubagentStop: 'idle',
     StopFailure: 'turn_failed',
     CwdChanged: 'working',
     ResumeTimedOut: NOT_APPLIED,
@@ -219,6 +229,8 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     'Notification:agent_completed': 'idle',
     'Notification:other': 'waiting_permission',
     Stop: 'idle',
+    SubagentStart: 'working',
+    SubagentStop: 'idle',
     StopFailure: 'turn_failed',
     CwdChanged: 'waiting_permission',
     ResumeTimedOut: NOT_APPLIED,
@@ -241,6 +253,8 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     'Notification:agent_completed': 'idle',
     'Notification:other': 'waiting_input',
     Stop: 'idle',
+    SubagentStart: 'working',
+    SubagentStop: 'idle',
     StopFailure: 'turn_failed',
     CwdChanged: 'waiting_input',
     ResumeTimedOut: NOT_APPLIED,
@@ -263,6 +277,8 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     'Notification:agent_completed': 'idle',
     'Notification:other': 'turn_failed',
     Stop: 'idle',
+    SubagentStart: 'working',
+    SubagentStop: 'idle',
     StopFailure: 'turn_failed',
     CwdChanged: 'turn_failed',
     ResumeTimedOut: NOT_APPLIED,
@@ -288,6 +304,8 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     'Notification:agent_completed': NOT_APPLIED,
     'Notification:other': NOT_APPLIED,
     Stop: NOT_APPLIED,
+    SubagentStart: NOT_APPLIED,
+    SubagentStop: NOT_APPLIED,
     StopFailure: NOT_APPLIED,
     CwdChanged: NOT_APPLIED,
     ResumeTimedOut: NOT_APPLIED,
@@ -313,6 +331,8 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     'Notification:agent_completed': 'idle',
     'Notification:other': 'degraded',
     Stop: 'idle',
+    SubagentStart: 'working',
+    SubagentStop: 'idle',
     StopFailure: 'turn_failed',
     CwdChanged: 'degraded',
     ResumeTimedOut: NOT_APPLIED,
@@ -335,6 +355,8 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     'Notification:agent_completed': 'idle',
     'Notification:other': 'degraded',
     Stop: 'idle',
+    SubagentStart: 'working',
+    SubagentStop: 'idle',
     StopFailure: 'turn_failed',
     CwdChanged: 'degraded',
     ResumeTimedOut: NOT_APPLIED,
@@ -357,6 +379,8 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     'Notification:agent_completed': NOT_APPLIED,
     'Notification:other': NOT_APPLIED,
     Stop: NOT_APPLIED,
+    SubagentStart: NOT_APPLIED,
+    SubagentStop: NOT_APPLIED,
     StopFailure: NOT_APPLIED,
     CwdChanged: NOT_APPLIED,
     ResumeTimedOut: NOT_APPLIED,
@@ -417,6 +441,110 @@ describe('the table covers the product and nothing else', () => {
 describe.each(STATES)('from %s', (state) => {
   it('lands where the table says, for all twenty events', () => {
     expect(rowOf(state)).toStrictEqual(TABLE[state]);
+  });
+});
+
+/*
+ * The customer's fifth complaint, 2026-08-21: "Иногда, не всегда, основной
+ * агент запускает агентов и ждёт тихо -- в этот момент иконка состояния
+ * показывает не спиннер а зелёную галку."
+ *
+ * MEASURED, twice, against a real CLI with all thirty-one hooks registered
+ * (2026-08-21). The second run, with two subagents each sleeping a minute:
+ *
+ *   17.77  SubagentStart  a0f2...      <- two subagents begin
+ *   19.22  SubagentStart  a1e4...
+ *   25.69  Stop                        <- the MAIN turn ends here, no agent_id
+ *   ...    PreToolUse/PostToolUse with agent_id -- the subagents working
+ *   85.71  Notification idle_prompt    <- "Claude is waiting for your input"
+ *  107.42  SubagentStop   a1e4...      <- eighty seconds after the green tick
+ *  109.18  SubagentStop   a0f2...
+ *
+ * So the CLI is telling the truth about the MAIN agent and this build was
+ * reading it as the truth about the terminal. `Stop` means the person's own
+ * agent has finished speaking; it does not mean the work it started is over.
+ *
+ * The rule is one line and it is the same line for every event that settles:
+ * idle is "nobody is running", not "the main agent stopped". Who is running is
+ * counted outside this machine (`runningAfter`) and handed in.
+ */
+describe('a turn that ends while the agents it started are still running', () => {
+  const A_SUBAGENT = 'a0f2051a530b4c7a2';
+  const ANOTHER = 'a1e499b3f0c990cc8';
+
+  it('goes on working when the main agent stops and a subagent does not', () => {
+    expect(machine.apply('working', EVENT_CASES.Stop, [A_SUBAGENT])).toStrictEqual<StateTransition>({
+      kind: 'stayed',
+      state: 'working',
+    });
+  });
+
+  it('is idle when the main agent stops and nothing else is running', () => {
+    expect(machine.apply('working', EVENT_CASES.Stop, [])).toStrictEqual<StateTransition>({
+      kind: 'moved',
+      from: 'working',
+      to: 'idle',
+      signal: 'idle',
+    });
+  });
+
+  it.each(['Notification:idle_prompt', 'Notification:agent_completed'] as const)(
+    'reads %s as work as well, while an agent is running',
+    (column) => {
+      // Measured at 85.71 s in the run above: the CLI says "Claude is waiting
+      // for your input" a full twenty seconds before the subagents finish. It
+      // is right about itself and wrong about the terminal.
+      expect(machine.apply('working', EVENT_CASES[column], [A_SUBAGENT, ANOTHER])).toStrictEqual<StateTransition>({
+        kind: 'stayed',
+        state: 'working',
+      });
+    }
+  );
+
+  it('calls the terminal working the moment a subagent starts', () => {
+    expect(machine.apply('idle', EVENT_CASES.SubagentStart, [A_SUBAGENT])).toStrictEqual<StateTransition>({
+      kind: 'moved',
+      from: 'idle',
+      to: 'working',
+      signal: 'working',
+    });
+  });
+
+  it('settles when the last subagent stops and nobody is left', () => {
+    // The way out of the working state above. The main agent had stopped long
+    // before, so nothing else is ever going to say the turn is over.
+    expect(machine.apply('working', EVENT_CASES.SubagentStop, [])).toStrictEqual<StateTransition>({
+      kind: 'moved',
+      from: 'working',
+      to: 'idle',
+      signal: 'idle',
+    });
+  });
+
+  it('goes on working when one subagent of two stops', () => {
+    expect(machine.apply('working', EVENT_CASES.SubagentStop, [ANOTHER])).toStrictEqual<StateTransition>({
+      kind: 'stayed',
+      state: 'working',
+    });
+  });
+
+  it('leaves a terminal that is waiting for the person alone', () => {
+    // `waiting_permission` outranks a subagent: the question on the screen is
+    // the one the person has to answer, whoever else is running.
+    expect(machine.apply('idle', EVENT_CASES.PermissionRequest, [A_SUBAGENT])).toStrictEqual<StateTransition>({
+      kind: 'moved',
+      from: 'idle',
+      to: 'waiting_permission',
+      signal: 'waiting_permission',
+    });
+  });
+
+  it('says nothing new about a terminal that is already over', () => {
+    // A subagent hook arriving after the conversation ended is late, exactly as
+    // every other hook is.
+    for (const event of [EVENT_CASES.SubagentStart, EVENT_CASES.SubagentStop]) {
+      expect(machine.apply('ended', event, [A_SUBAGENT]).kind).toBe('ignored');
+    }
   });
 });
 

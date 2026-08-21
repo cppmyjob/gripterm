@@ -89,6 +89,15 @@ export interface ObservedDocument {
   readonly cost: { readonly totalUsd: number, readonly durationMs: number } | null;
   readonly contextWindow: { readonly usedPercentage: number } | null;
   readonly pid: number | null;
+  /**
+   * Who was working in the conversation when this was written: the main agent
+   * and the subagents it had started (2026-08-21).
+   *
+   * Absent in every file written before that date, and absent is empty --
+   * which is exactly what this build believed before it: that a `Stop` settles
+   * the record whatever else is running.
+   */
+  readonly running: readonly string[];
 }
 
 /**
@@ -160,6 +169,7 @@ export function encodeObserved(state: ObservedState): ObservedDocument {
     contextWindow:
       state.contextWindow === null ? null : { usedPercentage: state.contextWindow.usedPercentage },
     pid: state.pid,
+    running: state.running,
   };
 }
 
@@ -293,7 +303,22 @@ function decodeObserved(raw: unknown): ObservedState {
             requireNumber(context.usedPercentage, 'observed.contextWindow.usedPercentage')
           ),
     pid: nullableNumber(document.pid, 'observed.pid'),
+    running: names(document.running),
   });
+}
+
+/**
+ * The names of what was running, read leniently on purpose.
+ *
+ * Every other field here throws on rubbish, and this one does not: it is the
+ * cheapest thing in the file -- rebuilt by the next hook that arrives -- and
+ * refusing the whole `observed.json` over it would throw away the state, the
+ * last message and the cost, all of which cost something to lose. Anything that
+ * is not a list of strings reads as "nobody", which is this build's own
+ * behaviour before the field existed.
+ */
+function names(raw: unknown): readonly string[] {
+  return Array.isArray(raw) ? raw.filter((one): one is string => typeof one === 'string') : [];
 }
 
 /**
