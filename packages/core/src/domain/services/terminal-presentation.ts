@@ -19,6 +19,11 @@ export interface TerminalPresentation {
   readonly tooltipLines: readonly string[];
   readonly iconId: string;
   /**
+   * One or two characters for the editor's tab, where an icon cannot go. See
+   * `StateAppearance.badge`.
+   */
+  readonly badge: string;
+  /**
    * The STATE's colour, for the icon. A theme colour id, or `null` to leave the
    * host's default.
    */
@@ -117,6 +122,17 @@ export const CONTEXT_ADOPTABLE = 'gripterm.terminal.adoptable';
 
 interface StateAppearance {
   readonly iconId: string;
+  /**
+   * One or two characters for the editor's TAB, where an icon cannot go.
+   *
+   * The customer's third complaint (2026-08-21): the state is in the tree and
+   * not on the tab. The editor offers no way to change a terminal's icon after
+   * it is made and renames only the ACTIVE terminal, so the one thing that
+   * reaches a tab is a file decoration -- a badge of at most two characters and
+   * a colour. Three characters are silently cut off, and a badge that is cut
+   * off is a state a person cannot read.
+   */
+  readonly badge: string;
   readonly colorId: string | null;
   /** What the state is called in front of a person. */
   readonly words: string;
@@ -141,34 +157,38 @@ interface StateAppearance {
  *     that do not.
  */
 const APPEARANCE: Readonly<Record<TerminalState, StateAppearance>> = {
-  launching: { iconId: 'loading~spin', colorId: 'charts.blue', words: 'starting', live: true },
-  idle: { iconId: 'check', colorId: 'charts.green', words: 'idle', live: true },
-  working: { iconId: 'sync~spin', colorId: 'charts.blue', words: 'working', live: true },
+  launching: { iconId: 'loading~spin', badge: '↻', colorId: 'charts.blue', words: 'starting', live: true },
+  idle: { iconId: 'check', badge: '✓', colorId: 'charts.green', words: 'idle', live: true },
+  working: { iconId: 'sync~spin', badge: '●', colorId: 'charts.blue', words: 'working', live: true },
   waiting_permission: {
     iconId: 'shield',
+    badge: '!',
     colorId: 'charts.yellow',
     words: 'waiting for permission',
     live: true,
   },
   waiting_input: {
     iconId: 'comment-discussion',
+    badge: '?',
     colorId: 'charts.yellow',
     words: 'waiting for input',
     live: true,
   },
-  turn_failed: { iconId: 'warning', colorId: 'charts.orange', words: 'turn failed', live: true },
-  degraded: { iconId: 'question', colorId: 'charts.orange', words: 'state unknown', live: true },
+  turn_failed: { iconId: 'warning', badge: '⨯', colorId: 'charts.orange', words: 'turn failed', live: true },
+  degraded: { iconId: 'question', badge: '~', colorId: 'charts.orange', words: 'state unknown', live: true },
   orphaned: {
     iconId: 'debug-disconnect',
+    badge: '⊘',
     colorId: 'charts.orange',
     words: 'no process',
     live: false,
   },
-  ended: { iconId: 'circle-slash', colorId: 'disabledForeground', words: 'ended', live: false },
-  resume_failed: { iconId: 'error', colorId: 'charts.red', words: 'restore failed', live: false },
-  detached: { iconId: 'plug', colorId: 'disabledForeground', words: 'detached', live: false },
+  ended: { iconId: 'circle-slash', badge: '–', colorId: 'disabledForeground', words: 'ended', live: false },
+  resume_failed: { iconId: 'error', badge: '⚠', colorId: 'charts.red', words: 'restore failed', live: false },
+  detached: { iconId: 'plug', badge: '≠', colorId: 'disabledForeground', words: 'detached', live: false },
   unreachable: {
     iconId: 'eye-closed',
+    badge: '∅',
     colorId: 'disabledForeground',
     words: 'window not answering',
     live: false,
@@ -225,6 +245,7 @@ export function presentTerminal(
     description: description(entry, appearance, !ours && liveness === 'live'),
     tooltipLines: tooltipLines(entry, appearance, ours),
     iconId: appearance.iconId,
+    badge: appearance.badge,
     colorId: appearance.colorId,
     labelColorId: entry.metadata.color,
     contextValue,

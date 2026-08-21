@@ -132,10 +132,24 @@ export class VsCodeTerminalGateway implements TerminalGateway, Disposable {
   private readonly _strip: VsCodeEditorStrip;
   private readonly _quiet: VsCodeQuietShell;
   private readonly _logger: Logger;
+  /**
+   * Whoever draws the tabs, or nobody.
+   *
+   * The gateway is the only thing that knows a terminal is OURS at the moment
+   * it is made -- there is no event that says so -- and the tab decoration
+   * (M3, customer's third complaint) has to be told before the workbench draws
+   * the tab, because that is what pairs the tab's uri with the record.
+   */
+  private readonly _opened: ((terminalId: TerminalId, terminal: vscode.Terminal) => void) | null;
 
-  constructor(location: LaunchLocation, logger: Logger) {
+  constructor(
+    location: LaunchLocation,
+    logger: Logger,
+    opened: ((terminalId: TerminalId, terminal: vscode.Terminal) => void) | null = null
+  ) {
     this._location = location;
     this._logger = logger;
+    this._opened = opened;
     this._strip = new VsCodeEditorStrip(logger);
     this._quiet = new VsCodeQuietShell(logger);
     this._closeSubscription = vscode.window.onDidCloseTerminal((terminal) => {
@@ -174,6 +188,7 @@ export class VsCodeTerminalGateway implements TerminalGateway, Disposable {
 
     const handle = new VsCodeTerminalHandle(spec.terminalId, terminal, this._quiet);
     this._handles.set(spec.terminalId.value, handle);
+    this._opened?.(spec.terminalId, terminal);
     return handle;
   }
 

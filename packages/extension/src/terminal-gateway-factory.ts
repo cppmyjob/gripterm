@@ -11,6 +11,7 @@ import type {
   TerminalAudience,
   TerminalEngine,
   TerminalGateway,
+  TerminalId,
 } from '@gripterm/core';
 
 /**
@@ -69,6 +70,15 @@ export interface TerminalGatewayParams {
    * test talking to a person.
    */
   readonly announce?: (message: string) => void;
+  /**
+   * Told when a terminal of ours has been made by the EDITOR's engine, so that
+   * whoever draws its tab can pair the two (customer's third complaint,
+   * 2026-08-21).
+   *
+   * Optional and editor-only: a terminal of our own has no editor tab at all,
+   * and the contract suite builds gateways with nobody watching.
+   */
+  readonly tabOpened?: (terminalId: TerminalId, terminal: unknown) => void;
 }
 
 /**
@@ -102,7 +112,7 @@ export function terminalGatewayFor(params: TerminalGatewayParams): TerminalGatew
   }
 
   if (choice.engine === 'editor') {
-    return new VsCodeTerminalGateway(params.location, params.logger);
+    return new VsCodeTerminalGateway(params.location, params.logger, params.tabOpened ?? null);
   }
 
   const pty = loadNodePty(params.extensionPath, params.logger);
@@ -152,7 +162,7 @@ function fallenBackTo(params: TerminalGatewayParams, refusal: string): TerminalG
   // is no third: `chooseEngine` refuses exactly one pair of settings, and the
   // addon either loads or it does not.
   return remindOnFirstTerminal(
-    new VsCodeTerminalGateway(params.location, params.logger),
+    new VsCodeTerminalGateway(params.location, params.logger, params.tabOpened ?? null),
     (message) => { params.announce?.(message); },
     refusal
   );

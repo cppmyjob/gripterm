@@ -221,6 +221,51 @@ describe('presentTerminal marks what a menu may offer', () => {
  * offers none: `packages/extension` is outside the coverage thresholds (3.5),
  * so a comparison written there is a decision nothing checks.
  */
+/*
+ * The customer's third complaint, 2026-08-21: "Иконка статуса не отображается в
+ * табе терминала, но отображается в treeview."
+ *
+ * The editor gives no way to change a terminal's icon after it is made, and its
+ * name can only be changed while it is the ACTIVE terminal -- which is the one
+ * terminal a person is already looking at. What it does offer, measured the
+ * same day, is a file decoration on the tab: a badge of at most two characters
+ * and a colour, both drawn by default.
+ *
+ * So the badge is a second spelling of the same table, and it lives here for
+ * the reason the icons do: `packages/extension` is outside the coverage
+ * thresholds, and a glyph chosen there is a decision nothing checks.
+ */
+describe('presentTerminal gives every state a badge for the tab', () => {
+  it.each(EVERY_STATE)('gives %s one that fits a tab', (state) => {
+    // One or two, and two is what the platform draws: a third character is
+    // silently cut off, and a badge that is cut off is a state a person cannot
+    // read. Counted with a segmenter, so an emoji made of several code points
+    // cannot pass as one character.
+    const badge = [...new Intl.Segmenter().segment(presentTerminal(inState(state)).badge)];
+
+    expect(badge.length).toBeGreaterThanOrEqual(1);
+    expect(badge.length).toBeLessThanOrEqual(2);
+  });
+
+  it('gives no two states the same badge', () => {
+    // The whole value of the thing: a badge shared by `working` and `idle`
+    // would put a tab in the one state П1 exists to tell apart.
+    const badges = EVERY_STATE.map((state) => presentTerminal(inState(state)).badge);
+
+    expect(new Set(badges).size).toBe(EVERY_STATE.length);
+  });
+
+  it('gives the two overlays badges of their own as well', () => {
+    const overlays = [
+      presentTerminal(inState('working'), { liveness: 'dead' }),
+      presentTerminal(inState('working'), { liveness: 'unknown' }),
+    ];
+
+    expect(overlays.map((shown) => shown.badge)).not.toContain('');
+    expect(overlays[0]?.badge).not.toBe(overlays[1]?.badge);
+  });
+});
+
 describe('presentTerminal says which rows open their terminal on a click', () => {
   it.each(['launching', 'idle', 'working', 'waiting_permission', 'waiting_input', 'turn_failed', 'degraded'] as const)(
     'opens %s, which is a terminal this window has',

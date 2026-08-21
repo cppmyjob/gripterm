@@ -93,6 +93,7 @@ import { registerResumeTerminal } from './commands/resume-terminal';
 import { registerStartOver } from './commands/start-over';
 import { registerFocusTerminal } from './commands/focus-terminal';
 import { registerMaximizeTerminals } from './commands/maximize-terminals';
+import { TerminalTabDecorations } from './ui/terminal-tab-decorations';
 import { registerMetadataCommands } from './commands/edit-metadata';
 import { registerNewTerminal } from './commands/new-terminal';
 import {
@@ -253,6 +254,14 @@ export interface GriptermApi {
    */
   readonly endOwnProcesses: () => WindowShutdownReport;
   readonly lifecycle: TerminalLifecycleService;
+  /**
+   * What is drawn on the tab of a terminal (customer's third complaint).
+   *
+   * Exposed for the live suite: which uri the workbench drew a tab from is
+   * something only this object learns, and a test that guessed the uri would be
+   * checking its own guess rather than the pairing.
+   */
+  readonly tabs: TerminalTabDecorations;
   /**
    * The five things a person changes about their own record.
    *
@@ -504,6 +513,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   const strip = new TerminalStrip({ view: workbench, stage, registry, logger });
   context.subscriptions.push(strip);
 
+  /*
+   * The state of an agent on the tab of its terminal (customer's third
+   * complaint, 2026-08-21).
+   *
+   * Made before the gateway because the gateway is what feeds it: only the
+   * thing that CREATES a terminal knows the tab about to appear is ours, and
+   * the pairing has to be in place before the workbench draws it.
+   */
+  const tabs = new TerminalTabDecorations({ registry, logger });
+  context.subscriptions.push(tabs);
+
   const location = readLaunchLocation(logger);
   // Read here rather than where it used to be read, further down: the engine is
   // chosen from BOTH settings, because a terminal of our own has no shell to type
@@ -522,6 +542,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     // that is not one. The window says it once, here, and never again for an
     // engine that was honoured.
     announce: (message) => { announcer.say('warning', message); },
+    tabOpened: (terminalId, terminal) => { tabs.expect(terminalId, terminal as vscode.Terminal); },
   });
   // Still a subscription as well, and deliberately: `deactivate` covers the
   // ordinary way out, this covers the extension being disabled under a window
@@ -971,6 +992,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     registry,
     gateway,
     makeGateway: terminalGatewayFor,
+    tabs,
     endOwnProcesses,
     lifecycle,
     metadata,
