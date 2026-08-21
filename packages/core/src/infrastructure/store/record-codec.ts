@@ -65,6 +65,16 @@ export interface RecordDocument {
    * kills nothing -- and every record ever written stays readable.
    */
   readonly engine?: string;
+  /**
+   * Where the person put this terminal among the others, or absent.
+   *
+   * Optional and NOT a schema bump, for the same reason `engine` above is: prior
+   * builds refuse a whole base over the directory version, and the migrator does
+   * not rewrite records. Absence is given a meaning instead -- "nobody arranged
+   * this one" -- and `TerminalEntry.placement` reads it as the moment the
+   * terminal was made, which is the order the tabs appeared in.
+   */
+  readonly order?: number | null;
   readonly createdAt: number;
   readonly closedAt: number | null;
   readonly revision: number;
@@ -130,6 +140,7 @@ export function encodeRecord(entry: TerminalEntry): RecordDocument {
       extraEnv: { ...entry.launch.extraEnv },
     },
     engine: entry.engine,
+    order: entry.order,
     createdAt: entry.createdAt.getTime(),
     closedAt: entry.closedAt === null ? null : entry.closedAt.getTime(),
     revision: entry.revision,
@@ -188,6 +199,13 @@ export function decodeEntry(record: unknown, observed: unknown): EntryDecode {
       launch: decodeLaunch(document.launch),
       observed: recovery.state,
       engine: decodeEngine(document.engine),
+      // Refused rather than ignored when it is there and unreadable: an
+      // arrangement this build cannot understand is a strip drawn in an order
+      // the person did not choose, and silently drawing it differently is the
+      // defect this field exists to end.
+      order: document.order === undefined || document.order === null
+        ? null
+        : requireNumber(document.order, 'order'),
       createdAt,
       closedAt: nullableNumberToDate(document.closedAt, 'closedAt'),
       revision: requireNumber(document.revision, 'revision'),

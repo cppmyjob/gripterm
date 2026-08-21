@@ -22,6 +22,8 @@ interface TerminalEntryState {
   readonly createdAtMs: number;
   readonly closedAtMs: number | null;
   readonly revision: number;
+  /** Where the person put this terminal among the others, or `null`. See `placement`. */
+  readonly order: number | null;
 }
 
 export interface CreateTerminalEntryParams {
@@ -46,6 +48,14 @@ export interface CreateTerminalEntryParams {
    * that is not cleaned up; reading it the other way costs a conversation.
    */
   readonly engine?: TerminalEngine;
+  /**
+   * Where the person put this terminal among the others, if they ever did.
+   *
+   * Optional for the reason `engine` is: every record written before this field
+   * existed has no arrangement, and the honest reading of that silence is "where
+   * it was made" (`placement`).
+   */
+  readonly order?: number | null;
 }
 
 /**
@@ -119,6 +129,31 @@ export class TerminalEntry {
   }
 
   /**
+   * Where the person put this terminal among the others, or `null` if they never
+   * did.
+   *
+   * `null` and not a number, so that "never arranged" stays a fact rather than
+   * being written down as an arrangement that happens to equal the default.
+   */
+  public get order(): number | null {
+    return this._state.order;
+  }
+
+  /**
+   * The number the tabs and the rows are sorted by: the arrangement if there is
+   * one, and otherwise the moment this terminal was made.
+   *
+   * ONE number space for both kinds of record, which is what keeps a drag
+   * between an arranged tab and an unarranged one an ordinary comparison. It is
+   * also why the default is the creation moment rather than zero: zero would put
+   * every old record in front of every new one, and the moment is exactly the
+   * order the person watched the tabs appear in.
+   */
+  public get placement(): number {
+    return this._state.order ?? this._state.createdAtMs;
+  }
+
+  /**
    * Set ONLY by an explicit human action: closing the terminal from our list, or
    * closing it in the editor itself -- which the platform names `user` and
    * nothing else (A29).
@@ -178,6 +213,7 @@ export class TerminalEntry {
       createdAtMs: params.createdAt.getTime(),
       closedAtMs: closedAt === null ? null : closedAt.getTime(),
       revision,
+      order: params.order ?? null,
     });
   }
 
@@ -203,6 +239,20 @@ export class TerminalEntry {
 
   public withMetadata(next: HumanMetadata): TerminalEntry {
     return this._withState({ metadata: next });
+  }
+
+  /**
+   * Puts this terminal at a place among the others (owner's decision
+   * 2026-08-21).
+   *
+   * Deliberately does NOT touch `revision`, like `withMetadata`: this is the
+   * owning window writing down something its own person did to its own record,
+   * not a transfer another window has to lose a compare-and-swap over. Returns
+   * `this` when the number has not moved, which keeps the identity comparison
+   * the UI redraws on.
+   */
+  public withOrder(next: number): TerminalEntry {
+    return this._state.order === next ? this : this._withState({ order: next });
   }
 
   /**

@@ -1,3 +1,4 @@
+import { arranged } from './terminal-order';
 import { belongsHere, normalizeFolder } from './folder-path';
 import type { TerminalEntry } from '../entities/terminal-entry';
 
@@ -81,7 +82,11 @@ export function groupTerminals(
     folder: bucket.folder,
     ...naming(bucket.folder),
     mine: belongsHere(bucket.folder, windowFolders),
-    entries: bucket.entries,
+    // In the arrangement the person gave them, exactly as the panel's tabs are
+    // (owner's decision 2026-08-21). The alternative is the order the records
+    // arrived in, which is the order the filesystem lists uuid-named
+    // directories -- no order at all, and two windows were free to disagree.
+    entries: [...arranged(bucket.entries)],
   }));
 }
 

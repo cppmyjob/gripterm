@@ -182,3 +182,42 @@ describe('groupTerminals names a group the way a person reads a path', () => {
     expect(new Set(groups.map((group) => group.key)).size).toBe(2);
   });
 });
+
+/**
+ * The order the rows stand in inside a group (owner's decision 2026-08-21).
+ *
+ * The same arrangement the tabs of the panel are drawn in, and for the same
+ * reason: it lives on the record, so the two views cannot come to different
+ * conclusions about where a terminal belongs, and a restart cannot change
+ * either. Before this, both drew rows in the order the store happened to hand
+ * the records over -- which is the order the filesystem lists uuid-named
+ * directories.
+ */
+describe('the order of the rows inside a group', () => {
+  it('follows the arrangement on the records, not the order they arrived', () => {
+    const first = rowIn(OPEN_HERE, 1).withOrder(3000);
+    const second = rowIn(OPEN_HERE, 2).withOrder(1000);
+
+    const groups = groupTerminals([first, second], [OPEN_HERE]);
+
+    expect(groups[0]?.entries.map((entry) => entry.terminalId.value)).toStrictEqual([
+      second.terminalId.value,
+      first.terminalId.value,
+    ]);
+  });
+
+  it('reads a record nobody arranged as one made when it was made', () => {
+    const older = rowIn(OPEN_HERE, 1);
+    const newer = rowIn(OPEN_HERE, 2);
+
+    // Same fixture moment for both, so the last resort decides -- and the point
+    // of the assertion is that it decides the SAME WAY whichever order they
+    // arrive in. Two windows reading one store must draw one list.
+    const one = groupTerminals([older, newer], [OPEN_HERE]);
+    const other = groupTerminals([newer, older], [OPEN_HERE]);
+
+    expect(one[0]?.entries.map((entry) => entry.terminalId.value)).toStrictEqual(
+      other[0]?.entries.map((entry) => entry.terminalId.value)
+    );
+  });
+});

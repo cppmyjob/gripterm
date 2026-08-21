@@ -43,15 +43,31 @@ function tabFor(tabs: readonly StripTab[], terminalId: string): StripTab {
 }
 
 describe('the strip is drawn from what the panel holds', () => {
-  it('keeps the order the panel took them in, whatever order the records arrive in', () => {
+  it('draws a tab for every held terminal, whatever order the records arrive in', () => {
+    /*
+     * The order this used to assert -- "the order the panel took them in" -- is
+     * no longer the promise (owner's decision 2026-08-21, see the last describe
+     * of this file). What survives from it, and is the reason the test stays, is
+     * the other half: the order the RECORDS arrive in decides nothing, and a
+     * held terminal with no record among them still gets a tab.
+     */
     const tabs = stripTabs({
       held: [TERMINAL_UUID, OTHER_UUID, THIRD_UUID],
       running: [TERMINAL_UUID, OTHER_UUID, THIRD_UUID],
       active: TERMINAL_UUID,
       entries: [inState(THIRD_UUID, 'idle'), inState(TERMINAL_UUID, 'idle')],
     });
+    const backwards = stripTabs({
+      held: [TERMINAL_UUID, OTHER_UUID, THIRD_UUID],
+      running: [TERMINAL_UUID, OTHER_UUID, THIRD_UUID],
+      active: TERMINAL_UUID,
+      entries: [inState(TERMINAL_UUID, 'idle'), inState(THIRD_UUID, 'idle')],
+    });
 
-    expect(tabs.map((tab) => tab.terminalId)).toEqual([TERMINAL_UUID, OTHER_UUID, THIRD_UUID]);
+    expect(tabs.map((tab) => tab.terminalId).sort()).toEqual(
+      [TERMINAL_UUID, OTHER_UUID, THIRD_UUID].sort()
+    );
+    expect(backwards.map((tab) => tab.terminalId)).toEqual(tabs.map((tab) => tab.terminalId));
   });
 
   it('marks exactly one tab as the one on screen', () => {
@@ -201,5 +217,74 @@ describe('a terminal the panel holds and no record describes', () => {
 describe('a panel holding nothing', () => {
   it('draws no strip at all', () => {
     expect(stripTabs({ held: [], running: [], active: null, entries: [] })).toEqual([]);
+  });
+});
+
+/**
+ * The order the tabs stand in (owner's decision 2026-08-21).
+ *
+ * The strip used to draw them in the order the PANEL took them, which after a
+ * restart is the order the store handed the records over -- and that is the
+ * order the filesystem lists uuid-named directories in, which is no order at
+ * all. The owner watched terminal 2 come back in front of terminal 1 and could
+ * not drag it back, because the tabs did not drag.
+ *
+ * The arrangement now decides, and it lives on the record (`placement`), so the
+ * strip and the tree draw the same one and a restart cannot change it.
+ */
+describe('the order the tabs stand in', () => {
+  const placed = (terminalId: string, madeAtMs: number, order: number | null): TerminalEntry => {
+    const entry = makeEntry({
+      terminalId: TerminalId.fromString(terminalId),
+      createdAt: new Date(madeAtMs),
+    });
+    return order === null ? entry : entry.withOrder(order);
+  };
+
+  it('follows the arrangement, not the order the panel took them in', () => {
+    const first = placed(TERMINAL_UUID, 1000, 3000);
+    const second = placed(OTHER_UUID, 2000, 1000);
+
+    const tabs = stripTabs({
+      // The panel took them in this order and the person arranged them in the
+      // other one. The person wins.
+      held: [TERMINAL_UUID, OTHER_UUID],
+      running: [TERMINAL_UUID, OTHER_UUID],
+      active: null,
+      entries: [first, second],
+    });
+
+    expect(tabs.map((tab) => tab.terminalId)).toStrictEqual([OTHER_UUID, TERMINAL_UUID]);
+  });
+
+  it('falls back to when each terminal was made, which is the order they appeared', () => {
+    const older = placed(TERMINAL_UUID, 1000, null);
+    const newer = placed(OTHER_UUID, 2000, null);
+
+    const tabs = stripTabs({
+      held: [OTHER_UUID, TERMINAL_UUID],
+      running: [OTHER_UUID, TERMINAL_UUID],
+      active: null,
+      entries: [newer, older],
+    });
+
+    expect(tabs.map((tab) => tab.terminalId)).toStrictEqual([TERMINAL_UUID, OTHER_UUID]);
+  });
+
+  it('keeps a held terminal no record describes, and puts it last', () => {
+    // It is a defect somewhere else if this happens, and the tab still has to be
+    // there -- a screen on the stack with no tab is a terminal a person cannot
+    // reach. Last, because there is nothing to sort it by, and guessing a place
+    // for it would move the tabs that do have one.
+    const known = placed(TERMINAL_UUID, 5000, null);
+
+    const tabs = stripTabs({
+      held: [THIRD_UUID, TERMINAL_UUID],
+      running: [THIRD_UUID, TERMINAL_UUID],
+      active: null,
+      entries: [known],
+    });
+
+    expect(tabs.map((tab) => tab.terminalId)).toStrictEqual([TERMINAL_UUID, THIRD_UUID]);
   });
 });

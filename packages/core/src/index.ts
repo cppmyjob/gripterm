@@ -539,6 +539,11 @@ export {
 } from './domain/services/owner-identity';
 
 export { chooseTerminal, showingFirst, terminalTargetOf } from './domain/services/terminal-target';
+export {
+  arranged,
+  reorderTerminals,
+  type ReorderRequest,
+} from './domain/services/terminal-order';
 export type { SoleTerminal, TerminalChoice, TerminalTarget } from './domain/services/terminal-target';
 
 export {

@@ -401,3 +401,49 @@ describe('the engine that made the terminal', () => {
     expect(loaded({ ...good, engine: 7 }).kind).toBe('broken');
   });
 });
+
+/**
+ * Where the person put this terminal among the others (owner's decision
+ * 2026-08-21).
+ *
+ * On the record rather than in a window's own storage, because that is what
+ * makes the arrangement survive a restart and travel with the record to
+ * whichever window adopts it. The field is OPTIONAL in the same way `engine` is:
+ * every record written before today has no arrangement, and the honest reading
+ * of that silence is the moment the terminal was made (`placement`).
+ */
+describe('the place a person gave the terminal', () => {
+  const good = JSON.parse(JSON.stringify(encodeRecord(makeEntry()))) as Record<string, unknown>;
+
+  it('writes the arrangement into the document', () => {
+    expect(encodeRecord(makeEntry().withOrder(1234)).order).toBe(1234);
+  });
+
+  it('survives a round trip', () => {
+    const decode = loaded(JSON.parse(JSON.stringify(encodeRecord(makeEntry().withOrder(1234)))));
+
+    expect(decode.kind).toBe('ok');
+    expect(decode.kind === 'ok' ? decode.entry.order : 'not read').toBe(1234);
+  });
+
+  it('reads a record written before the field existed as one nobody arranged', () => {
+    const older = Object.fromEntries(Object.entries(good).filter(([key]) => key !== 'order'));
+
+    const decode = loaded(older);
+
+    expect(decode.kind).toBe('ok');
+    expect(decode.kind === 'ok' ? decode.entry.order : 'not read').toBeNull();
+    // And it still has a place: the moment it was made, which is the order the
+    // person watched the tabs appear in.
+    expect(decode.kind === 'ok' ? decode.entry.placement : null).toBe(
+      decode.kind === 'ok' ? decode.entry.createdAt.getTime() : null
+    );
+  });
+
+  it.each([{ order: 'first' }, { order: true }, { order: Number.NaN }, { order: [] }])(
+    'refuses %p, because an arrangement that is not a number is a record we would draw wrongly',
+    (broken) => {
+      expect(loaded({ ...good, ...broken }).kind).toBe('broken');
+    }
+  );
+});

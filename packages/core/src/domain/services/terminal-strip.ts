@@ -1,3 +1,4 @@
+import { arranged } from './terminal-order';
 import { presentTerminal } from './terminal-presentation';
 import type { TerminalEntry } from '../entities/terminal-entry';
 import type { TerminalState } from '../entities/terminal-state';
@@ -51,7 +52,16 @@ export interface StripTab {
 export const ATTENTION_STATES: readonly TerminalState[] = ['waiting_permission', 'waiting_input'];
 
 export interface StripInput {
-  /** Every terminal the panel is holding, in the order it took them. */
+  /**
+   * Every terminal the panel is holding, in whatever order it took them.
+   *
+   * The order it took them in is NOT the order they are drawn in, and that is
+   * the owner's decision of 2026-08-21: after a restart "the order it took
+   * them" is the order the store handed the records over, which is the order
+   * the filesystem lists uuid-named directories. What decides is the
+   * arrangement on the record (`placement`), so the strip and the tree agree
+   * and a restart cannot change either.
+   */
   readonly held: readonly string[];
   /** Those of them that still have a process. The rest have ended and are kept to be read. */
   readonly running: readonly string[];
@@ -80,7 +90,13 @@ const OVER_ICON = 'circle-slash';
  */
 export function stripTabs(input: StripInput): readonly StripTab[] {
   const known = new Map(input.entries.map((entry) => [entry.terminalId.value, entry]));
-  return input.held.map((terminalId) => {
+  // Held terminals with a record, in the arrangement; then the ones no record
+  // describes, in the order the panel has them. Guessing a place for those would
+  // move tabs that do have one.
+  const placed = arranged(input.entries.filter((entry) => input.held.includes(entry.terminalId.value)))
+    .map((entry) => entry.terminalId.value);
+  const strangers = input.held.filter((terminalId) => !known.has(terminalId));
+  return [...placed, ...strangers].map((terminalId) => {
     const active = terminalId === input.active;
     const over = !input.running.includes(terminalId);
     const entry = known.get(terminalId);
