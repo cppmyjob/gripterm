@@ -41,6 +41,24 @@ function groupAt(column: vscode.ViewColumn): vscode.TabGroup | undefined {
   return vscode.window.tabGroups.all.find((group) => group.viewColumn === column);
 }
 
+/** A tab this build made: a terminal, named the way this suite names them. */
+function isOurTerminal(tab: vscode.Tab): boolean {
+  return tab.input instanceof vscode.TabInputTerminal && tab.label.startsWith('gripterm-m224-');
+}
+
+/**
+ * Every group and what is in it, for an assertion message.
+ *
+ * Written because the failure this replaces said `3 !== 2` and left the reader
+ * to guess which third group -- and a live run is exactly where guessing is
+ * most expensive.
+ */
+function describeGroups(): string {
+  return vscode.window.tabGroups.all
+    .map((group) => `[${String(group.viewColumn)}] ${group.tabs.map((tab) => tab.label).join(', ')}`)
+    .join(' | ');
+}
+
 /**
  * How much of its parent the group at `index` takes, walking the editor's own
  * answer. Deliberately NOT `withGroupShare` read backwards: a test that checks
@@ -196,10 +214,36 @@ suite('the strip of our own', () => {
           columnOf('gripterm-m224-one'),
           'our two terminals are in different groups'
         );
-        assert.equal(
-          vscode.window.tabGroups.all.length,
-          2,
-          'there is more than one group beside the editors'
+        /*
+         * "AND NOTHING ELSE", asked of OUR group rather than of the window.
+         *
+         * This was `tabGroups.all.length === 2` until 2026-08-21, when it failed
+         * a live run with `3 !== 2` and nothing to say about what the third
+         * group was. It was the editor's own doing: the document opened a few
+         * lines above must land outside a LOCKED active group, and where the
+         * editor puts it -- back among the editors, or in a new group beside
+         * them -- is the editor's routing decision and not a promise of ours.
+         * The count made every other suite's leftovers part of this assertion
+         * too.
+         *
+         * What the title claims is asserted instead, and it is the stronger
+         * claim: our group holds our two terminals and nothing besides. A second
+         * strip is caught by the assertion above -- both terminals in one column
+         * -- and by the one below, which is about every OTHER group.
+         */
+        const stripNow = groupAt(strip);
+        assert.ok(stripNow, 'our group is gone');
+        assert.deepEqual(
+          stripNow.tabs.map((tab) => tab.label).sort(),
+          ['gripterm-m224-one', 'gripterm-m224-two'],
+          `our group holds something else: ${describeGroups()}`
+        );
+        assert.deepEqual(
+          vscode.window.tabGroups.all
+            .filter((group) => group.viewColumn !== strip && group.tabs.some(isOurTerminal))
+            .map((group) => group.viewColumn),
+          [],
+          `a terminal of ours is outside our group: ${describeGroups()}`
         );
       } finally {
         two.dispose();
