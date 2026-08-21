@@ -42,6 +42,45 @@ async function until(ready: () => boolean, ms = SETTLES_MS): Promise<boolean> {
   return ready();
 }
 
+/**
+ * A size the page has STOOD STILL at, rather than the first one it answers.
+ *
+ * **Measured, 2026-08-21, and this helper exists for the measurement.** Polling
+ * the page every hundred milliseconds from the moment our view became visible
+ * gives, in one ordinary run:
+ *
+ * ```
+ * +2ms 25x13 | +112ms 75x13 | +221ms 75x13 | ... (unchanged for two seconds)
+ * ```
+ *
+ * The first answer is taken while the panel is still laying out -- a THIRD of
+ * the width it settles at -- and `workbench.visible` has been true for all of
+ * it. A test that measured on the first answer was therefore comparing a size
+ * mid-layout with a settled one, which is what dropped a run of the live label
+ * with "8 rows before, 13 after" while nothing about the panel had changed.
+ *
+ * Two agreeing answers in a row rather than a sleep: a sleep is a guess about
+ * somebody else's schedule, and this is the same thing said as a condition.
+ */
+async function settledSize(
+  workbench: GriptermApi['workbench'],
+  because: string
+): Promise<{ readonly cols: number, readonly rows: number }> {
+  const deadline = Date.now() + SETTLES_MS;
+  let last = await workbench.measure(because);
+  const seen = [`${String(last.cols)}x${String(last.rows)}`];
+  while (Date.now() < deadline) {
+    await pause(POLL_MS);
+    const next = await workbench.measure(because);
+    if (next.cols === last.cols && next.rows === last.rows) {
+      return { cols: next.cols, rows: next.rows };
+    }
+    seen.push(`${String(next.cols)}x${String(next.rows)}`);
+    last = next;
+  }
+  throw new Error(`the page never stood still at one size (${because}): ${seen.join(' -> ')}`);
+}
+
 /** Long enough for the editor to have done a thing it does not announce. */
 async function pause(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -98,7 +137,7 @@ suite('the panel our tab lives in', () => {
 
   test('keeps the height a person gave it when we open it ourselves', async () => {
     const workbench = await shownPanel();
-    const before = await workbench.measure('panel height, before the panel was closed');
+    const before = await settledSize(workbench, 'panel height, before the panel was closed');
 
     // The panel closed the ordinary way, and opened again the way a RESTORE
     // opens it -- which is the moment the owner's complaint is about (M3 plan
@@ -107,14 +146,15 @@ suite('the panel our tab lives in', () => {
     assert.equal(await until(() => !workbench.visible), true, 'the panel would not close');
     workbench.reveal(true);
     assert.equal(await until(() => workbench.visible), true, 'the panel would not open again');
-    const after = await workbench.measure('panel height, after we opened it ourselves');
+    const after = await settledSize(workbench, 'panel height, after we opened it ourselves');
 
     // Rows and not pixels: rows are what the agent's TUI is laid out in, and a
     // panel that came back two rows shorter is the complaint in its own units.
     assert.equal(
       after.rows,
       before.rows,
-      `our own reveal changed the height of the panel: ${String(before.rows)} rows before, ${String(after.rows)} after`
+      `our own reveal changed the height of the panel: ${String(before.cols)}x${String(before.rows)} before, ` +
+      `${String(after.cols)}x${String(after.rows)} after`
     );
   });
 });

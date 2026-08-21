@@ -406,14 +406,50 @@ suite('a terminal of ours, on our own screen', () => {
        * before M3.9 exactly as on this one (A48 -- a live agent and the owner's
        * eyes, M3.14).
        */
+      /*
+       * Every size the bridge let through while we waited, with the moment it
+       * went (2026-08-21).
+       *
+       * The wait above dropped a run roughly one time in six, and the message it
+       * dropped it with -- "waited 30000 ms" -- says nothing about WHICH of the
+       * two silences happened: a pseudoconsole that was sent one size and said
+       * nothing, or one that was sent two on top of each other and therefore
+       * said nothing (`TerminalBridge.resize`, measured 2026-08-18). Those are a
+       * platform question and a defect of ours respectively, and they were
+       * indistinguishable from here.
+       *
+       * Counted rather than timed to the millisecond on purpose: the poll below
+       * cannot see two sizes a millisecond apart as two events, but the COUNT is
+       * kept by the bridge and survives the gap.
+       */
+      const startedWaiting = Date.now();
+      const sizesSent: string[] = [];
+      let sizesCounted = bridge.resizeCount;
+      const noteSizes = (): void => {
+        if (bridge.resizeCount !== sizesCounted) {
+          sizesCounted = bridge.resizeCount;
+          sizesSent.push(
+            `+${String(Date.now() - startedWaiting)}ms #${String(sizesCounted)} ${JSON.stringify(bridge.lastSize)}`
+          );
+        }
+      };
       await until(
         'the pseudoconsole to acknowledge a resize at all',
-        () => bridge.tail.text.includes(`${String.fromCharCode(27)}[8;`),
+        () => {
+          noteSizes();
+          return bridge.tail.text.includes(`${String.fromCharCode(27)}[8;`);
+        },
         SETTLES_WITHIN_MS
       ).catch((cause: unknown) => {
         // With what the gateway said while it was trying: a resize that never
         // reached the pseudoconsole and one it refused look the same from here.
-        throw new Error(`${String(cause)} -- the gateway said: ${stand.said.join(' | ')}`);
+        noteSizes();
+        throw new Error(
+          `${String(cause)} -- the bridge sent ${String(bridge.resizeCount)} sizes ` +
+          `[${sizesSent.join(', ')}], the page settled at ` +
+          `${String(settled.cols)}x${String(settled.rows)}, the pty was spawned at 80x30 ` +
+          `-- the gateway said: ${stand.said.join(' | ')}`
+        );
       });
       // And the size the page settled at is the one the pty was last told.
       await until(
@@ -463,11 +499,71 @@ suite('a terminal of ours, on our own screen', () => {
       bridge.resize(narrower, settled.rows);
       bridge.resize(narrower, settled.rows);
 
+      // Waited for rather than read at once: since 2026-08-21 a size is held
+      // briefly so that a burst of them is one resize (`SIZES_SETTLE_MS`). The
+      // rule under test is unchanged -- one size, one resize -- and this is the
+      // same rule with the moment it happens made explicit.
+      await until(
+        'the size to reach the pty',
+        () => bridge.lastSize?.cols === narrower,
+        SETTLES_WITHIN_MS
+      );
+
       assert.equal(bridge.resizeCount - before, 1, 'the pty was told one size more than once');
       assert.deepEqual(
         { cols: bridge.lastSize?.cols, rows: bridge.lastSize?.rows },
         { cols: narrower, rows: settled.rows },
         'the bridge kept a size other than the one it sent'
+      );
+    } finally {
+      await stand.end();
+    }
+  });
+
+  test('two different sizes in one breath are one resize, at the last of them', async () => {
+    /*
+     * The other half of the rule above, and the half that was missing until a
+     * live run measured it (2026-08-21).
+     *
+     * The build deduplicated sizes BY VALUE, on the reasoning written above:
+     * a freshly attached screen answers twice and both answers are the same, so
+     * one of them collapses. Measured, they are not always the same. The panel
+     * is still laying out when the first answer is taken -- polling the page
+     * from the moment our view says it is visible gives `+2ms 25x13` and then
+     * `+112ms 75x13` -- so the two answers can be two different sizes, and then
+     * nothing collapses: both reach ConPTY together and it acknowledges
+     * NEITHER. The failure it produced said so in those words:
+     *
+     *   waited 30000 ms for the pseudoconsole to acknowledge a resize at all
+     *   -- the bridge sent 2 sizes [], the page settled at 46x12,
+     *      the pty was spawned at 80x30
+     *
+     * A terminal left at the size it was spawned with while the screen is
+     * another size is the defect the rule above exists to prevent; this test is
+     * that rule stated over time instead of over values.
+     */
+    const stand = await Stand.start('10');
+    try {
+      await attach(stand);
+      const bridge = await bridgeOf(stand.terminalId);
+      const settled = await api().then(async ({ workbench }) =>
+        await workbench.measure('the suite is reading the size', SETTLES_WITHIN_MS));
+      const before = bridge.resizeCount;
+
+      // Two sizes nobody could have looked at in between -- which is what a
+      // panel that is still laying out produces.
+      bridge.resize(settled.cols - 9, settled.rows);
+      bridge.resize(settled.cols - 4, settled.rows);
+
+      await until(
+        'the size to reach the pty',
+        () => bridge.lastSize?.cols === settled.cols - 4,
+        SETTLES_WITHIN_MS
+      );
+      assert.equal(
+        bridge.resizeCount - before,
+        1,
+        'the pty was sent both sizes, which is the pair ConPTY answers neither of'
       );
     } finally {
       await stand.end();

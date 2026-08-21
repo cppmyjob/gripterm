@@ -48,6 +48,30 @@ export interface TerminalBridgeOptions {
 /** Where a message goes when there is a page to take it. */
 export type Sink = (message: HostMessage) => void;
 
+/**
+ * How long a size is held before the pty is told, so that a burst is one size.
+ *
+ * Measured rather than chosen, and measured twice. The page answers with its
+ * size once when a terminal is attached and again when the panel has finished
+ * laying out -- the page's own settle is 80 ms (`SETTLE_MS` in the webview) --
+ * and the two answers are different sizes while the panel is still moving. Seen
+ * from here they were 110 ms apart in one run and 159 ms in another, so a
+ * window of 150 ms was not enough: the pair went through and ConPTY
+ * acknowledged neither of them, leaving the pty at the 80x30 it was spawned
+ * with while the screen was 46x12.
+ *
+ * A quarter of a second is above both measurements and is the same quarter the
+ * gateway already spends after a pty's first output, for the same reason and
+ * against the same platform. It is spent where nobody is looking: xterm has
+ * already reflowed for the person, and what waits is only the number the agent
+ * behind the pty is told to draw at. A person dragging the panel's border still
+ * gets four sizes a second.
+ *
+ * The condition for taking this out: a ConPTY that answers a resize sent on top
+ * of another.
+ */
+const SIZES_SETTLE_MS = 250;
+
 export class TerminalBridge implements Disposable {
   private readonly _options: TerminalBridgeOptions;
   /** What this terminal has printed, under a ceiling: what a rebuilt page is drawn from. */
@@ -70,6 +94,9 @@ export class TerminalBridge implements Disposable {
   private _attachCount = 0;
   private _resizeCount = 0;
   private _lastSize: { readonly cols: number, readonly rows: number } | null = null;
+  /** The last size of a burst still being waited out, or `null` for none. */
+  private _wantedSize: { readonly cols: number, readonly rows: number } | null = null;
+  private _sizeSoon: Disposable | null = null;
   private _over = false;
 
   constructor(options: TerminalBridgeOptions) {
@@ -276,6 +303,21 @@ export class TerminalBridge implements Disposable {
    * `ESC[8;rows;cols t` in the output stream, and the agent's first frame is
    * drawn at a width nobody has. Sent once, it acknowledges.
    *
+   * **The same rule over TIME, and that half was missing until 2026-08-21.**
+   * Dropping repeats by VALUE assumed the two answers are the same size. They
+   * are not always: the panel is still laying out when the first one is taken.
+   * Polling the page from the moment our view says it is visible gives
+   * `+2ms 25x13` and then `+112ms 75x13` -- a third of the width it settles at,
+   * with `visible` true for all of it. Two DIFFERENT sizes collapse into
+   * nothing, both reach ConPTY together, and it acknowledges neither: a live run
+   * caught exactly that, with the pty left at the 80x30 it was spawned with
+   * while the screen was 46x12. So a size is now held for `SIZES_SETTLE_MS` and
+   * the LAST one of a burst is what the pty is told.
+   *
+   * The delay is spent on the pty and never on the screen: xterm has already
+   * reflowed for the person by then, and what waits is the number the agent is
+   * told to draw at.
+   *
    * What the PROGRAM behind the pty makes of a resize is a separate question and
    * an open one: measured on this machine, `process.stdout.columns` inside it
    * never moves from the size it was spawned with, whatever the pseudoconsole is
@@ -287,11 +329,19 @@ export class TerminalBridge implements Disposable {
       return;
     }
     if (this._lastSize?.cols === cols && this._lastSize.rows === rows) {
+      // Back where the pty already is. A burst that ends here has nothing to
+      // say, and saying it would be the very pair this method exists to avoid.
+      this._wantedSize = null;
       return;
     }
-    this._lastSize = { cols, rows };
-    this._resizeCount += 1;
-    this._options.screen.resize(cols, rows);
+    this._wantedSize = { cols, rows };
+    if (this._sizeSoon !== null) {
+      return;
+    }
+    this._sizeSoon = this._options.scheduler.after(SIZES_SETTLE_MS, () => {
+      this._sizeSoon = null;
+      this._sendWantedSize();
+    });
   }
 
   public dispose(): void {
@@ -300,7 +350,24 @@ export class TerminalBridge implements Disposable {
     }
     this._subscriptions.length = 0;
     this._coalescer.dispose();
+    this._sizeSoon?.dispose();
+    this._sizeSoon = null;
     this._sink = null;
+  }
+
+  /** The last size of the burst that just ended, towards the pty. */
+  private _sendWantedSize(): void {
+    const wanted = this._wantedSize;
+    this._wantedSize = null;
+    if (wanted === null || this._over) {
+      return;
+    }
+    if (this._lastSize?.cols === wanted.cols && this._lastSize.rows === wanted.rows) {
+      return;
+    }
+    this._lastSize = wanted;
+    this._resizeCount += 1;
+    this._options.screen.resize(wanted.cols, wanted.rows);
   }
 
   private _arrived(chunk: string): void {
