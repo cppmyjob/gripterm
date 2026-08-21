@@ -92,6 +92,7 @@ import { registerShowRecord } from './commands/show-record';
 import { registerResumeTerminal } from './commands/resume-terminal';
 import { registerStartOver } from './commands/start-over';
 import { registerFocusTerminal } from './commands/focus-terminal';
+import { registerMaximizeTerminals } from './commands/maximize-terminals';
 import { registerMetadataCommands } from './commands/edit-metadata';
 import { registerNewTerminal } from './commands/new-terminal';
 import {
@@ -801,6 +802,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     )
   );
   context.subscriptions.push(registerFocusTerminal(gateway, logger));
+  /*
+   * The chevron on the group holding the terminals (customer, 2026-08-21).
+   * Registered whatever the engine is: the buttons that reach it are contributed
+   * against a terminal EDITOR, which is a thing only the editor engine makes,
+   * and the palette entries do no harm anywhere else.
+   */
+  context.subscriptions.push(registerMaximizeTerminals(logger));
   context.subscriptions.push(registerCloseTerminal(lifecycle, registry, asker, logger));
   context.subscriptions.push(
     registerDeleteTerminal({

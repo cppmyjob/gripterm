@@ -75,6 +75,16 @@
         "icon": "$(terminal)"
       },
       {
+        "command": "gripterm.maximizeTerminals",
+        "title": "Gripterm: Maximise the Terminals",
+        "icon": "$(chevron-up)"
+      },
+      {
+        "command": "gripterm.restoreTerminals",
+        "title": "Gripterm: Restore the Terminals",
+        "icon": "$(chevron-down)"
+      },
+      {
         "command": "gripterm.showRecord",
         "title": "Gripterm: Show Record",
         "icon": "$(list-selection)"
@@ -276,6 +286,18 @@
         {
           "command": "gripterm.showRecord",
           "when": "false"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "gripterm.maximizeTerminals",
+          "when": "activeEditor == 'terminalEditor' && editorPartMultipleEditorGroups && !editorPartMaximizedEditorGroup",
+          "group": "navigation@1"
+        },
+        {
+          "command": "gripterm.restoreTerminals",
+          "when": "activeEditor == 'terminalEditor' && editorPartMaximizedEditorGroup",
+          "group": "navigation@1"
         }
       ]
     },

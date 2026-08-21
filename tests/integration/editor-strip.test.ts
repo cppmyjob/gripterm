@@ -60,18 +60,31 @@ function describeGroups(): string {
 }
 
 /**
- * How much of its parent the group at `index` takes, walking the editor's own
- * answer. Deliberately NOT `withGroupShare` read backwards: a test that checks
- * an implementation with the same implementation checks nothing.
+ * The group at `index`: how many pixels it has, and how many its siblings share
+ * between them. Walking the editor's own answer, and deliberately NOT
+ * `withGroupShare` read backwards -- a test that checks an implementation with
+ * the same implementation checks nothing.
+ *
+ * The two numbers are handed back separately because a maximised group makes
+ * their ratio meaningless: measured 2026-08-21 in this host, maximising turns
+ * `[{size:495},{size:248}]` into `[{size:495},{size:743}]` -- our group is given
+ * the WHOLE editor area (743 = 495 + 248) while the group it covers keeps the
+ * number it had. So "it takes everything" is `size === the span it had before`,
+ * and a share would say 0.6 about a group that fills the window.
  */
-function shareOf(layout: { readonly groups: readonly LayoutNode[] }, index: number): number | null {
+function sizeAndSpanOf(
+  layout: { readonly groups: readonly LayoutNode[] },
+  index: number
+): { readonly size: number, readonly span: number } | null {
   let seen = 0;
-  const walk = (siblings: readonly LayoutNode[]): number | null => {
+  const walk = (siblings: readonly LayoutNode[]): { size: number, span: number } | null => {
     for (const node of siblings) {
       if (node.groups === undefined) {
         if (seen === index) {
-          const total = siblings.reduce((sum, one) => sum + (one.size ?? 0), 0);
-          return total === 0 ? null : (node.size ?? 0) / total;
+          return {
+            size: node.size ?? 0,
+            span: siblings.reduce((sum, one) => sum + (one.size ?? 0), 0),
+          };
         }
         seen += 1;
       } else {
@@ -84,6 +97,12 @@ function shareOf(layout: { readonly groups: readonly LayoutNode[] }, index: numb
     return null;
   };
   return walk(layout.groups);
+}
+
+/** How much of what it shares the group at `index` takes, or `null`. */
+function shareOf(layout: { readonly groups: readonly LayoutNode[] }, index: number): number | null {
+  const measured = sizeAndSpanOf(layout, index);
+  return measured === null || measured.span === 0 ? null : measured.size / measured.span;
 }
 
 async function layoutNow(): Promise<{ readonly groups: readonly LayoutNode[] }> {
@@ -256,6 +275,92 @@ suite('the strip of our own', () => {
         autoLock?.globalValue,
         vscode.ConfigurationTarget.Global
       );
+    }
+  });
+
+  /*
+   * The button the customer asked for on 2026-08-21: a chevron that throws the
+   * terminals over the whole editor area and puts them back at the second
+   * click, the way Cursor's terminal panel does it.
+   *
+   * What only a live host can answer, and the reason this is not a unit test:
+   * `workbench.action.toggleMaximizeEditorGroup` is a command id read out of a
+   * bundle, not an API. Whether it is there, whether it acts on the group we
+   * mean, and whether a second call is really the way back are three facts
+   * about this editor and about nothing else.
+   *
+   * What is NOT asserted here, because nothing in the API can see it: that the
+   * chevron is drawn on the title bar of our group and nowhere else. The `when`
+   * clause is the editor's to evaluate, and a menu's visibility is not
+   * readable. That one is an eye check, and it is written down as one.
+   */
+  test('throws the terminals over the whole editor area, and puts them back', async () => {
+    const { gateway } = await api();
+    const commands = await vscode.commands.getCommands(true);
+    for (const id of ['gripterm.maximizeTerminals', 'gripterm.restoreTerminals']) {
+      assert.ok(commands.includes(id), `${id} is not registered with the workbench`);
+    }
+
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    const file = await vscode.workspace.openTextDocument({
+      content: 'the file the terminals are supposed to cover',
+      language: 'plaintext',
+    });
+    await vscode.window.showTextDocument(file, { viewColumn: vscode.ViewColumn.One });
+
+    const handle = await gateway.create({
+      terminalId: TERMINAL_ID,
+      name: 'gripterm-m224-big',
+      cwd: os.tmpdir(),
+      env: {},
+      shellPath: null,
+      shellArgs: [],
+    });
+    let maximised = false;
+    try {
+      await waitFor('the terminal to get a tab', () => columnOf('gripterm-m224-big') !== undefined);
+      const strip = columnOf('gripterm-m224-big');
+      assert.ok(strip !== undefined);
+      // The toggle names no target and takes the ACTIVE group, so the group is
+      // made active first -- which is what clicking its title bar does.
+      handle.show(false);
+      await waitFor(
+        'the strip to become the active group',
+        () => vscode.window.tabGroups.activeTabGroup.viewColumn === strip
+      );
+
+      const before = sizeAndSpanOf(await layoutNow(), strip - 1);
+      assert.ok(before !== null, 'the editor reports no size for our group');
+      assert.ok(before.size < before.span, 'our group already fills the editor area');
+
+      await vscode.commands.executeCommand('gripterm.maximizeTerminals');
+      maximised = true;
+      const during = sizeAndSpanOf(await layoutNow(), strip - 1);
+
+      assert.ok(during !== null);
+      assert.equal(
+        during.size,
+        before.span,
+        `maximised, our group has ${String(during.size)} px of the ${String(before.span)} px the editor area is`
+      );
+
+      await vscode.commands.executeCommand('gripterm.restoreTerminals');
+      maximised = false;
+      const after = sizeAndSpanOf(await layoutNow(), strip - 1);
+
+      assert.ok(after !== null);
+      assert.equal(
+        after.size,
+        before.size,
+        `put back, our group has ${String(after.size)} px where it had ${String(before.size)} px`
+      );
+    } finally {
+      // A window left maximised is a window every suite after this one runs in.
+      if (maximised) {
+        await vscode.commands.executeCommand('gripterm.restoreTerminals');
+      }
+      handle.dispose();
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     }
   });
 
