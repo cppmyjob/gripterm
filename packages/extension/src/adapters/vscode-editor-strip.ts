@@ -148,6 +148,18 @@ export class VsCodeEditorStrip {
   public async column(): Promise<vscode.ViewColumn> {
     const kept = this._kept();
     if (kept !== null) {
+      /*
+       * Said out loud, and it was not until 2026-08-22.
+       *
+       * This was the one way through this method that wrote nothing, and it
+       * cost a whole round with the customer: their log showed a terminal
+       * started and its tab paired with nothing in between, and every other
+       * branch here leaves a line -- so the silence itself was the only clue,
+       * and it could not be told apart from "the strip was never asked".
+       * A path that says nothing cannot be diagnosed from a log, and a log is
+       * all there is when the window is somebody else's.
+       */
+      this._logger.info('the terminals went into the group they were already in', { column: kept });
       return kept;
     }
 

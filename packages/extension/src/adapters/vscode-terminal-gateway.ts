@@ -224,6 +224,14 @@ export class VsCodeTerminalGateway implements TerminalGateway, Disposable {
   private async _place(): Promise<vscode.TerminalLocation | vscode.TerminalEditorLocationOptions> {
     const place = PLACES[this._location];
     if (place !== STRIP) {
+      // For the same reason as the line in `VsCodeEditorStrip.column`: a person
+      // reporting "the terminal shares the area with my files" is describing
+      // exactly what `gripterm.launch.location: editor` DOES, and a log that
+      // does not say which of the three was in force cannot tell a defect from
+      // a setting.
+      this._logger.info('the terminals are not going into a strip of their own', {
+        location: this._location,
+      });
       return place;
     }
     try {
