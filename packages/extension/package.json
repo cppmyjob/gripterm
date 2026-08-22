@@ -148,7 +148,12 @@
         {
           "command": "gripterm.newTerminal",
           "when": "view == gripterm.terminals",
-          "group": "navigation"
+          "group": "navigation@1"
+        },
+        {
+          "command": "gripterm.maximizeTerminals",
+          "when": "view == gripterm.terminals",
+          "group": "navigation@2"
         },
         {
           "command": "gripterm.cleanUpStorage",

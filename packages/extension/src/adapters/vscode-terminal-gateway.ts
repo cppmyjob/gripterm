@@ -82,6 +82,22 @@ function exitOf(terminal: vscode.Terminal): TerminalExit {
 }
 
 /**
+ * What a window can ask of the group its terminals live in.
+ *
+ * Separate from `TerminalGateway`, which is the domain's and knows nothing
+ * about editor groups: a gateway that makes terminals of our own has no strip
+ * to keep, and this is answered by the composition with `null` there. Named as
+ * an interface rather than reached for with `instanceof` because the fallback
+ * path wraps the gateway in `remindOnFirstTerminal` -- and that wrapper is
+ * exactly the case where the strip matters most, an `own` engine that could not
+ * load its addon and is making editor terminals after all.
+ */
+export interface StripKeeper {
+  readonly takeAwayAnEmptyStrip: () => Promise<boolean>;
+  readonly standOnTheStrip: () => Promise<boolean>;
+}
+
+/**
  * The `TerminalGateway` port on `vscode.window`.
  *
  * Three properties of the platform shape this file, and all three are measured
@@ -209,6 +225,34 @@ export class VsCodeTerminalGateway implements TerminalGateway, Disposable {
     // to kill a conversation, and the editor closing takes them anyway --
     // that is what `isTransient` is for.
     this._handles.clear();
+  }
+
+  /**
+   * The empty strip a restart brings back, taken away. Asked for once, when the
+   * window wakes -- see `VsCodeEditorStrip.takeAwayAnEmptyStrip`.
+   *
+   * Only when the terminals are set to a strip of their own: with
+   * `gripterm.launch.location` at `editor` or `panel` this window has never
+   * made a group below the editors, and an empty one there is somebody else's
+   * to close.
+   */
+  public async takeAwayAnEmptyStrip(): Promise<boolean> {
+    if (PLACES[this._location] !== STRIP) {
+      return false;
+    }
+    return await this._strip.takeAwayAnEmptyStrip();
+  }
+
+  /**
+   * Puts the editor on the strip, for the button that maximises it. `false`
+   * when there is no strip -- because there are no terminals in one, or because
+   * the terminals do not live in a strip at all.
+   */
+  public async standOnTheStrip(): Promise<boolean> {
+    if (PLACES[this._location] !== STRIP) {
+      return false;
+    }
+    return await this._strip.standOnTheStrip();
   }
 
   /**

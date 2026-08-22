@@ -516,6 +516,90 @@ suite('the strip of our own', () => {
   });
 
   /*
+   * The customer, 2026-08-22, on the build that put the strip below the editors
+   * at last: "теперь открывается в панели как нужно НО при переоткрытии
+   * остаётся пустая панель."
+   *
+   * What a restart leaves: the grid is the editor's and comes back whole, and
+   * every terminal this build makes is `isTransient: true` (A3) and does not.
+   * A third of the editor area, held by a group with nothing in it, on every
+   * start until they open a terminal.
+   *
+   * The window that wakes cannot be built here -- a suite runs inside one that
+   * is already awake -- so what is built is the SHAPE it wakes into, which is
+   * the whole of what the rule is given to decide on: editors above, an empty
+   * group below them, and nothing of ours anywhere.
+   */
+  test('takes away the empty strip a restart brings back', async () => {
+    const { editorStrip } = await api();
+    assert.ok(editorStrip, 'this window has no strip to keep, and the engine or the location says why');
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+
+    const file = await vscode.workspace.openTextDocument({
+      content: 'a file of the person, above the strip that came back empty',
+      language: 'plaintext',
+    });
+    await vscode.window.showTextDocument(file, { viewColumn: vscode.ViewColumn.One });
+    await vscode.commands.executeCommand('workbench.action.newGroupBelow');
+    await vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
+    assert.equal(vscode.window.tabGroups.all.length, 2, `the stand is not two rows: ${describeGroups()}`);
+    const stand = await layoutNow();
+    assert.equal(stand.orientation, 1, `the stand did not come out as rows: ${JSON.stringify(stand)}`);
+
+    try {
+      const took = await editorStrip.takeAwayAnEmptyStrip();
+      assert.equal(took, true, `the empty strip was left where it was: ${describeGroups()}`);
+      assert.equal(
+        vscode.window.tabGroups.all.length,
+        1,
+        `the editor area still holds the empty strip: ${describeGroups()}`
+      );
+      assert.equal(
+        columnOf('a file of the person'),
+        vscode.ViewColumn.One,
+        `the person's file did not survive the tidying up: ${describeGroups()}`
+      );
+    } finally {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    }
+  });
+
+  /*
+   * The other side of the same rule, and the reason it asks the LAYOUT rather
+   * than counting tabs: an empty group at the end of an area laid out in
+   * columns is a column beside the person's editors, which this build has never
+   * made and must not take away. `rowBelowAtTheEnd` is where the two are told
+   * apart, and this is the live half of that unit.
+   */
+  test('leaves an empty group BESIDE the editors where it is', async () => {
+    const { editorStrip } = await api();
+    assert.ok(editorStrip, 'this window has no strip to keep, and the engine or the location says why');
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+
+    const file = await vscode.workspace.openTextDocument({
+      content: 'a file of the person, in the column they work in',
+      language: 'plaintext',
+    });
+    await vscode.window.showTextDocument(file, { viewColumn: vscode.ViewColumn.One });
+    await vscode.commands.executeCommand('workbench.action.newGroupRight');
+    await vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
+    const stand = await layoutNow();
+    assert.equal(stand.orientation, 0, `the stand did not come out as columns: ${JSON.stringify(stand)}`);
+
+    try {
+      const took = await editorStrip.takeAwayAnEmptyStrip();
+      assert.equal(took, false, `a column of the person's was closed as if it were ours: ${describeGroups()}`);
+      assert.equal(
+        vscode.window.tabGroups.all.length,
+        2,
+        `the person's empty column is gone: ${describeGroups()}`
+      );
+    } finally {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    }
+  });
+
+  /*
    * The FIRST half of the customer's sixth complaint, and the half that was
    * still open on 2026-08-22: "панель с терминалами открывается на весь экран
    * ПОСЛЕ ЗАГРУЗКИ... воспроизводится в непонятных для меня случаях."
@@ -806,6 +890,124 @@ suite('the strip of our own', () => {
         group.tabs.every((tab) => !(tab.input instanceof vscode.TabInputTerminal))));
     inFront.refresh();
     assert.equal(inFront.inFront, false, 'the key still says a terminal is in front, and there is none');
+  });
+
+  /*
+   * The button pressed from somewhere that is NOT the terminal's own tab bar.
+   *
+   * The customer has now reported three times that the icon never appears on
+   * that tab bar in Cursor, and on 2026-08-22 the key it hangs on was measured
+   * in Cursor itself and found to be set correctly (`probe-empty-strip.ts`:
+   * `inFront = true` with a terminal in front, `false` with a file). What is
+   * missing is the drawing, which no API can be asked about -- so the button
+   * was put where that editor is known to draw ours, the title bar of the list
+   * of terminals, and from there the active group is whatever file the person
+   * last touched.
+   *
+   * `toggleMaximizeEditorGroup` names no target. Without the strip being stood
+   * on first, this test maximises the person's SOURCE FILE -- a button doing
+   * the opposite of what its title says, which is the defect the owner found in
+   * the arrow on the same day.
+   */
+  test('maximises the terminals when it is pressed from a file the person was in', async () => {
+    const { gateway } = await api();
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    const file = await vscode.workspace.openTextDocument({
+      content: 'the file the person was looking at when they pressed the button',
+      language: 'plaintext',
+    });
+    await vscode.window.showTextDocument(file, { viewColumn: vscode.ViewColumn.One });
+
+    const handle = await gateway.create({
+      terminalId: TERMINAL_ID,
+      name: 'gripterm-m224-from-the-list',
+      cwd: os.tmpdir(),
+      env: {},
+      shellPath: null,
+      shellArgs: [],
+    });
+    let maximised = false;
+    try {
+      await waitFor('the terminal to get a tab', () => columnOf('gripterm-m224-from-the-list') !== undefined);
+      const strip = columnOf('gripterm-m224-from-the-list');
+      assert.ok(strip !== undefined);
+      const theirs = columnOf('the file the person was looking at');
+      assert.ok(theirs !== undefined);
+
+      // Where the person is: their file, not the terminal.
+      await vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
+      await waitFor(
+        'the editor to stand on the group the person was in',
+        () => vscode.window.tabGroups.activeTabGroup.viewColumn === theirs
+      );
+
+      const before = sizeAndSpanOf(await layoutNow(), strip - 1);
+      assert.ok(before !== null, 'the editor reports no size for our group');
+      assert.ok(before.size < before.span, 'our group already fills the editor area');
+
+      await vscode.commands.executeCommand('gripterm.maximizeTerminals');
+      maximised = true;
+      const during = sizeAndSpanOf(await layoutNow(), strip - 1);
+      assert.ok(during !== null);
+      assert.equal(
+        during.size,
+        before.span,
+        `the button maximised something else: our group has ${String(during.size)} px`
+          + ` of the ${String(before.span)} px the editor area is | ${describeGroups()}`
+      );
+
+      await vscode.commands.executeCommand('gripterm.maximizeTerminals');
+      maximised = false;
+      const after = sizeAndSpanOf(await layoutNow(), strip - 1);
+      assert.ok(after !== null);
+      assert.equal(after.size, before.size, 'the second press did not put the group back');
+    } finally {
+      if (maximised) {
+        await vscode.commands.executeCommand('gripterm.maximizeTerminals');
+      }
+      handle.dispose();
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    }
+  });
+
+  /*
+   * And with nothing of ours in front of anybody, it declines.
+   *
+   * The command is in the palette and in the title bar of the list, both of
+   * which a person can reach with no terminal open at all. `toggleMaximize`
+   * would then throw their file over the window -- a button that says
+   * "the Terminals" doing something to a file is worse than one that does
+   * nothing, and this is the line that holds it.
+   */
+  test('does nothing at all when there are no terminals to maximise', async () => {
+    await api();
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    const file = await vscode.workspace.openTextDocument({
+      content: 'a file, and not a terminal in sight',
+      language: 'plaintext',
+    });
+    await vscode.window.showTextDocument(file, { viewColumn: vscode.ViewColumn.One });
+    await vscode.commands.executeCommand('workbench.action.newGroupRight');
+    await vscode.window.showTextDocument(file, { viewColumn: vscode.ViewColumn.Two });
+    await vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
+
+    try {
+      const before = sizeAndSpanOf(await layoutNow(), 0);
+      assert.ok(before !== null, 'the editor reports no size for the group the person is in');
+      assert.ok(before.size < before.span, 'the stand is one group, so nothing could be maximised anyway');
+
+      await vscode.commands.executeCommand('gripterm.maximizeTerminals');
+      const after = sizeAndSpanOf(await layoutNow(), 0);
+      assert.ok(after !== null);
+      assert.equal(
+        after.size,
+        before.size,
+        `the button threw the person's own file over the editor area: ${String(after.size)} px`
+          + ` where it had ${String(before.size)} px`
+      );
+    } finally {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    }
   });
 
   test('M2.24: lets the strip go when its last terminal goes', async () => {

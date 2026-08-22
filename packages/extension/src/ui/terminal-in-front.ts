@@ -13,6 +13,18 @@ import type { Disposable, Logger } from '@gripterm/core';
  */
 export const TERMINAL_IN_FRONT_KEY = 'gripterm.terminalInFront';
 
+/**
+ * Whether the editor in front of the person right now is a terminal.
+ *
+ * The one place that question is answered, and it is asked twice: here, to set
+ * the key the button is drawn on, and by the maximise command, which has to
+ * decide whether there is anything of ours to maximise when the person pressed
+ * it from somewhere other than a terminal's own tab bar.
+ */
+export function aTerminalIsInFront(): boolean {
+  return vscode.window.tabGroups.activeTabGroup.activeTab?.input instanceof vscode.TabInputTerminal;
+}
+
 export interface TerminalInFrontOptions {
   /** Where the answer goes. `setContext` in the composition, a spy in a test. */
   readonly announce: (inFront: boolean) => void;
@@ -68,7 +80,7 @@ export class TerminalInFront implements Disposable {
 
   /** Look again, and say so only when the answer has changed. */
   public refresh(): void {
-    const now = vscode.window.tabGroups.activeTabGroup.activeTab?.input instanceof vscode.TabInputTerminal;
+    const now = aTerminalIsInFront();
     if (now === this._inFront) {
       return;
     }

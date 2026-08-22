@@ -27,6 +27,14 @@ const GET_LAYOUT = 'vscode.getEditorLayout';
 const SET_LAYOUT = 'vscode.setEditorLayout';
 
 /**
+ * Closing an editor group, read out of the Cursor 3.17.8 bundle on 2026-08-22
+ * beside `closeEditorsAndGroup` and `closeEditorsInGroup`. Like every other
+ * group command it names no target and acts on the ACTIVE group, and it is only
+ * ever asked here of a group this file has just found empty.
+ */
+const CLOSE_GROUP = 'workbench.action.closeGroup';
+
+/**
  * Putting the editor on one group by its number, which the workbench spells as
  * eight separate commands and not as one that takes an argument.
  *
@@ -91,6 +99,19 @@ const REPAIR_ROUNDS = 4;
 const REPAIR_WAIT_MS = 500;
 
 /**
+ * How many times the editor area is looked at, while a window is waking, for
+ * the grid to come back.
+ *
+ * An extension activates while the workbench is still restoring, and a look
+ * taken too early sees the one group every empty window has and finds nothing
+ * to do. Six looks half a second apart is three seconds, which is longer than
+ * any restore measured on this machine and short enough that a person pressing
+ * the plus straight away is not kept waiting -- and if they do press it, the
+ * strip they make cancels this outright.
+ */
+const AREA_LOOKS = 6;
+
+/**
  * A group of the editor area that holds our terminals and nothing else.
  *
  * The owner asked for the agents to open "in a separate panel of their own, at
@@ -152,6 +173,19 @@ export class VsCodeEditorStrip {
    * paid the moment the group's tabs change.
    */
   private _owed = false;
+  /**
+   * How many times this window has been asked where the terminals go.
+   *
+   * Counted rather than remembered as a flag, and read across the awaits of
+   * `takeAwayAnEmptyStrip`: the group is adopted BEFORE the terminal going into
+   * it exists, so between those two instants the strip holds no tabs -- and a
+   * sweep that read "no tabs" as "not ours" would close the group the gateway
+   * had just been given, leaving the terminal to land wherever the editor felt
+   * like putting it. What has to be true is not "this window never made a
+   * strip" but "nobody asked for one WHILE this was deciding", which a number
+   * says and a flag cannot.
+   */
+  private _asked = 0;
 
   constructor(logger: Logger) {
     this._logger = logger;
@@ -173,6 +207,7 @@ export class VsCodeEditorStrip {
 
   /** The column our terminals open in, making it if there is not one. */
   public async column(): Promise<vscode.ViewColumn> {
+    this._asked += 1;
     const kept = this._kept();
     if (kept !== null) {
       /*
@@ -285,6 +320,96 @@ export class VsCodeEditorStrip {
   }
 
   /**
+   * The strip a restart brings back with nothing in it, taken away.
+   *
+   * **The customer, 2026-08-22, on the build that put the strip below the
+   * editors at last:** "теперь открывается в панели как нужно НО при
+   * переоткрытии остаётся пустая панель". A third of their editor area held by
+   * a group with nothing in it, every time the window opens.
+   *
+   * Ours by provenance, and by nothing the editor can be asked for: every
+   * terminal we make is `isTransient: true` (A3), so the TABS do not come back
+   * while the GROUP does -- the group is part of the grid, and the grid is
+   * restored. What is left on the screen is the outline of a strip with nothing
+   * inside it.
+   *
+   * **Why here and not on the way out.** Measured in Cursor 3.17.8 on
+   * 2026-08-22 (`probe-empty-strip.ts`): with the last terminal of the strip
+   * disposed, the editor takes the group away by itself inside a second, locked
+   * or unlocked, with `closeEmptyGroups` at its default. A rule that tidied up
+   * after a close would be a rule for a case that does not happen; the case
+   * that does happen is a window that has just woken.
+   *
+   * **The price, named.** Nothing tells us that an empty group below the
+   * editors was made by us rather than by the person, and this closes it either
+   * way. What a person loses is a split holding nothing, which one command
+   * makes again -- and the gateway only asks for this when the terminals are
+   * set to a strip of their own.
+   */
+  public async takeAwayAnEmptyStrip(): Promise<boolean> {
+    if (this._arranging || this._kept() !== null) {
+      return false;
+    }
+    const askedBefore = this._timesAsked();
+    this._arranging = true;
+    try {
+      for (let look = 1; look <= AREA_LOOKS; look += 1) {
+        if (vscode.window.tabGroups.all.length > 1) {
+          // One more pause before deciding: the groups come back one at a time
+          // and the question is about the LAST of them.
+          await new Promise((resolve) => setTimeout(resolve, REPAIR_WAIT_MS));
+          const empty = await this._emptyRowBelow();
+          // Counted again, because everything above it is awaited: a person who
+          // pressed the plus meanwhile has been given this very group, and it
+          // has no tab in it yet to say so.
+          if (empty === null || this._timesAsked() !== askedBefore) {
+            return false;
+          }
+          return await this._closeGroup(empty);
+        }
+        await new Promise((resolve) => setTimeout(resolve, REPAIR_WAIT_MS));
+      }
+      return false;
+    } finally {
+      this._arranging = false;
+    }
+  }
+
+  /**
+   * Puts the editor on the strip, if there is one and it is still ours.
+   *
+   * For the maximise button, which acts on the ACTIVE group and names no
+   * target. Pressed from the list of terminals -- which is where the customer
+   * will find it, Cursor having refused three times to draw it on the tab bar
+   * of a terminal -- the active group is whatever file they last touched, and
+   * maximising THAT is the button doing the opposite of what it says.
+   */
+  public async standOnTheStrip(): Promise<boolean> {
+    const column = this._kept();
+    if (column === null) {
+      return false;
+    }
+    if (vscode.window.tabGroups.activeTabGroup.viewColumn === column) {
+      return true;
+    }
+    return await this._focus(column);
+  }
+
+  /**
+   * The count, read through a call on purpose.
+   *
+   * It is raised in `column()`, which runs BETWEEN the awaits of
+   * `takeAwayAnEmptyStrip` -- and the compiler, reading the one straight line
+   * in front of it and seeing no assignment along it, holds the field to the
+   * value it had at the top of the method and calls the second look pointless.
+   * It is not pointless: it is the whole of the guard against closing a group
+   * the gateway has just been given.
+   */
+  private _timesAsked(): number {
+    return this._asked;
+  }
+
+  /**
    * Puts the editor on a group that HOLDS something before the area is split.
    *
    * `newGroupBelow` splits the ACTIVE group, and a strip belongs under the
@@ -344,6 +469,49 @@ export class VsCodeEditorStrip {
     // more: the lock is done, and the focus is the editor's to argue about.
     if (!(await this._focus(was))) {
       this._logger.info('the focus was not put back after the terminals` group was locked', { was, column });
+    }
+    return true;
+  }
+
+  /**
+   * Closes that group, and answers whether the editor really did.
+   *
+   * `closeGroup` names no target, so the group has to be made the active one
+   * first, and the only evidence that it went is that there is one group fewer
+   * than there was -- a command answers `undefined` whether it acted or not.
+   */
+  private async _closeGroup(column: vscode.ViewColumn): Promise<boolean> {
+    const was = vscode.window.tabGroups.activeTabGroup.viewColumn;
+    const before = vscode.window.tabGroups.all.length;
+    if (!(await this._focus(column))) {
+      this._logger.warn('the editor would not stand on the empty strip, which is left where it is', { column });
+      return false;
+    }
+    try {
+      await vscode.commands.executeCommand(CLOSE_GROUP);
+    } catch (cause: unknown) {
+      this._logger.warn('closing the empty strip threw', { column, cause: String(cause) });
+      return false;
+    }
+    await new Promise((resolve) => setTimeout(resolve, BETWEEN_ATTEMPTS_MS));
+    const after = vscode.window.tabGroups.all.length;
+    if (after >= before) {
+      this._logger.warn('the editor kept the empty strip after being asked to close it', {
+        column,
+        before,
+        after,
+      });
+      return false;
+    }
+    this._logger.info('the empty strip the editor brought back was taken away', {
+      column,
+      groups: after,
+    });
+    // Columns BEFORE the one that went keep their numbers and the ones after it
+    // do not, so the focus is put back only where the number still means what
+    // it meant.
+    if (was < column && !(await this._focus(was))) {
+      this._logger.info('the focus was not put back after the empty strip was closed', { was, column });
     }
     return true;
   }

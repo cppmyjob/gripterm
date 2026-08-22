@@ -1,9 +1,20 @@
 import * as vscode from 'vscode';
 import type { Logger } from '@gripterm/core';
+import { aTerminalIsInFront } from '../ui/terminal-in-front';
 
 export const MAXIMIZE_TERMINALS_COMMAND = 'gripterm.maximizeTerminals';
 
 const TOGGLE_MAXIMIZE_GROUP = 'workbench.action.toggleMaximizeEditorGroup';
+
+export interface MaximizeTerminalsOptions {
+  /**
+   * Puts the editor on the strip, answering whether it went. `false` when this
+   * window has no strip -- no terminals in one, or terminals that do not live
+   * in a strip at all.
+   */
+  readonly standOnTheStrip: () => Promise<boolean>;
+  readonly logger: Logger;
+}
 
 /**
  * The button the customer asked for on 2026-08-21: "хотелось бы в панели иметь
@@ -31,19 +42,35 @@ const TOGGLE_MAXIMIZE_GROUP = 'workbench.action.toggleMaximizeEditorGroup';
  * asked for: "распахивал бы панель на всю высоту... при повторном клике
  * возвращалась бы на место".
  *
- * **What acts, and the price of it.** The editor's toggle takes the ACTIVE
- * group and names no target, so this button maximises whichever group is
- * active. In front of the button that is the group whose title bar was
- * clicked; from the palette it is wherever the person was. The price: there is
- * no `when` clause that can say "this group is Gripterm's", so the button also
- * appears on a terminal the person moved into the editor area themselves -- and
- * there it does the same, sensible thing. REMOVED WHEN: a build offers a
- * context key that names the group an extension made.
+ * **What it acts on, and why that changed on 2026-08-22.** The editor's toggle
+ * takes the ACTIVE group and names no target. That was left as it stood while
+ * the only way to the button was a terminal's own tab bar, where the active
+ * group IS the strip. Cursor has now refused three times to draw it there --
+ * measured the same day: the key it hangs on is set correctly in Cursor
+ * (`probe-empty-strip.ts`: `inFront = true` with a terminal in front), so what
+ * is missing is the drawing and not the condition -- and the button had to be
+ * put where that editor is known to draw ours, which is the title bar of the
+ * list of terminals. From there the active group is whatever file the person
+ * last touched, and a toggle would have maximised THAT: the same class of
+ * defect as the arrow, a button doing the opposite of what it says.
+ *
+ * So the strip is stood on first. When there is no strip to stand on, the
+ * button acts only if the editor in front is a terminal -- the case of a
+ * terminal the person moved into the editor area themselves, where it does the
+ * same sensible thing -- and otherwise does nothing but say so. A button that
+ * maximises somebody's source file is worse than a button that declines.
  */
-export function registerMaximizeTerminals(logger: Logger): vscode.Disposable {
+export function registerMaximizeTerminals(options: MaximizeTerminalsOptions): vscode.Disposable {
   const toggle = async (): Promise<void> => {
+    const stood = await options.standOnTheStrip();
+    if (!stood && !aTerminalIsInFront()) {
+      options.logger.info('there was nothing of ours in front to maximise, so nothing was maximised');
+      return;
+    }
     await vscode.commands.executeCommand(TOGGLE_MAXIMIZE_GROUP);
-    logger.info('the group holding the terminals was maximised or put back');
+    options.logger.info('the group holding the terminals was maximised or put back', {
+      stoodOnTheStrip: stood,
+    });
   };
 
   return vscode.commands.registerCommand(MAXIMIZE_TERMINALS_COMMAND, toggle);

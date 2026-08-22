@@ -107,6 +107,7 @@ import {
   readToastSignals,
 } from './settings';
 import { terminalGatewayFor } from './terminal-gateway-factory';
+import type { StripKeeper } from './adapters/vscode-terminal-gateway';
 import { UnavailableAgentCommandFactory } from './adapters/unavailable-agent-command-factory';
 import { VsCodeLogger } from './adapters/vscode-logger';
 import { windowIdentity } from './adapters/vscode-window-identity';
@@ -271,6 +272,15 @@ export interface GriptermApi {
    * API, so the only way to hold this promise is to ask the object that sets it.
    */
   readonly inFront: TerminalInFront;
+  /**
+   * The group the terminals live in, when they live in one -- `null` under the
+   * `own` engine and under any launch location but `group`.
+   *
+   * Exposed for the live suite: taking away the empty strip a restart leaves
+   * behind is a rule about a window that has just woken, and the only way to
+   * put a suite in front of it is to build the shape by hand and ask.
+   */
+  readonly editorStrip: StripKeeper | null;
   /**
    * The five things a person changes about their own record.
    *
@@ -564,7 +574,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   // chosen from BOTH settings, because a terminal of our own has no shell to type
   // a launch line into (`chooseEngine`).
   const mode = readLaunchMode(logger);
+  /*
+   * A holder rather than a bare `let`: the strip is handed over from inside a
+   * callback, and a narrowing that cannot see the callback run would read the
+   * variable as `null` for the rest of this function.
+   */
+  const held: { strip: StripKeeper | null } = { strip: null };
   const gateway = terminalGatewayFor({
+    keepTheStrip: (keeper) => {
+      held.strip = keeper;
+    },
     setting: readTerminalEngine(logger),
     mode,
     location,
@@ -726,6 +745,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     dragAndDropController: tree,
   });
   context.subscriptions.push(view);
+  /*
+   * The strip a restart brought back with nothing in it (customer, 2026-08-22:
+   * "при переоткрытии остаётся пустая панель").
+   *
+   * Here, and this early, because what the person is looking at is the point:
+   * measured in Cursor on 2026-08-22 with a real reload, the empty group came
+   * back holding 248 of the 743 pixels the editor area has, and stood there
+   * until this ran. Everything below is store work that nobody can see.
+   *
+   * Not awaited, and it must not be: it waits on the workbench to finish
+   * restoring the grid, which is up to three seconds, and nothing below depends
+   * on the answer. Whoever asks for a strip meanwhile cancels it from inside.
+   */
+  void held.strip?.takeAwayAnEmptyStrip().catch((cause: unknown) => {
+    logger.warn('the empty strip could not be looked for', { cause: String(cause) });
+  });
+
   logger.info('the list of terminals is on screen', {
     // Everything before this: the store, the base read whole, the port, and
     // finding `claude`. What comes after it -- the restore, the first sweep --
@@ -875,7 +911,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
    * against a terminal EDITOR, which is a thing only the editor engine makes,
    * and the palette entries do no harm anywhere else.
    */
-  context.subscriptions.push(registerMaximizeTerminals(logger));
+  context.subscriptions.push(
+    registerMaximizeTerminals({
+      standOnTheStrip: async () => (await held.strip?.standOnTheStrip()) ?? false,
+      logger,
+    })
+  );
   context.subscriptions.push(registerCloseTerminal(lifecycle, registry, asker, logger));
   context.subscriptions.push(
     registerDeleteTerminal({
@@ -1041,6 +1082,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     makeGateway: terminalGatewayFor,
     tabs,
     inFront,
+    editorStrip: held.strip,
     endOwnProcesses,
     lifecycle,
     metadata,

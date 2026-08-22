@@ -1,6 +1,7 @@
 import { chooseEngine, remindOnFirstTerminal } from '@gripterm/core';
 import { PtyTerminalGateway } from './adapters/pty-terminal-gateway';
 import { VsCodeTerminalGateway } from './adapters/vscode-terminal-gateway';
+import type { StripKeeper } from './adapters/vscode-terminal-gateway';
 import { loadNodePty } from './adapters/node-pty-module';
 import type {
   Disposable,
@@ -79,6 +80,30 @@ export interface TerminalGatewayParams {
    * and the contract suite builds gateways with nobody watching.
    */
   readonly tabOpened?: (terminalId: TerminalId, terminal: unknown) => void;
+  /**
+   * Handed the strip when the gateway that was built has one -- the editor's
+   * engine, whichever way it was arrived at.
+   *
+   * A callback rather than a second return value because there are two ways out
+   * of this function and one of them wraps the gateway in a decorator: after
+   * that wrapping the strip cannot be reached from the object at all, and the
+   * one thing a window must be able to do at startup is take away the empty
+   * strip a restart brought back.
+   *
+   * Optional: the contract suite builds gateways with nobody to hand it to.
+   */
+  readonly keepTheStrip?: (keeper: StripKeeper) => void;
+}
+
+/**
+ * The editor's gateway, and the strip handed to whoever asked for it. Both ways
+ * out of `terminalGatewayFor` that end in editor terminals come through here,
+ * so neither of them can forget the second half.
+ */
+function editorGateway(params: TerminalGatewayParams): VsCodeTerminalGateway {
+  const gateway = new VsCodeTerminalGateway(params.location, params.logger, params.tabOpened ?? null);
+  params.keepTheStrip?.(gateway);
+  return gateway;
 }
 
 /**
@@ -112,7 +137,7 @@ export function terminalGatewayFor(params: TerminalGatewayParams): TerminalGatew
   }
 
   if (choice.engine === 'editor') {
-    return new VsCodeTerminalGateway(params.location, params.logger, params.tabOpened ?? null);
+    return editorGateway(params);
   }
 
   const pty = loadNodePty(params.extensionPath, params.logger);
@@ -162,7 +187,7 @@ function fallenBackTo(params: TerminalGatewayParams, refusal: string): TerminalG
   // is no third: `chooseEngine` refuses exactly one pair of settings, and the
   // addon either loads or it does not.
   return remindOnFirstTerminal(
-    new VsCodeTerminalGateway(params.location, params.logger, params.tabOpened ?? null),
+    editorGateway(params),
     (message) => { params.announce?.(message); },
     refusal
   );
