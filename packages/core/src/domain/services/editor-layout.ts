@@ -25,6 +25,35 @@ interface Family {
 }
 
 /**
+ * What the group at `index` holds of the space it shares, or `null` when the
+ * editor has not sized that family yet.
+ *
+ * The companion `withGroupShare` needed: a caller can ASK for a third and has
+ * no way to learn whether it got one. Measured in Cursor on 2026-08-22 --
+ * `newGroupBelow` over an empty editor area, then `getEditorLayout` at once --
+ * the editor answers with a layout it has not laid out, `withGroupShare` finds
+ * nothing to divide and answers `null`, and the strip silently keeps the size
+ * the split gave it: 673 pixels of 743, which is the customer's "терминал на
+ * всю область файлов". Asking is not enough; this is what makes the asking
+ * checkable.
+ *
+ * `null` is "the editor has not said", never "zero": a family whose sizes add
+ * up to nothing is one the editor has not laid out, and treating that as a
+ * share of zero would read an unlaid layout as a group that is already small.
+ *
+ * `index` counts the LEAVES from the left, exactly as in `withGroupShare` --
+ * see the note there, which is the whole reason both of these are functions.
+ */
+export function groupShare(layout: EditorLayout, index: number): number | null {
+  const family = familyOf(layout.groups, { index: assertIndex(index), seen: 0 });
+  if (family === null) {
+    return null;
+  }
+  const total = family.siblings.reduce((sum, node) => sum + (node.size ?? 0), 0);
+  return total <= 0 ? null : (family.node.size ?? 0) / total;
+}
+
+/**
  * The layout with one group given `share` of the space it shares with its
  * siblings, or `null` when there is nothing sensible to ask the editor for.
  *
@@ -52,11 +81,7 @@ export function withGroupShare(
   index: number,
   share: number
 ): EditorLayout | null {
-  if (!Number.isInteger(index) || index < 0) {
-    throw new ValidationError('the index of a group must be a non-negative integer', {
-      details: { index },
-    });
-  }
+  assertIndex(index);
   if (!(share > 0 && share < 1)) {
     throw new ValidationError('a share must be between zero and one, exclusive', {
       details: { share },
@@ -131,4 +156,14 @@ function rebuilt(
   return nodes.map((node) =>
     node.groups === undefined ? node : { ...node, groups: rebuilt(node.groups, target, next) }
   );
+}
+
+/** Both readers take the same index, so they refuse the same ones. */
+function assertIndex(index: number): number {
+  if (!Number.isInteger(index) || index < 0) {
+    throw new ValidationError('the index of a group must be a non-negative integer', {
+      details: { index },
+    });
+  }
+  return index;
 }

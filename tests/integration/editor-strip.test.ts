@@ -416,6 +416,28 @@ suite('the strip of our own', () => {
           elsewhere.length > 0,
           `the terminals took the whole editor area: ${describeGroups()}`
         );
+
+        /*
+         * And a strip is a STRIP -- the size half of the same complaint, which
+         * having a neighbour does not answer on its own. Measured in Cursor on
+         * 2026-08-22: the group was there, and ours held 673 pixels of 743, so
+         * the person still met "новый терминал на всю область файлов" with a
+         * seventy-pixel sliver above it.
+         *
+         * WHAT THIS TEST CANNOT HOLD, said out loud: it did not fail on the
+         * build that had that defect. The cause is the editor answering
+         * `getEditorLayout` with a layout it has not sized yet, and this host
+         * has never been seen to do it -- the retry the product now makes is
+         * what handles it, and the evidence for it is the Cursor probe in the
+         * protocol, not this line. What this line holds is the promise itself,
+         * so a build that starts taking the area here fails here.
+         */
+        const share = shareOf(await layoutNow(), strip - 1);
+        assert.ok(share !== null, `the editor sized no group for the strip: ${describeGroups()}`);
+        assert.ok(
+          share <= 0.5,
+          `the terminals took ${String(Math.round(share * 100))}% of the space they share: ${describeGroups()}`
+        );
       } finally {
         handle.dispose();
         await vscode.commands.executeCommand('workbench.action.closeAllEditors');

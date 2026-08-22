@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { withGroupShare } from '@gripterm/core';
+import { groupShare, withGroupShare } from '@gripterm/core';
 import type { EditorLayout, Logger } from '@gripterm/core';
 
 /**
@@ -45,6 +45,33 @@ const SPLIT_ATTEMPTS = 3;
 const BETWEEN_ATTEMPTS_MS = 120;
 
 /**
+ * How many times the strip's size is looked at before the asking stops, and
+ * how long the repair of a strip left alone waits between its rounds.
+ *
+ * The looks exist because the editor answers `getEditorLayout` with a layout it
+ * has not laid out yet -- measured, and the numbers are in `_askForAThird`.
+ * Five looks at 120 ms is 480 ms of patience for something that took one tick
+ * every time it was watched.
+ *
+ * The rounds are longer and for a different reason: `_keepCompany` is the only
+ * thing standing between a person and a layout they cannot get out of, and the
+ * three quick attempts it used to make were over in a third of a second. Four
+ * rounds waiting half a second more each time is three seconds of patience --
+ * a refusal measured to be transient deserves to be waited out, not reported.
+ */
+/**
+ * What came of asking for a third: it is a third now, the editor has not laid
+ * the group out yet and can be asked again, or it was laid out and stayed too
+ * big. Only the middle one is worth coming back to.
+ */
+type AThird = 'settled' | 'unlaid' | 'refused';
+
+const SHARE_LOOKS = 5;
+const A_SHADE_OVER = 0.05;
+const REPAIR_ROUNDS = 4;
+const REPAIR_WAIT_MS = 500;
+
+/**
  * A group of the editor area that holds our terminals and nothing else.
  *
  * The owner asked for the agents to open "in a separate panel of their own, at
@@ -87,12 +114,30 @@ export class VsCodeEditorStrip {
   private _column: vscode.ViewColumn | null = null;
   /** True while this object is making a group, so its own change is not answered. */
   private _arranging = false;
+  /**
+   * True while the strip still owes the editor a size.
+   *
+   * The size is asked for when the group is MADE, which is before the terminal
+   * that is going into it exists -- and an editor does not lay out a group with
+   * nothing in it. Measured in Cursor on 2026-08-22: `getEditorLayout` answers
+   * with no sizes at all until the tab appears, and then answers 70/673. So the
+   * asking cannot end when the group is made: what is owed is remembered, and
+   * paid the moment the group's tabs change.
+   */
+  private _owed = false;
 
   constructor(logger: Logger) {
     this._logger = logger;
-    this._watch = vscode.window.tabGroups.onDidChangeTabGroups(() => {
-      void this._keepCompany();
-    });
+    const look = (): void => {
+      void this._afterAChange();
+    };
+    // Both events, because they are different: a group appearing or going is a
+    // group change, and a TAB appearing in a group is a tab change -- and the
+    // tab is what makes the editor lay the group out at all.
+    this._watch = vscode.Disposable.from(
+      vscode.window.tabGroups.onDidChangeTabGroups(look),
+      vscode.window.tabGroups.onDidChangeTabs(look)
+    );
   }
 
   public dispose(): void {
@@ -161,6 +206,20 @@ export class VsCodeEditorStrip {
     // command focuses it, and nothing is awaited in between that could move on.
     await vscode.commands.executeCommand(LOCK_GROUP);
     await this._askForAThird(made);
+    /*
+     * Owed no matter what that answered, and this is the measured heart of it
+     * (Cursor, 2026-08-22, from this build's own log):
+     *
+     *   look 1  share 0.906  [{size:70},{size:673}]
+     *   look 2  share 0.334  [{size:495},{size:248}]   <- ours, and it took
+     *   +400 ms              [{size:70},{size:673}]    <- and was given back
+     *
+     * A group with nothing in it is a group the editor sizes by what is about
+     * to go into it, and the terminal is not there yet: `column()` runs BEFORE
+     * `createTerminal`. So a third granted here is provisional, and the debt
+     * stands until the group has a tab to be sized around.
+     */
+    this._owed = true;
 
     this._column = made;
     this._logger.info('a group of our own was opened below the editors', { column: made });
@@ -207,6 +266,51 @@ export class VsCodeEditorStrip {
   }
 
   /**
+   * Everything this object does in answer to the editor moving something.
+   *
+   * Two rules, in this order and not the other: a strip alone in the editor
+   * area is a trap and is undone first, and only then is a size asked for --
+   * because making a group above renumbers ours, and a size asked for the old
+   * number would be a size asked for somebody else's group.
+   */
+  private async _afterAChange(): Promise<void> {
+    await this._keepCompany();
+    await this._payWhatIsOwed();
+  }
+
+  /**
+   * The size the strip was promised when its group was made, asked for again
+   * now that there is something in the group to lay out.
+   *
+   * Once, and only while it is owed: `_askForAThird` never grows the strip, so
+   * the moment a real share is read and it is no more than a third the debt is
+   * gone and no later drag of the person's is ever answered.
+   */
+  private async _payWhatIsOwed(): Promise<void> {
+    if (!this._owed || this._arranging) {
+      return;
+    }
+    const column = this._kept();
+    if (column === null) {
+      // The group is gone, or is not ours any more. Nothing is owed to it.
+      this._owed = false;
+      return;
+    }
+    const group = vscode.window.tabGroups.all.find((one) => one.viewColumn === column);
+    if (group === undefined || group.tabs.length === 0) {
+      // Still empty, so still the answer that was measured to be provisional.
+      // The debt stands and the next change to the tabs asks again.
+      return;
+    }
+    this._arranging = true;
+    try {
+      this._owed = (await this._askForAThird(column)) === 'unlaid';
+    } finally {
+      this._arranging = false;
+    }
+  }
+
+  /**
    * The strip is never the only group of the editor area.
    *
    * **The other half of the customer's sixth complaint, 2026-08-21**, and it is
@@ -228,63 +332,98 @@ export class VsCodeEditorStrip {
    * not a size anybody chose.
    */
   private async _keepCompany(): Promise<void> {
-    if (this._arranging || vscode.window.tabGroups.all.length !== 1) {
+    if (this._arranging || !this._aloneInTheArea()) {
       return;
     }
-    // `at(0)` of a list this line has just established holds exactly one.
-    const [only] = vscode.window.tabGroups.all;
-    if (only === undefined) {
-      return;
+
+    this._arranging = true;
+    try {
+      for (let round = 1; round <= REPAIR_ROUNDS; round += 1) {
+        // Nothing before the first round: the trap is already there, and the
+        // waiting is for the rounds that follow a refusal.
+        const wait = (round - 1) * REPAIR_WAIT_MS;
+        if (wait > 0) {
+          await new Promise((resolve) => setTimeout(resolve, wait));
+        }
+        if (!this._aloneInTheArea()) {
+          // The person opened something, or the editor brought a group back.
+          // Either way the trap this repairs is not there any more.
+          return;
+        }
+        if ((await this._splitOff(NEW_GROUP_ABOVE)) !== null) {
+          await this._settleAbove();
+          return;
+        }
+        this._logger.info('the editor would not make a group above the terminals, and is being given a moment', {
+          column: this._column,
+          waited: wait,
+        });
+      }
+      /*
+       * Every ask refused, and this is the one state where giving up costs the
+       * person the window they set up: a strip alone in the editor area is
+       * locked, so the next file they open has nowhere to go but BESIDE it, and
+       * from then on there are two groups -- which is not the state this rule
+       * watches for, so nothing here ever asks again. The waits above exist for
+       * exactly that: the editor's refusal was measured to be transient, and
+       * the alternative to waiting it out is leaving somebody in a layout they
+       * cannot get out of.
+       */
+      this._logger.warn('the editor would not make a group above the terminals, which are alone in the editor area', {
+        column: this._column,
+        asked: REPAIR_ROUNDS,
+      });
+    } finally {
+      this._arranging = false;
     }
-    /*
-     * Ours, and holding something. Asked as "a strip was made in this window
-     * and the one group left holds terminals and nothing else" -- NOT as "its
-     * column is the one we remember", which is the trap this file already warns
-     * about twice: closing the group above renumbers ours, so by the time this
-     * runs the remembered number names nothing. The first build of this rule
-     * compared the number and never fired.
-     *
-     * A single EMPTY group is an editor area with nothing in it, which is how
-     * every window starts and is nobody's problem.
-     */
+  }
+
+  /**
+   * True when the editor area holds our strip and nothing else, which is the
+   * trap `_keepCompany` exists to undo. Remembers the column while it is at it,
+   * because that is the one moment the number is known to be right.
+   *
+   * Asked as "the one group left holds terminals and nothing else" -- NOT as
+   * "its column is the one we remember", which is the trap this file already
+   * warns about twice: closing the group above renumbers ours, so by the time
+   * this runs the remembered number names nothing. The first build of this rule
+   * compared the number and never fired.
+   *
+   * A single EMPTY group is an editor area with nothing in it, which is how
+   * every window starts and is nobody's problem.
+   */
+  private _aloneInTheArea(): boolean {
+    const groups = vscode.window.tabGroups.all;
+    const [only] = groups;
+    if (groups.length !== 1 || only === undefined) {
+      return false;
+    }
     const held =
       this._column !== null &&
       only.tabs.length > 0 &&
       only.tabs.every((tab) => tab.input instanceof vscode.TabInputTerminal);
     if (!held) {
-      return;
+      return false;
     }
     this._column = only.viewColumn;
+    return true;
+  }
 
-    this._arranging = true;
-    try {
-      if ((await this._splitOff(NEW_GROUP_ABOVE)) === null) {
-        // Nothing is written down and nothing is given up: the column stays
-        // what it was, so the next change to the tab groups brings this rule
-        // back to the same state and asks again. That matters because the state
-        // it is asking about is the trap -- a strip alone in the editor area --
-        // and the alternative to asking again is leaving the person in it.
-        this._logger.warn('the editor would not make a group above the terminals, which are alone in the editor area', {
-          column: this._column,
-        });
-        return;
-      }
-      // Making a group above renumbers ours: the new one takes the column we
-      // had. Read it back rather than assumed -- the whole file turns on that
-      // number being right.
-      const strip = vscode.window.tabGroups.all.find((group) =>
-        group.tabs.some((tab) => tab.input instanceof vscode.TabInputTerminal)
-      );
-      this._column = strip?.viewColumn ?? null;
-      if (this._column !== null) {
-        await this._askForAThird(this._column);
-      }
-      this._logger.info('a group was made above the terminals, which had the editor area to themselves', {
-        column: this._column,
-      });
-    } finally {
-      this._arranging = false;
+  /** After a group is made above ours: find ourselves again, and take a third. */
+  private async _settleAbove(): Promise<void> {
+    // Making a group above renumbers ours: the new one takes the column we had.
+    // Read it back rather than assumed -- the whole file turns on that number
+    // being right.
+    const strip = vscode.window.tabGroups.all.find((group) =>
+      group.tabs.some((tab) => tab.input instanceof vscode.TabInputTerminal)
+    );
+    this._column = strip?.viewColumn ?? null;
+    if (this._column !== null) {
+      this._owed = (await this._askForAThird(this._column)) === 'unlaid';
     }
+    this._logger.info('a group was made above the terminals, which had the editor area to themselves', {
+      column: this._column,
+    });
   }
 
   /**
@@ -349,16 +488,74 @@ export class VsCodeEditorStrip {
   }
 
   /**
-   * A third of the space, asked for pointwise. `withGroupShare` answers `null`
-   * when there is nothing to ask for -- a strip with no sibling, a layout with
-   * no sizes yet -- and then nothing is asked for, rather than a layout being
-   * written that says the same as the one already there.
+   * A third of the space, asked for pointwise and then LOOKED AT.
+   *
+   * **The customer's sixth complaint, second half, measured 2026-08-22 in
+   * Cursor.** The plus was pressed with the list focused in a window that had
+   * only just started, and the strip came out holding 673 pixels of the 743 the
+   * editor area had -- "появляется новый терминал на всю область файлов". Every
+   * part of this file had done its job and none of them had lied: the split was
+   * made and checked, `withGroupShare` was handed the layout the editor
+   * answered with, and that layout had no sizes in it yet, so it answered `null`
+   * -- correctly, because there was nothing to divide. What was missing is the
+   * line below: the caller could not tell "the editor is not laid out yet" from
+   * "the strip is a third", and the strip kept whatever the split gave it.
+   *
+   * So the size is read back, and the asking repeats until the answer is a size
+   * or the looks run out. `null` is not a share of zero and must never be read
+   * as one -- see `groupShare`, which is where that distinction lives.
+   *
+   * **Never grows the strip**, and that is what makes a loop here safe: a share
+   * already at or under a third is left exactly as it is, so a person who has
+   * dragged the strip smaller keeps their drag, and the loop can only ever run
+   * where nobody has chosen the size yet.
+   *
+   * Answers with which of three things happened, because the two ways of not
+   * succeeding are answered differently. `unlaid` is a group the editor has not
+   * laid out -- an empty one, which is every strip at the moment it is made --
+   * and it is worth coming back to when its tabs change. `refused` is a group
+   * that was laid out, was too big, and stayed too big through every look;
+   * coming back to that one would be asking the same question forever.
    */
-  private async _askForAThird(column: vscode.ViewColumn): Promise<void> {
-    const layout = await vscode.commands.executeCommand<EditorLayout>(GET_LAYOUT);
-    const next = withGroupShare(layout, column - 1, A_THIRD);
-    if (next !== null) {
-      await vscode.commands.executeCommand(SET_LAYOUT, next);
+  private async _askForAThird(column: vscode.ViewColumn): Promise<AThird> {
+    let last: number | null = null;
+    for (let look = 1; look <= SHARE_LOOKS; look += 1) {
+      const layout = await vscode.commands.executeCommand<EditorLayout>(GET_LAYOUT);
+      last = groupShare(layout, column - 1);
+      // The editor's own answer, in the log, because every defect this file has
+      // had was a disagreement between what it asked for and what it got --
+      // and the only place the disagreement is visible is here.
+      this._logger.info('the editor was asked what the terminals are holding', {
+        column,
+        look,
+        share: last,
+        layout: JSON.stringify(layout),
+      });
+      if (last !== null && last <= A_THIRD + A_SHADE_OVER) {
+        return 'settled';
+      }
+      const next = withGroupShare(layout, column - 1, A_THIRD);
+      if (next !== null) {
+        await vscode.commands.executeCommand(SET_LAYOUT, next);
+      }
+      if (look < SHARE_LOOKS) {
+        await new Promise((resolve) => setTimeout(resolve, BETWEEN_ATTEMPTS_MS));
+      }
     }
+    if (last === null) {
+      // Nothing is wrong yet: an empty group is a group the editor has not laid
+      // out, and the terminal that will make it lay one out is not there yet.
+      this._logger.info('the editor has not sized the group of the terminals, so the size will be asked for again', {
+        column,
+        looks: SHARE_LOOKS,
+      });
+      return 'unlaid';
+    }
+    this._logger.warn('the terminals are holding more of the editor area than the third they were made with', {
+      column,
+      share: last,
+      looks: SHARE_LOOKS,
+    });
+    return 'refused';
   }
 }

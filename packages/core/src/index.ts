@@ -42,6 +42,7 @@ export {
 } from './domain/services/window-shutdown';
 
 export {
+  groupShare,
   withGroupShare,
   type EditorLayout,
   type EditorLayoutNode,
