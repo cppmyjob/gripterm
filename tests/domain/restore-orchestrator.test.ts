@@ -1,4 +1,5 @@
 import {
+  CONTEXT_OVER,
   ConflictError,
   HookEventParser,
   ListeningAddress,
@@ -10,6 +11,7 @@ import {
   TerminalId,
   TerminalLifecycleService,
   TerminalStateMachine,
+  presentTerminal,
   type AdoptOptions,
   type AgentCommand,
   type AgentCommandFactory,
@@ -703,6 +705,39 @@ describe('a restore whose terminal cannot be started at all', () => {
 
     expect(report.attempts.map((one) => one.outcome)).toStrictEqual(['unstartable']);
     expect(here.registry.knows(entry.terminalId)).toBe(true);
+  });
+
+  it('says the record has no process, so the row it leaves can be got rid of', async () => {
+    /*
+     * The customer, 2026-08-21 and again on the 22nd: rows that stay in the
+     * list and cannot be deleted by any means.
+     *
+     * A record comes out of the store wearing the state its window died in.
+     * `idle` -- the fixture's, and the commonest -- is a state
+     * `presentTerminal` reads as a terminal this window can still act on, so
+     * the row would offer Close, Rename and Focus and NOT Delete, would show no
+     * green button to try the restore again, and would be refused by the
+     * palette's Delete with "every terminal of this window is still running".
+     * The only way out of it was to close a conversation that had never opened.
+     *
+     * Asserted through `presentTerminal` and `DISCARDABLE_ROWS` rather than on
+     * the state alone, because the state is not what the person meets: the
+     * `contextValue` is what every menu in the manifest is keyed on.
+     */
+    const here = stand();
+    const entry = abandoned(here);
+    expect(entry.observed.state).toBe('idle');
+    here.commands.failure = new Error('no settings file');
+
+    await here.orchestrator.run(planFor(entry));
+
+    const left = here.registry.get(entry.terminalId);
+    expect(left?.observed.state).toBe('orphaned');
+    const shown = presentTerminal(left as TerminalEntry);
+    expect(shown.contextValue).toBe(CONTEXT_OVER);
+    // And still worth offering back: `orphaned` keeps the record restorable, so
+    // the green button is on the row rather than gone with the failure.
+    expect(left?.isRestorable()).toBe(true);
   });
 
   it('leaves no wait armed for a terminal that does not exist', async () => {

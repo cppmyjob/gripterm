@@ -1,5 +1,5 @@
 import { isWitnessedEnd } from './terminal-state-machine';
-import { resumeTimedOut } from '../events/terminal-event';
+import { processGone, resumeTimedOut } from '../events/terminal-event';
 import type { Disposable } from '../ports/disposable';
 import type { Logger } from '../ports/logger';
 import type { RegistryChange, SessionRegistry } from './session-registry';
@@ -182,9 +182,27 @@ export class RestoreOrchestrator implements Disposable {
    * So it is registered anyway. A record owned by this window and held by nobody
    * would be filtered out of the projection as ours and out of the list as
    * unheld, which is a row that disappears from every window on the machine
-   * until this one closes; registered, it is simply a row whose terminal is not
-   * running, which is a thing the tree can already draw and a person can already
-   * delete. Named in §8.2, because it stays that way until the window closes.
+   * until this one closes. Named in §8.2, because it stays that way until the
+   * window closes.
+   *
+   * **AND IT IS THEN TOLD THAT IT HAS NO PROCESS, which the register above did
+   * not do, and the difference is the whole of whether the row can be got rid
+   * of.** A record comes out of the store wearing the state its window died in
+   * -- `idle`, `working`, `waiting_input` -- and `presentTerminal` reads every
+   * one of those as a terminal this window can still act on
+   * (`gripterm.terminal.live`). The menus keyed on that value offer Close,
+   * Rename and Focus; they do NOT offer Delete, they do not offer Resume, and
+   * the palette's own Delete refuses the record with "every terminal of this
+   * window is still running". So a start that failed left a row with a green
+   * tick, no terminal behind it, and no way out but closing a conversation that
+   * was never open. This comment used to claim such a row was one "a person can
+   * already delete", and that was simply false (found 2026-08-22, reading after
+   * the customer's report of rows that would not go away).
+   *
+   * `ProcessGone` is the true thing to say -- the record was adopted and no
+   * process was made for it -- and `orphaned` is what the machine makes of it:
+   * not live, so the row offers the journal, Start Over and Delete; still
+   * restorable, so the green button is there to try again.
    */
   private async _restore(step: RestoreStep): Promise<RestoreAttempt> {
     const { entry } = step;
@@ -229,6 +247,9 @@ export class RestoreOrchestrator implements Disposable {
     } catch (cause: unknown) {
       this._forget(entry.terminalId);
       this._options.registry.register(adopted);
+      // After the register, because `ingest` only speaks about a record this
+      // window holds -- and it is the line that makes the row honest. See above.
+      this._options.registry.ingest(entry.terminalId, processGone(adopted.observed.pid));
       this._options.logger.error('a record was adopted and its terminal could not be started', {
         terminalId: entry.terminalId.value,
         reason: String(cause),
