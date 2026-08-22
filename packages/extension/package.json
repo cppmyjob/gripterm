@@ -286,7 +286,7 @@
       "editor/title": [
         {
           "command": "gripterm.maximizeTerminals",
-          "when": "activeEditor == 'terminalEditor'",
+          "when": "gripterm.terminalInFront",
           "group": "navigation@1"
         }
       ]

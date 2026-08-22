@@ -93,6 +93,7 @@ import { registerResumeTerminal } from './commands/resume-terminal';
 import { registerStartOver } from './commands/start-over';
 import { registerFocusTerminal } from './commands/focus-terminal';
 import { registerMaximizeTerminals } from './commands/maximize-terminals';
+import { TERMINAL_IN_FRONT_KEY, TerminalInFront } from './ui/terminal-in-front';
 import { TerminalTabDecorations } from './ui/terminal-tab-decorations';
 import { registerMetadataCommands } from './commands/edit-metadata';
 import { registerNewTerminal } from './commands/new-terminal';
@@ -262,6 +263,14 @@ export interface GriptermApi {
    * checking its own guess rather than the pairing.
    */
   readonly tabs: TerminalTabDecorations;
+  /**
+   * Whether the editor in front is a terminal, which is what the maximise
+   * button is drawn on.
+   *
+   * Exposed for the live suite: a context key cannot be read back through the
+   * API, so the only way to hold this promise is to ask the object that sets it.
+   */
+  readonly inFront: TerminalInFront;
   /**
    * The five things a person changes about their own record.
    *
@@ -523,6 +532,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
    */
   const tabs = new TerminalTabDecorations({ registry, logger });
   context.subscriptions.push(tabs);
+
+  /*
+   * Whether a terminal is the editor in front (customer's report, 2026-08-22).
+   *
+   * A context key of ours, set from here and nowhere else, and the reason it
+   * exists is in `TerminalInFront`: the platform key it replaces was answered
+   * by one editor and not by the other, which took the maximise button off the
+   * terminal's tab AND out of the command palette in the same stroke.
+   */
+  const inFront = new TerminalInFront({
+    announce: (terminal) => {
+      void vscode.commands.executeCommand('setContext', TERMINAL_IN_FRONT_KEY, terminal);
+    },
+    logger,
+  });
+  context.subscriptions.push(inFront);
 
   const location = readLaunchLocation(logger);
   // Read here rather than where it used to be read, further down: the engine is
@@ -993,6 +1018,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     gateway,
     makeGateway: terminalGatewayFor,
     tabs,
+    inFront,
     endOwnProcesses,
     lifecycle,
     metadata,

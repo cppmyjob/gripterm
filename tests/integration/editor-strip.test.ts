@@ -547,12 +547,15 @@ suite('the strip of our own', () => {
    * about this editor and about nothing else.
    *
    * What is NOT asserted here, because nothing in the API can see it: that the
-   * chevron is drawn on the title bar of our group and nowhere else. The `when`
-   * clause is the editor's to evaluate, and a menu's visibility is not
-   * readable. That one is an eye check, and it is written down as one.
+   * chevron is drawn on the title bar of our group and nowhere else. A menu's
+   * visibility is not readable. What IS asserted, below, is the whole of what
+   * the editor is given to decide it with -- the customer reported on
+   * 2026-08-22 that the button had still never appeared, and the `when` behind
+   * it was the platform's `activeEditor == 'terminalEditor'`, a string a fork
+   * is free not to answer. It is ours now, so the answer is ours to hold.
    */
   test('throws the terminals over the whole editor area, and puts them back', async () => {
-    const { gateway } = await api();
+    const { gateway, inFront } = await api();
     const commands = await vscode.commands.getCommands(true);
     assert.ok(
       commands.includes('gripterm.maximizeTerminals'),
@@ -590,6 +593,15 @@ suite('the strip of our own', () => {
         'the strip to become the active group',
         () => vscode.window.tabGroups.activeTabGroup.viewColumn === strip
       );
+      // The key the button is drawn on, and the only part of the drawing a run
+      // can reach. `refresh` because a tab that became active without an event
+      // -- the API promises no order here -- must not be read as "no terminal".
+      inFront.refresh();
+      assert.equal(
+        inFront.inFront,
+        true,
+        'a terminal is the editor in front and the key that draws the button says otherwise'
+      );
 
       const before = sizeAndSpanOf(await layoutNow(), strip - 1);
       assert.ok(before !== null, 'the editor reports no size for our group');
@@ -626,6 +638,14 @@ suite('the strip of our own', () => {
       handle.dispose();
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     }
+
+    // And it goes back down: a button that never turns off is a button on
+    // every file the person opens.
+    await waitFor('the terminal to be gone from the editor area', () =>
+      vscode.window.tabGroups.all.every((group) =>
+        group.tabs.every((tab) => !(tab.input instanceof vscode.TabInputTerminal))));
+    inFront.refresh();
+    assert.equal(inFront.inFront, false, 'the key still says a terminal is in front, and there is none');
   });
 
   test('M2.24: lets the strip go when its last terminal goes', async () => {
