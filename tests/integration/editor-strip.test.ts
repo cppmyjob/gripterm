@@ -322,6 +322,20 @@ suite('the strip of our own', () => {
     const before = sizeAndSpanOf(await layoutNow(), restored - 1);
     assert.ok(before !== null);
 
+    /*
+     * The person is NOT in the empty group, and that is the customer's window
+     * rather than a detail of the stand. `newGroupBelow` above leaves the
+     * editor on the group it made, and with the focus there the rule that stood
+     * here until 2026-08-22 -- lock it only if it is already active -- locked
+     * it by luck. Their log says what happens otherwise, four windows over five
+     * hours: `{"column":2,"locked":false}`.
+     */
+    await vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
+    await waitFor(
+      `the editor to be on the person's own group: ${describeGroups()}`,
+      () => vscode.window.tabGroups.activeTabGroup.viewColumn === vscode.ViewColumn.One
+    );
+
     const handle = await gateway.create({
       terminalId: TERMINAL_ID,
       name: 'gripterm-m224-adopted',
@@ -349,6 +363,41 @@ suite('the strip of our own', () => {
       const after = sizeAndSpanOf(await layoutNow(), restored - 1);
       assert.ok(after !== null);
       assert.equal(after.size, before.size, 'the adopted group was resized');
+
+      /*
+       * And the adopted group is OURS, which is the half this test did not
+       * hold until 2026-08-22. The customer's log, four windows over five
+       * hours:
+       *
+       *   the terminals went into the empty group at the end of the editor
+       *   area {"column":2,"locked":false}
+       *
+       * An unlocked strip takes the person's next file. They open a terminal,
+       * the strip becomes the active group, they click a file in the explorer,
+       * and it lands beside the terminal as a tab -- "он делит область с
+       * файлами... справа от терминала появляется файл".
+       *
+       * The lock is asserted the way a person meets it: the strip is made the
+       * active group, a document is opened with NO target, and it must land
+       * somewhere else. `autoLockGroups.terminalEditor` is off in this window
+       * (the first test of this suite turns it off and leaves it off), so what
+       * turns the document away is our lock and nothing else.
+       */
+      await vscode.commands.executeCommand(`workbench.action.focus${['First', 'Second', 'Third'][restored - 1] ?? 'First'}EditorGroup`);
+      await waitFor(
+        `the strip to be the active group: ${describeGroups()}`,
+        () => vscode.window.tabGroups.activeTabGroup.viewColumn === restored
+      );
+      const wanderer = await vscode.workspace.openTextDocument({
+        content: 'a file opened with no target while the strip is in front',
+        language: 'plaintext',
+      });
+      const landed = (await vscode.window.showTextDocument(wanderer)).viewColumn;
+      assert.notEqual(
+        landed,
+        restored,
+        `a file landed in the strip, so the group we adopted was never locked: ${describeGroups()}`
+      );
     } finally {
       handle.dispose();
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');

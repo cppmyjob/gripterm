@@ -27,6 +27,25 @@ const GET_LAYOUT = 'vscode.getEditorLayout';
 const SET_LAYOUT = 'vscode.setEditorLayout';
 
 /**
+ * Putting the editor on one group by its number, which the workbench spells as
+ * eight separate commands and not as one that takes an argument.
+ *
+ * Eight because that is how many the workbench has; a ninth column cannot be
+ * focused by any command, and a strip that lands there is left unlocked with a
+ * line in the log rather than pretended about.
+ */
+const FOCUS_GROUP: Readonly<Record<number, string>> = {
+  1: 'workbench.action.focusFirstEditorGroup',
+  2: 'workbench.action.focusSecondEditorGroup',
+  3: 'workbench.action.focusThirdEditorGroup',
+  4: 'workbench.action.focusFourthEditorGroup',
+  5: 'workbench.action.focusFifthEditorGroup',
+  6: 'workbench.action.focusSixthEditorGroup',
+  7: 'workbench.action.focusSeventhEditorGroup',
+  8: 'workbench.action.focusEighthEditorGroup',
+};
+
+/**
  * How many times a split is asked for before this file believes the answer, and
  * how long it waits in between.
  *
@@ -108,6 +127,14 @@ const REPAIR_WAIT_MS = 500;
  * same way -- the remembered column is checked before it is reused, and a strip
  * that is no longer ours is abandoned rather than argued with.
  */
+/** What `workbench.editor.autoLockGroups` says about terminals, in force. */
+function locksTerminals(): boolean {
+  const groups = vscode.workspace
+    .getConfiguration('workbench.editor')
+    .get<Record<string, boolean>>('autoLockGroups');
+  return groups?.terminalEditor === true;
+}
+
 export class VsCodeEditorStrip {
   private readonly _logger: Logger;
   private readonly _watch: vscode.Disposable;
@@ -166,19 +193,37 @@ export class VsCodeEditorStrip {
     const empty = this._emptyAtTheEnd();
     if (empty !== null) {
       this._column = empty;
-      // Locked only if it is already the group the editor is on -- the command
-      // names no target and takes the active group, and moving the focus to lock
-      // something would be a worse trade than the lock is worth. At the start of
-      // a window the restored strip IS the active group (measured 2026-08-21),
-      // which is the case this exists for; anywhere else the editor's own
-      // `autoLockGroups.terminalEditor` locks it when our terminal opens.
-      const active = vscode.window.tabGroups.activeTabGroup.viewColumn === empty;
-      if (active) {
-        await vscode.commands.executeCommand(LOCK_GROUP);
-      }
+      /*
+       * Locked, and it takes a moment of the focus to do it. What stood here
+       * locked the group ONLY when it was already the active one, on two
+       * beliefs, and the customer's log of 2026-08-22 says both were wrong:
+       *
+       *   the terminals went into the empty group at the end of the editor
+       *   area {"column":2,"locked":false}
+       *
+       * -- every time, over five hours and four windows. The first belief was
+       * that a restored strip is the active group at the start of a window; it
+       * is not, and `locked: false` is that sentence measured. The second was
+       * that `autoLockGroups.terminalEditor` locks it for us otherwise;
+       * measured on 2026-08-22 in Cursor, it does not -- the editor's own lock
+       * is for a group MADE for an editor, not for one that was already there.
+       *
+       * So the strip was unlocked, and an unlocked strip takes the person's
+       * next file: they open a terminal, the strip becomes the active group,
+       * they click a file in the explorer and it lands in the strip beside the
+       * terminal. That is the whole of "он делит область с файлами... справа от
+       * терминала появляется файл" -- a tab to the right, not a pane.
+       */
+      const locked = await this._lock(empty);
       this._logger.info('the terminals went into the empty group at the end of the editor area', {
         column: empty,
-        locked: active,
+        locked,
+        // The editor's own lock, beside ours, because the two cover for each
+        // other and a log that shows one without the other cannot say which was
+        // holding the strip -- measured 2026-08-22: in Cursor the platform
+        // locked an adopted group that we had left open, and in the same editor
+        // it did NOT lock the only group of an empty area.
+        editorLocksTerminals: locksTerminals(),
       });
       return empty;
     }
@@ -236,6 +281,56 @@ export class VsCodeEditorStrip {
     this._column = made;
     this._logger.info('a group of our own was opened below the editors', { column: made });
     return made;
+  }
+
+  /**
+   * Locks that group, whether or not it is the one the editor is on.
+   *
+   * `lockEditorGroup` names no target and takes the ACTIVE group, so locking
+   * one that is not active means making it active for as long as the lock
+   * takes. That was refused when this file was written -- "moving the focus to
+   * lock something would be a worse trade than the lock is worth" -- and the
+   * customer paid for the refusal: the strip stayed open to their files. The
+   * trade is the other way round, and the focus is put back.
+   *
+   * Every step is CHECKED, because every one of them is a command: the focus
+   * command may name a group that is not there, and a lock asked of the wrong
+   * active group would lock somebody else's.
+   */
+  private async _lock(column: vscode.ViewColumn): Promise<boolean> {
+    const was = vscode.window.tabGroups.activeTabGroup.viewColumn;
+    if (was === column) {
+      await vscode.commands.executeCommand(LOCK_GROUP);
+      return true;
+    }
+    if (!(await this._focus(column))) {
+      this._logger.warn('the editor would not put the focus on the group of the terminals, which is left unlocked', {
+        column,
+      });
+      return false;
+    }
+    await vscode.commands.executeCommand(LOCK_GROUP);
+    // Back where the person was. A failure here is worth a line and nothing
+    // more: the lock is done, and the focus is the editor's to argue about.
+    if (!(await this._focus(was))) {
+      this._logger.info('the focus was not put back after the terminals` group was locked', { was, column });
+    }
+    return true;
+  }
+
+  /** Puts the editor on that group, and answers whether it went. */
+  private async _focus(column: vscode.ViewColumn): Promise<boolean> {
+    const command = FOCUS_GROUP[column];
+    if (command === undefined) {
+      return false;
+    }
+    try {
+      await vscode.commands.executeCommand(command);
+    } catch (cause: unknown) {
+      this._logger.warn('a focus of an editor group threw', { column, cause: String(cause) });
+      return false;
+    }
+    return vscode.window.tabGroups.activeTabGroup.viewColumn === column;
   }
 
   /**
