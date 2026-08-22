@@ -207,6 +207,28 @@ export function stateWords(state: TerminalState): string {
   return APPEARANCE[state].words;
 }
 
+/**
+ * Whether a terminal in this state is one this window can still act on.
+ *
+ * The same field the row is drawn from, read out for the one caller that has to
+ * agree with the row and lives on the other side of the list: `discard` refuses
+ * to throw a record away while its conversation is running, and "running" has
+ * to mean here exactly what it means on the row -- or the person is offered
+ * Delete on a row whose Delete then refuses.
+ *
+ * That is not hypothetical. It was reported on 2026-08-22 and reproduced by the
+ * owner in three moves: open a terminal, close it without typing anything, wait
+ * for the row to say `no process`, press Delete. The record said `orphaned`, so
+ * the row was over and the menu offered Delete and NOT Close; the refusal asked
+ * a different question -- "is this window still holding a terminal object" --
+ * answered yes, and told the person to close a terminal the row gave them no
+ * way to close. Resume refused it too, because a watched terminal cannot be
+ * started twice. Every act on that row failed.
+ */
+export function actsOnTheTerminal(state: TerminalState): boolean {
+  return APPEARANCE[state].live;
+}
+
 /** Long enough to recognise the answer, short enough not to become the row. */
 const MESSAGE_LIMIT = 160;
 

@@ -590,6 +590,7 @@ export {
   CONTEXT_FOREIGN,
   CONTEXT_LIVE,
   CONTEXT_OVER,
+  actsOnTheTerminal,
   presentTerminal,
   stateWords,
   type PresentationContext,

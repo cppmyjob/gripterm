@@ -1,4 +1,5 @@
 import { ConflictError } from '../errors/gripterm-error';
+import { actsOnTheTerminal } from './terminal-presentation';
 import { HumanMetadata } from '../entities/human-metadata';
 import { ObservedState } from '../entities/observed-state';
 import { SessionId } from '../entities/session-id';
@@ -147,24 +148,22 @@ export class TerminalLifecycleService implements Disposable {
    * name, the task, the notes, the tags, and the recipe that says which project
    * this is.
    *
-   * **Refused while this window still holds a process for the record**, on the
-   * same evidence `discard` uses and for a sharper reason. A restore that failed
-   * in the editor leaves a LIVE `claude` in an open pane -- measured, A26: the
-   * process prints its refusal and does not exit -- and starting over on top of
-   * that is precisely how one terminal becomes two (О3). The pane is not closed
-   * for them either: it is not ours to kill, and nothing here establishes that
-   * anything is wrong with it.
+   * **Refused while the record says a conversation is running**, by the same
+   * rule `discard` uses -- `_releasedItsPane` -- and for a sharper reason. A
+   * restore that failed in the editor leaves a LIVE `claude` in an open pane --
+   * measured, A26: the process prints its refusal and does not exit, so the row
+   * reaches `degraded` rather than any end state -- and starting over on top of
+   * that is precisely how one terminal becomes two (О3). That pane is not
+   * closed for them: it is not ours to kill, and nothing here establishes that
+   * anything is wrong with it. A pane held for a record that IS over is the
+   * other case, and that one goes; see the rule.
    *
    * **The archive happens last.** Reversed, a start that threw would leave the
    * person with nothing on screen and their notes in the trash; this way the
    * worst case is two rows, which they can see and act on (§I.3).
    */
   public async startOver(terminalId: TerminalId): Promise<StartOverOutcome> {
-    if (this._watched.has(terminalId.value)) {
-      this._options.logger.warn(
-        'a terminal was not started over, because this window still has a process for it',
-        { terminalId: terminalId.value }
-      );
+    if (!this._releasedItsPane(terminalId, 'started over')) {
       return { kind: 'still-running' };
     }
 
@@ -385,23 +384,16 @@ export class TerminalLifecycleService implements Disposable {
    * goes is our record of the terminal, and it goes to `trash/` rather than to
    * nothing, so the answer to "I did not mean that" is a file move (§I.3).
    *
-   * **Refused while this window still has a process for the terminal**, and the
-   * evidence is `_watched` rather than the record's state: a record can look
-   * finished -- `orphaned` is a process that died without saying so -- while its
-   * terminal is still open in the editor. Deleting under an open terminal leaves
-   * a pane nothing can name and events arriving for a record nobody holds. The
-   * menus offer this only on rows that are over, so the refusal is the second
-   * line of defence and not the first; it is here because the first one lives in
-   * a manifest, and a manifest is not a rule.
+   * **Refused while the record says a conversation is running, and never on any
+   * other ground** -- `_releasedItsPane`, which is where the 2026-08-22
+   * correction and the report behind it are written down. A pane this window is
+   * still holding for a record that is over goes with the record.
    *
    * It lives on this service and not beside the metadata edits for one reason:
    * that precondition is knowledge only this object has.
    */
   public discard(terminalId: TerminalId): DiscardOutcome {
-    if (this._watched.has(terminalId.value)) {
-      this._options.logger.warn('a record was not deleted, because its terminal is still running', {
-        terminalId: terminalId.value,
-      });
+    if (!this._releasedItsPane(terminalId, 'deleted')) {
       return 'still-running';
     }
     if (!this._options.registry.knows(terminalId)) {
@@ -541,6 +533,67 @@ export class TerminalLifecycleService implements Disposable {
     this._options.logger.info('a terminal was closed by the person, so its record will not come back', {
       terminalId: terminalId.value,
     });
+  }
+
+  /**
+   * Whether the person may have this record, and takes its leftover pane if so.
+   *
+   * The one rule behind both `discard` and `startOver`, written once because
+   * having it twice is how they came to disagree with the ROW -- and the row is
+   * what the person is looking at.
+   *
+   * **What went wrong, reproduced by the owner on 2026-08-22 in three moves:**
+   * open a terminal, close it without typing anything, wait until the row says
+   * `no process`, press Delete. Both methods asked "is this window still
+   * holding a terminal object" and refused on yes. But the record by then said
+   * `orphaned` -- the reconciler had found the process gone -- so
+   * `presentTerminal` drew the row as OVER, and the manifest offers Delete and
+   * Start Over there and does NOT offer Close. So the answer was "close this
+   * terminal before deleting its record", naming an act that row has no button
+   * for; Start Over refused in the same breath; and Resume could not run either,
+   * because a watched terminal must not be started twice. Every act on that row
+   * failed and only a restart cleared it: "удалить их нельзя никакими
+   * способами".
+   *
+   * So the question is now the one the row was drawn from --
+   * `actsOnTheTerminal`, the same table, read twice rather than guessed at
+   * twice. While the record says a conversation is running, this refuses, and
+   * the row is LIVE, which is exactly where Close is offered: the person is
+   * told to do something they can do.
+   *
+   * **And when the record says it is over, the leftover pane goes with it.** The
+   * old comment was right that acting under an open terminal leaves a pane
+   * nothing can name; what it missed is that the way out is to take the pane,
+   * not to refuse. A pane still held for a record whose conversation is over is
+   * a husk -- the process is established gone, which is how the record reached
+   * that state at all. `dispose` on a terminal that has already gone is
+   * harmless, which is what makes this safe in the case that produced the
+   * report: an editor that never told us the terminal had closed.
+   */
+  private _releasedItsPane(terminalId: TerminalId, act: string): boolean {
+    const watched = this._watched.get(terminalId.value);
+    if (watched === undefined) {
+      return true;
+    }
+    const state = this._options.registry.stateOf(terminalId);
+    if (state !== null && actsOnTheTerminal(state)) {
+      this._options.logger.warn(`a record was not ${act}, because its terminal is still running`, {
+        terminalId: terminalId.value,
+        state,
+      });
+      return false;
+    }
+    // Dropped from the watch BEFORE the pane is taken, so that the close event
+    // this raises finds nothing left to write: one act must not reach the
+    // record as two.
+    watched.subscription.dispose();
+    this._watched.delete(terminalId.value);
+    watched.handle.dispose();
+    this._options.logger.info(`a record being ${act} still had a pane of its own, which went with it`, {
+      terminalId: terminalId.value,
+      state,
+    });
+    return true;
   }
 
   private _watch(handle: TerminalHandle, intent: LaunchIntent): void {

@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as vscode from 'vscode';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { CONTEXT_OVER, presentTerminal } from '../../packages/core/src/index';
+import { CONTEXT_OVER, presentTerminal, processGone } from '../../packages/core/src/index';
 import type { GriptermApi } from '../../packages/extension/src/extension';
 
 /**
@@ -58,6 +58,13 @@ async function waitFor(what: string, ready: () => boolean, ms = 20_000): Promise
     }
     await pause(100);
   }
+}
+
+/** How many tabs in the window carry that name. */
+function tabsNamed(name: string): number {
+  return vscode.window.tabGroups.all
+    .flatMap((group) => group.tabs)
+    .filter((tab) => tab.label.includes(name)).length;
 }
 
 function describeGroups(): string {
@@ -201,6 +208,64 @@ suite('the row a closed terminal leaves behind', () => {
       }
       await pause(1500);
       await rm(join(readiness.storageDir, 'terminals', terminalId.value), { recursive: true, force: true });
+    }
+  });
+
+  test('a record whose process is gone can be deleted although its pane is still there', async () => {
+    /*
+     * The owner, 2026-08-22, in three moves: open a terminal, close it without
+     * typing anything, wait until the row says `no process`, press Delete. The
+     * answer was "Gripterm: close this terminal before deleting its record" --
+     * on a row whose menu offers Delete and does NOT offer Close.
+     *
+     * The reconciler's own act is what puts a record into `orphaned`, so this
+     * suite performs it directly rather than waiting thirty seconds for a sweep
+     * whose subject is somewhere else. What only a live host can answer is the
+     * half after the decision: a pane taken with the record really leaves the
+     * editor.
+     */
+    const gripterm = await api();
+    const { registry, lifecycle, readiness } = gripterm;
+    assert.notEqual(readiness.cliPath, null, 'claude was not found on PATH, and this suite starts a real one');
+
+    const started = await lifecycle.launch({
+      displayName: 'a terminal whose process went without saying so',
+      recipe: await recipeFromStore(gripterm),
+    });
+    const { terminalId } = started;
+    let deleted = false;
+    try {
+      await waitFor('the record to exist', () => registry.get(terminalId) !== undefined);
+      await waitFor('the terminal to get a tab', () => tabsNamed(started.metadata.displayName) === 1);
+
+      registry.ingest(terminalId, processGone(null));
+      const row = rowFor(gripterm, terminalId);
+      assert.ok(row);
+      assert.equal(row.state, 'orphaned', 'the record did not reach the state the person was looking at');
+      assert.equal(row.contextValue, CONTEXT_OVER, 'the row was not the one that offers Delete');
+
+      const outcome = lifecycle.discard(terminalId);
+      assert.equal(
+        outcome,
+        'discarded',
+        `the deletion answered ${outcome} on a row whose menu has no Close on it`
+      );
+      deleted = true;
+
+      assert.equal(rowFor(gripterm, terminalId), null, 'the row survived being deleted');
+      await waitFor(
+        `the pane to go with the record: ${describeGroups()}`,
+        () => tabsNamed(started.metadata.displayName) === 0
+      );
+    } finally {
+      if (!deleted && registry.knows(terminalId)) {
+        lifecycle.close(terminalId);
+        await pause(1000);
+        lifecycle.discard(terminalId);
+      }
+      await pause(1500);
+      await rm(join(readiness.storageDir, 'terminals', terminalId.value), { recursive: true, force: true });
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     }
   });
 

@@ -222,7 +222,7 @@ function detailFor(entry: TerminalEntry, disposal: RecordDisposal): string {
     return (
       `${kept} So is this terminal's event journal. What goes is the record — its name, task, ` +
       'notes and tags — and it is moved to the trash folder of your Gripterm storage rather ' +
-      'than deleted.'
+      'than deleted. If this window still has a pane open for it, that pane is closed as well.'
     );
   }
 

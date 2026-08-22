@@ -1,4 +1,5 @@
 import {
+  CONTEXT_OVER,
   ConflictError,
   HookEventParser,
   ObservedState,
@@ -9,6 +10,8 @@ import {
   TerminalLifecycleService,
   TerminalStateMachine,
   exitVerdict,
+  presentTerminal,
+  processGone,
   type AgentCommand,
   type AgentCommandFactory,
   type LaunchIntent,
@@ -1009,10 +1012,10 @@ describe('deleting the record of a terminal', () => {
     expect(registry.list()).toStrictEqual([]);
   });
 
-  it('refuses while this window still has a process for it', async () => {
-    // The evidence is the watch and not the record's state: a record can look
-    // finished while its terminal is still open, and deleting under an open
-    // terminal leaves a pane nothing can name.
+  it('refuses while the record says a conversation is running', async () => {
+    // The question is the one the ROW is drawn from, so that Delete cannot
+    // refuse on a row whose menu offers Delete: a record in a live state draws
+    // a live row, and a live row is where Close is offered.
     const { lifecycle, registry, logger } = stand();
     const entry = await lifecycle.launch(request());
 
@@ -1020,6 +1023,48 @@ describe('deleting the record of a terminal', () => {
 
     expect(registry.knows(entry.terminalId)).toBe(true);
     expect(logger.warnings.at(-1)?.message).toContain('still running');
+  });
+
+  it('takes a pane left over for a record whose process is established gone', async () => {
+    /*
+     * The owner, 2026-08-22, in three moves: open a terminal, close it without
+     * typing anything, wait until the row says `no process`, press Delete.
+     *
+     * The reconciler finds the process gone and the record reaches `orphaned`,
+     * which `presentTerminal` draws as a row that is OVER -- where the manifest
+     * offers Delete and Start Over and does NOT offer Close. The refusal used
+     * to ask a different question, "is this window still holding a terminal
+     * object", and answered "close this terminal before deleting its record":
+     * an act that row has no button for. Resume could not run either. Every act
+     * on that row failed and only a restart cleared it.
+     */
+    const { lifecycle, gateway, registry, logger } = stand();
+    const entry = await lifecycle.launch(request());
+    // The reconciler's own act, and the only thing that produces `orphaned`.
+    registry.ingest(entry.terminalId, processGone(null));
+    expect(registry.get(entry.terminalId)?.observed.state).toBe('orphaned');
+    expect(presentTerminal(registry.get(entry.terminalId) as TerminalEntry).contextValue).toBe(CONTEXT_OVER);
+
+    expect(lifecycle.discard(entry.terminalId)).toBe('discarded');
+
+    expect(registry.knows(entry.terminalId)).toBe(false);
+    // And the husk goes with it, or the person is left with a pane naming a
+    // record that no longer exists.
+    expect(gateway.handleFor(entry.terminalId).disposed).toBe(true);
+    expect(logger.infos.some((line) => line.message.includes('had a pane of its own'))).toBe(true);
+  });
+
+  it('starts a record over although a pane was left over for it', async () => {
+    // The same row, the same dead end: `Start Over` is offered on it and used
+    // to refuse on the same wrong question.
+    const { lifecycle, gateway, registry } = stand();
+    const entry = await lifecycle.launch(request());
+    registry.ingest(entry.terminalId, processGone(null));
+
+    const outcome = await lifecycle.startOver(entry.terminalId);
+
+    expect(outcome.kind).toBe('started');
+    expect(gateway.handleFor(entry.terminalId).disposed).toBe(true);
   });
 
   it('refuses a terminal this window does not hold, and does not shout about it', () => {
