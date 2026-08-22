@@ -2,17 +2,7 @@ import * as vscode from 'vscode';
 import type { Logger } from '@gripterm/core';
 
 export const MAXIMIZE_TERMINALS_COMMAND = 'gripterm.maximizeTerminals';
-export const RESTORE_TERMINALS_COMMAND = 'gripterm.restoreTerminals';
 
-/**
- * The editor's own toggle, named in one place.
- *
- * A command and not an API -- there is no way to maximise a group through
- * `vscode.window` -- so it is read out of the bundles before it is used and the
- * day it is renamed, this is the file that says what was being asked for. Read
- * 2026-08-21 out of VS Code 1.134.0 (`workbench.desktop.main.js`) and out of
- * Cursor's own bundle: present in both, spelled the same.
- */
 const TOGGLE_MAXIMIZE_GROUP = 'workbench.action.toggleMaximizeEditorGroup';
 
 /**
@@ -27,12 +17,19 @@ const TOGGLE_MAXIMIZE_GROUP = 'workbench.action.toggleMaximizeEditorGroup';
  * the same one the person's own chevron uses -- so this is a button in front of
  * a behaviour they already have, not a behaviour of ours.
  *
- * **Two commands for one act, and that is the whole reason there are two.** An
- * icon belongs to a command, not to a menu entry, so a single toggle can only
- * ever wear one chevron. Contributed twice with opposite `when` clauses on
- * `editorPartMaximizedEditorGroup`, the button points up when there is room to
- * grow and down when there is a way back -- which is what a person reads before
- * they read anything else.
+ * **ONE button and one icon, because the editor will not say which state we are
+ * in.** It was two at first, with the chevron pointing up or down against
+ * `editorPartMaximizedEditorGroup` -- and the owner found the defect by looking
+ * at it on 2026-08-22: with the group already maximised the button still said
+ * "Maximise", and pressing it put the group back. The key exists in both
+ * bundles and does not reach this menu, so the arrow was telling a person the
+ * opposite of the truth about their own window.
+ *
+ * An icon that cannot follow the state is not made honest by picking one of the
+ * two states and hoping. So there is one button, it says what it does -- both
+ * halves of it -- and the act is a toggle, which is exactly what the customer
+ * asked for: "распахивал бы панель на всю высоту... при повторном клике
+ * возвращалась бы на место".
  *
  * **What acts, and the price of it.** The editor's toggle takes the ACTIVE
  * group and names no target, so this button maximises whichever group is
@@ -49,8 +46,5 @@ export function registerMaximizeTerminals(logger: Logger): vscode.Disposable {
     logger.info('the group holding the terminals was maximised or put back');
   };
 
-  return vscode.Disposable.from(
-    vscode.commands.registerCommand(MAXIMIZE_TERMINALS_COMMAND, toggle),
-    vscode.commands.registerCommand(RESTORE_TERMINALS_COMMAND, toggle)
-  );
+  return vscode.commands.registerCommand(MAXIMIZE_TERMINALS_COMMAND, toggle);
 }

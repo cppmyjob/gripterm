@@ -464,9 +464,14 @@ suite('the strip of our own', () => {
   test('throws the terminals over the whole editor area, and puts them back', async () => {
     const { gateway } = await api();
     const commands = await vscode.commands.getCommands(true);
-    for (const id of ['gripterm.maximizeTerminals', 'gripterm.restoreTerminals']) {
-      assert.ok(commands.includes(id), `${id} is not registered with the workbench`);
-    }
+    assert.ok(
+      commands.includes('gripterm.maximizeTerminals'),
+      'gripterm.maximizeTerminals is not registered with the workbench'
+    );
+    assert.ok(
+      !commands.includes('gripterm.restoreTerminals'),
+      'the second command is still there, and an icon that cannot follow the state lied about it'
+    );
 
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     const file = await vscode.workspace.openTextDocument({
@@ -511,7 +516,9 @@ suite('the strip of our own', () => {
         `maximised, our group has ${String(during.size)} px of the ${String(before.span)} px the editor area is`
       );
 
-      await vscode.commands.executeCommand('gripterm.restoreTerminals');
+      // The same command again: it is a toggle, which is what the customer
+      // asked for and the only thing that cannot be wrong about the state.
+      await vscode.commands.executeCommand('gripterm.maximizeTerminals');
       maximised = false;
       const after = sizeAndSpanOf(await layoutNow(), strip - 1);
 
@@ -524,7 +531,7 @@ suite('the strip of our own', () => {
     } finally {
       // A window left maximised is a window every suite after this one runs in.
       if (maximised) {
-        await vscode.commands.executeCommand('gripterm.restoreTerminals');
+        await vscode.commands.executeCommand('gripterm.maximizeTerminals');
       }
       handle.dispose();
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
