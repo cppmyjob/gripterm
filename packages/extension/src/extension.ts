@@ -452,6 +452,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   const asker = new Asker();
 
   const clock = new SystemClock();
+  /*
+   * When this window began waking up, so that it can say how long it took.
+   *
+   * The customer, 2026-08-22: "само окно Claude Code Terminals загружает данные
+   * после открытия приложения очень долго — до минуты". A complaint about time
+   * cannot be answered by a build that never says what it spent, and the two
+   * lines this stamps -- the list going on screen, and activation finishing --
+   * are the two moments a person is actually waiting for.
+   */
+  const wokeAtMs = clock.now().getTime();
   const ids = new SystemIdGenerator();
   const identity = windowIdentity(ids);
   const registry = new SessionRegistry({
@@ -712,6 +722,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     dragAndDropController: tree,
   });
   context.subscriptions.push(view);
+  logger.info('the list of terminals is on screen', {
+    // Everything before this: the store, the base read whole, the port, and
+    // finding `claude`. What comes after it -- the restore, the first sweep --
+    // changes what the rows SAY, and is timed by the line at the end.
+    tookMs: clock.now().getTime() - wokeAtMs,
+    rows: registry.list().length,
+  });
   // The person's own colour, on the row's label. The icon's colour belongs to
   // the state, and the two must not be confusable (M2.7).
   const decorations = new TerminalDecorationProvider(registry);
@@ -987,6 +1004,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   // send us -- which is how the list in `identifyEditor` grows from evidence
   // rather than from guesses.
   logger.info('Gripterm activated', {
+    tookMs: clock.now().getTime() - wokeAtMs,
     trustedWorkspace: vscode.workspace.isTrusted,
     ownerId: identity.ownerId.value,
     editorKind: identity.editorKind,

@@ -202,6 +202,8 @@ export class Reconciler implements Disposable {
   /** When the last pass began. `null` until one has. */
   private _sweptAtMs: number | null = null;
   private _timer: Disposable | null = null;
+  /** True once `start` has been answered, which is not the same as having a timer. */
+  private _started = false;
   private _disposed = false;
 
   constructor(options: ReconcilerOptions) {
@@ -212,12 +214,32 @@ export class Reconciler implements Disposable {
     this._liveness = new Map([[options.self.value, 'live']]);
   }
 
-  /** Begins the repeating sweep. A second call does nothing. */
+  /**
+   * Begins the sweep, with a pass RIGHT NOW. A second call does nothing.
+   *
+   * **The customer, 2026-08-22:** "само окно Claude Code Terminals загружает
+   * данные после открытия приложения очень долго — до минуты", and, in the same
+   * breath, a row that goes on calling itself active for about as long.
+   *
+   * This is where both of those were. A window that has just started draws
+   * every record in the state it was PERSISTED in -- a conversation that was
+   * running when the window closed is written down as running -- and the only
+   * thing that ever says otherwise is a pass of this sweep. It used to arm the
+   * timer and wait out the whole interval before the first one, thirty seconds
+   * by default, and a first pass that could not read the machine put it at
+   * sixty. Neither of the two out-of-turn triggers helps at start: the window
+   * already has focus when an extension activates, so no focus event comes.
+   *
+   * So the first pass is not waited for. The timer is armed after it, as after
+   * any other, which keeps the interval an interval BETWEEN passes rather than
+   * a schedule the first one has to keep.
+   */
   public start(): void {
-    if (this._timer !== null) {
+    if (this._started) {
       return;
     }
-    this._arm();
+    this._started = true;
+    void this._tick();
   }
 
   /**

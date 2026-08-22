@@ -906,21 +906,33 @@ describe('conversations nobody has a record of', () => {
 });
 
 describe('the sweep as a repeating thing', () => {
-  it('arms nothing until it is started, and then sweeps on the interval', async () => {
+  /*
+   * The promise this asserts CHANGED on 2026-08-22, and the customer is why:
+   * "само окно Claude Code Terminals загружает данные после открытия
+   * приложения очень долго — до минуты". Until then the first pass waited out
+   * the whole interval, so a window that had just started drew every record in
+   * the state it was written down in -- a conversation that was running when
+   * the window closed still calling itself running -- for thirty seconds, and
+   * for sixty when the first pass could not read the machine.
+   */
+  it('sweeps the moment it is started, and then on the interval', async () => {
     const { reconciler, scheduler, base } = build();
     expect(scheduler.armed).toHaveLength(0);
 
     reconciler.start();
+    await settled();
+
+    expect(base.reads).toBe(1);
     expect(scheduler.live[0]?.ms).toBe(DEFAULT_RECONCILE_INTERVAL_MS);
 
     scheduler.elapse();
     await settled();
 
-    expect(base.reads).toBe(1);
+    expect(base.reads).toBe(2);
     expect(scheduler.live[0]?.ms).toBe(DEFAULT_RECONCILE_INTERVAL_MS);
   });
 
-  it('takes the interval it was given', () => {
+  it('takes the interval it was given', async () => {
     const { scheduler } = build();
     const reconciler = new Reconciler({
       repository: new Base(),
@@ -944,6 +956,7 @@ describe('the sweep as a repeating thing', () => {
       intervalMs: 90_000,
     });
     reconciler.start();
+    await settled();
 
     expect(scheduler.live[0]?.ms).toBe(90_000);
     reconciler.dispose();
@@ -953,6 +966,7 @@ describe('the sweep as a repeating thing', () => {
     const { reconciler, scheduler, base } = build();
     base.failure = new Error('the storage directory is gone');
     reconciler.start();
+    await settled();
 
     scheduler.elapse();
     await settled();
@@ -960,9 +974,13 @@ describe('the sweep as a repeating thing', () => {
     expect(scheduler.live).toHaveLength(1);
   });
 
-  it('stops when it is disposed', () => {
+  it('stops when it is disposed', async () => {
     const { reconciler, scheduler } = build();
     reconciler.start();
+    // Awaited, or the timer this is about would not be armed yet and the
+    // assertion would pass on a reconciler that had simply not got going.
+    await settled();
+    expect(scheduler.live).toHaveLength(1);
 
     reconciler.dispose();
 
@@ -974,6 +992,7 @@ describe('the sweep as a repeating thing', () => {
     // leave a timer holding a registry nobody is drawing any more.
     const { reconciler, scheduler } = build();
     reconciler.start();
+    await settled();
     scheduler.elapse();
 
     reconciler.dispose();
@@ -1027,11 +1046,15 @@ describe('the sweep as a repeating thing', () => {
     expect(base.reads).toBe(1);
   });
 
-  it('is not started twice by a second call', () => {
-    const { reconciler, scheduler } = build();
+  it('is not started twice by a second call', async () => {
+    const { reconciler, scheduler, base } = build();
     reconciler.start();
     reconciler.start();
+    await settled();
 
+    // Both halves, because the guard moved: a second call must not sweep a
+    // second time either, and the timer alone would no longer catch that.
+    expect(base.reads).toBe(1);
     expect(scheduler.live).toHaveLength(1);
     reconciler.dispose();
   });
