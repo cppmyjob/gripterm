@@ -232,6 +232,8 @@ interface Parts {
   readonly signalled: number[];
   /** Pids the platform will refuse to signal, as one already gone does. */
   readonly unsignallable: Set<number>;
+  /** `TerminalId.value` of the records this window still holds a terminal for. */
+  readonly ourTerminals: Set<string>;
 }
 
 function build(): Parts {
@@ -250,6 +252,7 @@ function build(): Parts {
   const agents = { value: NOTHING_RUNNING, asked: 0 };
   const signalled: number[] = [];
   const unsignallable = new Set<number>();
+  const ourTerminals = new Set<string>();
 
   const reconciler = new Reconciler({
     repository: base,
@@ -283,6 +286,7 @@ function build(): Parts {
       }
       signalled.push(pid);
     },
+    holdsTerminal: (terminalId) => ourTerminals.has(terminalId.value),
     clock,
     scheduler,
     logger,
@@ -291,7 +295,7 @@ function build(): Parts {
 
   return {
     reconciler, base, presence, registry, scheduler, logger, clock, gone, agents,
-    signalled, unsignallable,
+    signalled, unsignallable, ourTerminals,
   };
 }
 
@@ -603,6 +607,50 @@ describe('a record whose process is gone', () => {
 
     expect(report.orphaned).toStrictEqual([TERMINAL_UUID]);
     expect(stateOf(registry, mine)).toBe('orphaned');
+  });
+
+  it('leaves a record alone while this window still holds its terminal, whatever the pid says', async () => {
+    /*
+     * The customer's log, 2026-08-22, ten seconds apart:
+     *
+     *   a terminal was found without its process {"pid":32496}
+     *   a terminal could not be resumed
+     *   {"cause":"ConflictError: this terminal is already running"}
+     *
+     * The sweep called the record orphaned while the window was holding a
+     * terminal for it. The pid is what `Terminal.processId` said when the
+     * terminal was made -- on Windows, the process the EDITOR started, which an
+     * installer whose executable launches something else and exits leaves dead
+     * within seconds of a conversation that is running fine.
+     */
+    const { reconciler, base, registry, gone, ourTerminals, logger } = build();
+    const mine = ours();
+    base.hold(mine);
+    registry.register(mine);
+    gone.add(CLAUDE_PID);
+    ourTerminals.add(TERMINAL_UUID);
+
+    const report = await reconciler.sweep();
+
+    expect(report.orphaned).toStrictEqual([]);
+    expect(stateOf(registry, mine)).toBe('idle');
+    // And it is said out loud, because a pid that dies under a live terminal is
+    // worth knowing about on the machine it happens on.
+    expect(logger.warnings.some((line) => line.message.includes('kept its terminal'))).toBe(true);
+  });
+
+  it('still orphans a record whose terminal this window has let go of', async () => {
+    // The other side of the same rule: no terminal of ours, a dead pid, and
+    // nothing first-hand to outrank it.
+    const { reconciler, base, registry, gone } = build();
+    const mine = ours();
+    base.hold(mine);
+    registry.register(mine);
+    gone.add(CLAUDE_PID);
+
+    const report = await reconciler.sweep();
+
+    expect(report.orphaned).toStrictEqual([TERMINAL_UUID]);
   });
 
   it('leaves a record alone while its pid still answers', async () => {

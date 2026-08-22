@@ -12,6 +12,7 @@ import type { OwnerLiveness, OwnerPresence, OwnerSurvey } from '../ports/owner-p
 import type { Scheduler } from '../ports/scheduler';
 import type { SessionRegistry } from './session-registry';
 import type { TerminalEntry } from '../entities/terminal-entry';
+import type { TerminalId } from '../entities/terminal-id';
 import type { TerminalRepository } from '../repositories/terminal-repository';
 
 /**
@@ -125,6 +126,15 @@ export interface ReconcilerOptions {
    * would disagree with the first exactly where nobody looks.
    */
   readonly isRunning: (pid: number) => boolean;
+  /**
+   * Whether THIS window still holds a terminal for that record.
+   *
+   * First-hand evidence, and it outranks the pid -- see `_lostItsProcess`.
+   * Optional because a window with no gateway of its own (a test stand) has
+   * nothing to ask, and `false` is then the honest answer rather than a
+   * pretence.
+   */
+  readonly holdsTerminal?: (terminalId: TerminalId) => boolean;
   /**
    * Ends a process by pid, or throws the way `process.kill` does.
    *
@@ -635,6 +645,39 @@ export class Reconciler implements Disposable {
       return false;
     }
     if (listed !== null && entry.claimsAnyOf(listed)) {
+      return false;
+    }
+    /*
+     * The window's own hand, and it outranks every inference below.
+     *
+     * **The customer's log, 2026-08-22, ten seconds apart:**
+     *
+     *   a terminal was found without its process {"pid":32496}
+     *   a terminal could not be resumed
+     *   {"cause":"ConflictError: this terminal is already running"}
+     *
+     * The sweep had just called that record orphaned while the window was
+     * still holding a terminal for it. The pid is second-hand -- it is what
+     * `Terminal.processId` said when the terminal was made, which on Windows
+     * is the process the editor STARTED, and an installer whose executable
+     * launches something else and exits leaves us holding a number that dies
+     * while the conversation goes on. The terminal object is first-hand: the
+     * editor has one or it has not.
+     *
+     * What this costs, said rather than discovered: an agent that dies inside
+     * a tab the person leaves open keeps its last state until that tab closes.
+     * The editor tells us the moment it does -- measured 2026-08-22 in Cursor,
+     * `onDidCloseTerminal` fires with an exit status -- and that is a better
+     * trade than calling a running conversation dead.
+     */
+    if (this._options.holdsTerminal?.(entry.terminalId) === true) {
+      if (observed.pid !== null && !this._options.isRunning(observed.pid)) {
+        this._options.logger.warn('a record kept its terminal although the pid it carries is gone', {
+          terminalId: entry.terminalId.value,
+          pid: observed.pid,
+          state: observed.state,
+        });
+      }
       return false;
     }
     if (precedesBoot(observed.lastEventAt.getTime(), nowMs, uptimeSeconds)) {

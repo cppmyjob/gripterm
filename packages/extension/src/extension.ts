@@ -681,6 +681,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
           ? { kind: 'unavailable', reason: readiness.reason }
           : await readAgentListing(readiness.cliPath, AGENT_LISTING_TIMEOUT_MS),
       isRunning: (pid) => isProcessThere(pid, sendSignalZero),
+      // First-hand, and it outranks the pid: the gateway either has a terminal
+      // for that record or it does not. See `_lostItsProcess`, where the
+      // customer's log of 2026-08-22 is written down.
+      holdsTerminal: (terminalId) => gateway.handleFor(terminalId) !== undefined,
       endProcess: sendKillSignal,
       clock,
       scheduler: new SystemScheduler(),
