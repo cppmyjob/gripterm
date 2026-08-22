@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { groupShare, withGroupShare } from '@gripterm/core';
+import { groupShare, rowBelowAtTheEnd, withGroupShare } from '@gripterm/core';
 import type { EditorLayout, Logger } from '@gripterm/core';
 
 /**
@@ -190,7 +190,7 @@ export class VsCodeEditorStrip {
       return kept;
     }
 
-    const empty = this._emptyAtTheEnd();
+    const empty = await this._emptyRowBelow();
     if (empty !== null) {
       this._column = empty;
       /*
@@ -228,6 +228,7 @@ export class VsCodeEditorStrip {
       return empty;
     }
 
+    await this._standWhereTheEditorsAre();
     const made = await this._splitOff(NEW_GROUP_BELOW);
     if (made === null) {
       /*
@@ -281,6 +282,35 @@ export class VsCodeEditorStrip {
     this._column = made;
     this._logger.info('a group of our own was opened below the editors', { column: made });
     return made;
+  }
+
+  /**
+   * Puts the editor on a group that HOLDS something before the area is split.
+   *
+   * `newGroupBelow` splits the ACTIVE group, and a strip belongs under the
+   * person's editors. Measured on 2026-08-22 while the two-column case was
+   * being fixed: with the editor sitting in an empty column, the split made a
+   * row inside THAT column, the empty half was then closed by the editor's own
+   * `closeEmptyGroups`, and what was left was the terminals holding the whole
+   * right-hand column -- the customer's picture again, reached by refusing to
+   * adopt the column and then splitting it instead.
+   *
+   * An editor area with nothing in it anywhere is left alone: splitting the one
+   * empty group is exactly right there, and is how every window starts.
+   */
+  private async _standWhereTheEditorsAre(): Promise<void> {
+    if (vscode.window.tabGroups.activeTabGroup.tabs.length > 0) {
+      return;
+    }
+    const held = vscode.window.tabGroups.all.find((group) => group.tabs.length > 0);
+    if (held === undefined) {
+      return;
+    }
+    if (!(await this._focus(held.viewColumn))) {
+      this._logger.info('the editor would not stand where the editors are, so the split is asked for where it is', {
+        wanted: held.viewColumn,
+      });
+    }
   }
 
   /**
@@ -546,9 +576,18 @@ export class VsCodeEditorStrip {
    * processes are gone -- and the restore then made a THIRD group. Every restart
    * added one, and the ones above shrank to slivers.
    *
-   * The end of the area and nothing else, because that is where a strip is: it
-   * is made below the editors, so it is the last leaf of the grid. A group in
-   * the middle with nothing in it is somebody else's.
+   * The end of the area AND BELOW THE EDITORS, which is two questions and used
+   * to be one. "The last leaf of the grid" is where a strip is only while the
+   * window is laid out in rows; in a window laid out in COLUMNS the last leaf
+   * is the right-hand column, and taking it puts the terminals full height
+   * beside the person's files -- the customer's screenshot of 2026-08-22, and
+   * their sixth complaint in its original words. Worse, it feeds itself: the
+   * editor restores the grid it was left with, so a column taken once comes
+   * back and is taken again, which is the "иногда воспроизводится" and the
+   * "непонятно, как выйти". `rowBelowAtTheEnd` in the core is the second
+   * question.
+   *
+   * A group in the middle with nothing in it is somebody else's.
    *
    * **Never the ONLY group**, and that is the other half of the same defect
    * (complaint 6). A strip that fills the editor area is locked and alone, so
@@ -561,7 +600,7 @@ export class VsCodeEditorStrip {
    * height the person left it at, and a third would be us undoing their drag on
    * every start.
    */
-  private _emptyAtTheEnd(): vscode.ViewColumn | null {
+  private async _emptyRowBelow(): Promise<vscode.ViewColumn | null> {
     const groups = vscode.window.tabGroups.all;
     if (groups.length < 2) {
       return null;
@@ -569,7 +608,34 @@ export class VsCodeEditorStrip {
     const last = groups.reduce((furthest, group) =>
       group.viewColumn > furthest.viewColumn ? group : furthest
     );
-    return last.tabs.length === 0 ? last.viewColumn : null;
+    if (last.tabs.length > 0) {
+      return null;
+    }
+    /*
+     * And it has to be BELOW, which is the half this did not ask until the
+     * customer sent a picture of their window: two columns, their terminal full
+     * height on the left, a file on the right, and this line in the log beside
+     * it -- `the terminals went into the empty group at the end of the editor
+     * area {"column":2}`. The reasoning is in `rowBelowAtTheEnd`; the short of
+     * it is that the last leaf of a window laid out in COLUMNS is the
+     * right-hand column, and a strip is never that.
+     */
+    const layout = await vscode.commands.executeCommand<EditorLayout>(GET_LAYOUT);
+    const below = rowBelowAtTheEnd(layout);
+    // `- 1` rather than `+ 1` on the other side: a `ViewColumn` counts from one
+    // and a leaf index from zero, and subtracting keeps both of them numbers --
+    // comparing an index to an enum is a comparison the linter is right to
+    // refuse, and `Number()` around an enum that is already a number is one it
+    // refuses too.
+    if (below === null || below !== last.viewColumn - 1) {
+      this._logger.info('the empty group at the end of the editor area is beside the editors, not below them', {
+        column: last.viewColumn,
+        rowBelow: below === null ? null : below + 1,
+        layout: JSON.stringify(layout),
+      });
+      return null;
+    }
+    return last.viewColumn;
   }
 
   /**
@@ -588,6 +654,23 @@ export class VsCodeEditorStrip {
     }
     const group = vscode.window.tabGroups.all.find((one) => one.viewColumn === column);
     if (group === undefined || group.tabs.some((tab) => !(tab.input instanceof vscode.TabInputTerminal))) {
+      this._column = null;
+      return null;
+    }
+    if (group.tabs.length === 0) {
+      /*
+       * A third way it stops being ours, and the live suite caught it on
+       * 2026-08-22 while a different fix was being checked: an EMPTY group at
+       * that number is not evidence of anything. Closing a group renumbers the
+       * ones after it, so the number can now name a group somebody else made --
+       * the run that found this had our number land on a fresh empty COLUMN,
+       * and the strip walked straight into the layout the customer complained
+       * about, past the rule written to stop exactly that.
+       *
+       * Nothing is lost by letting go: an empty group that really is at the end
+       * and really is below is adopted a line later by `_emptyRowBelow`, which
+       * asks the editor rather than a remembered number.
+       */
       this._column = null;
       return null;
     }

@@ -101,6 +101,39 @@ function sizeAndSpanOf(
   return walk(layout.groups);
 }
 
+/**
+ * How the family holding the group at `index` is laid out: 0 for columns side
+ * by side, 1 for rows stacked. `null` when there is no such leaf.
+ *
+ * Its own walk, and a DIFFERENT question from the one the product asks: the
+ * core answers "is the LAST leaf a row at the bottom", this answers "is the
+ * family holding THIS leaf rows at all". Nested levels alternate, which is the
+ * editor's rule for this shape and is measured in `editor-layout.test.ts`.
+ */
+function familyOrientationOf(
+  layout: { readonly orientation: number, readonly groups: readonly LayoutNode[] },
+  index: number
+): number | null {
+  let seen = 0;
+  const walk = (siblings: readonly LayoutNode[], orientation: number): number | null => {
+    for (const node of siblings) {
+      if (node.groups === undefined) {
+        if (seen === index) {
+          return orientation;
+        }
+        seen += 1;
+      } else {
+        const found = walk(node.groups, orientation === 1 ? 0 : 1);
+        if (found !== null) {
+          return found;
+        }
+      }
+    }
+    return null;
+  };
+  return walk(layout.groups, layout.orientation);
+}
+
 /** How much of what it shares the group at `index` takes, or `null`. */
 function shareOf(layout: { readonly groups: readonly LayoutNode[] }, index: number): number | null {
   const measured = sizeAndSpanOf(layout, index);
@@ -397,6 +430,84 @@ suite('the strip of our own', () => {
         landed,
         restored,
         `a file landed in the strip, so the group we adopted was never locked: ${describeGroups()}`
+      );
+    } finally {
+      handle.dispose();
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    }
+  });
+
+  /*
+   * The customer's screenshot, 2026-08-22, after three rounds of me reading
+   * their words as something else: the editor area in TWO COLUMNS, their
+   * terminal full height on the left, `design.md` on the right, and in the
+   * Output panel beside it `the terminals went into the empty group at the end
+   * of the editor area {"column":2}`.
+   *
+   * "The end of the area" was one question where it is two. A strip is made
+   * below the editors, so in a window laid out in rows it IS the last leaf --
+   * but in a window laid out in columns the last leaf is the right-hand column,
+   * and taking it is the sixth complaint in its original words: "слева окажется
+   * окно терминала на всю высоту, а справа файл". It also feeds itself, which
+   * is why they could not get out of it: the editor restores the grid it was
+   * left with, so a column taken once comes back and is taken again.
+   */
+  test('refuses an empty group BESIDE the editors, which is not a strip', async () => {
+    const { gateway } = await api();
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+
+    const file = await vscode.workspace.openTextDocument({
+      content: 'a file of the person, in the column they work in',
+      language: 'plaintext',
+    });
+    await vscode.window.showTextDocument(file, { viewColumn: vscode.ViewColumn.One });
+    // The shape the customer's window came back in: a column at the end with
+    // nothing in it. `newGroupRight` and not `newGroupBelow` is the whole test.
+    await vscode.commands.executeCommand('workbench.action.newGroupRight');
+    assert.equal(vscode.window.tabGroups.all.length, 2, `the stand is not two columns: ${describeGroups()}`);
+    const stand = await layoutNow();
+    assert.equal(stand.orientation, 0, `the stand did not come out as columns: ${JSON.stringify(stand)}`);
+
+    const handle = await gateway.create({
+      terminalId: TERMINAL_ID,
+      name: 'gripterm-m224-beside',
+      cwd: os.tmpdir(),
+      env: {},
+      shellPath: null,
+      shellArgs: [],
+    });
+    try {
+      await waitFor('the terminal to get a tab', () => columnOf('gripterm-m224-beside') !== undefined);
+      const strip = columnOf('gripterm-m224-beside');
+      assert.ok(strip !== undefined);
+
+      /*
+       * Asked of the LAYOUT and not of the column numbers, because splitting
+       * renumbers them: the empty column the stand made was column two, and
+       * after a row is opened under the file it is column three while the strip
+       * is column two. Comparing the numbers across that is the trap this file
+       * warns about twice, and the first draft of this test walked into it.
+       *
+       * What is promised is the shape: the terminals are a ROW among rows.
+       * Taking the empty column would have made them a column among columns,
+       * full height beside the person's file, which is the picture the customer
+       * sent.
+       */
+      const after = await layoutNow();
+      assert.equal(
+        familyOrientationOf(after, strip - 1),
+        1,
+        `the terminals are a column beside the files rather than a strip under them: ${describeGroups()}`
+        + ` | the stand was ${JSON.stringify(stand)} and it is now ${JSON.stringify(after)}`
+      );
+      assert.equal(
+        vscode.window.tabGroups.all.length,
+        3,
+        `the person's empty column was taken instead of left alone: ${describeGroups()}`
+      );
+      assert.ok(
+        vscode.window.tabGroups.all.some((group) => group.tabs.length === 0),
+        `the person's empty column is gone: ${describeGroups()}`
       );
     } finally {
       handle.dispose();

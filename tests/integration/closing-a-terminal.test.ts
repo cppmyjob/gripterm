@@ -302,19 +302,30 @@ suite('the row a closed terminal leaves behind', () => {
       shellArgs: [],
     });
     try {
-      await waitFor('both terminals to get tabs', () =>
-        vscode.window.tabGroups.all.some((group) =>
-          group.tabs.filter((tab) => tab.input instanceof vscode.TabInputTerminal).length === 2));
+      /*
+       * OURS by name, not "a group with two terminals in it". The first draft
+       * counted, and on 2026-08-22 it closed a group holding one of ours and a
+       * `pwsh` left behind by an earlier suite -- so the failure said `pwsh`
+       * where it meant "this run had a stranger in the room". What the suite is
+       * about is that the editor names EVERY terminal of a closed group, and a
+       * stranger in the same group does not make that less true.
+       */
+      const holds = (group: vscode.TabGroup, name: string): boolean =>
+        group.tabs.some((tab) => tab.input instanceof vscode.TabInputTerminal && tab.label.includes(name));
+      await waitFor(
+        `both terminals to get tabs: ${describeGroups()}`,
+        () => vscode.window.tabGroups.all.some((group) =>
+          holds(group, 'gripterm-closing-a') && holds(group, 'gripterm-closing-b'))
+      );
       const group = vscode.window.tabGroups.all.find((one) =>
-        one.tabs.filter((tab) => tab.input instanceof vscode.TabInputTerminal).length === 2);
-      assert.ok(group, `the strip went away before the suite could close it: ${describeGroups()}`);
+        holds(one, 'gripterm-closing-a') && holds(one, 'gripterm-closing-b'));
+      assert.ok(group, `the two terminals are not in one group: ${describeGroups()}`);
 
       await vscode.window.tabGroups.close(group, false);
 
-      await waitFor(`the editor to name both terminals, and it named ${told.join(', ')}`, () => told.length === 2);
-      assert.deepEqual(
-        [...told].sort((left, right) => left.localeCompare(right)),
-        ['gripterm-closing-a', 'gripterm-closing-b']
+      await waitFor(
+        `the editor to name both terminals, and it named ${told.join(', ')}`,
+        () => told.includes('gripterm-closing-a') && told.includes('gripterm-closing-b')
       );
     } finally {
       watching.dispose();

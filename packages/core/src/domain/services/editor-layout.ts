@@ -25,6 +25,70 @@ interface Family {
 }
 
 /**
+ * How the editor lays a family of groups out. Measured, and the numbers are in
+ * this repository twice over: a window in two columns answers `orientation: 0`
+ * with sizes that add up to its WIDTH (426 + 426), and a strip made below
+ * answers `orientation: 1` with sizes that add up to its HEIGHT (495 + 248).
+ * Nested levels alternate, which is the editor's own rule for this shape.
+ */
+const COLUMNS = 0;
+const ROWS = 1;
+
+/**
+ * The last leaf of the layout when that leaf is a ROW AT THE BOTTOM, counted
+ * the way `ViewColumn` counts -- or `null` when the end of the area is not a
+ * row at all.
+ *
+ * **The customer's window, 2026-08-22, in a screenshot they sent after three
+ * rounds of my reading their words wrong.** The editor area was two COLUMNS:
+ * their terminal full height on the left, `design.md` on the right. The log
+ * beside it said `the terminals went into the empty group at the end of the
+ * editor area {"column":2}`.
+ *
+ * That is the whole defect, and it was written down as an assumption in the
+ * caller: "the end of the area and nothing else, because that is where a strip
+ * is: it is made below the editors, so it is the last leaf of the grid". True
+ * of a window laid out in rows. In a window laid out in COLUMNS the last leaf
+ * is the right-hand column, and adopting it puts the terminals full height
+ * beside the person's files -- "слева окажется окно терминала на всю высоту, а
+ * справа файл".
+ *
+ * It also feeds itself: the editor restores the grid it was left with, so a
+ * column adopted once comes back as a column next time and is adopted again.
+ * That is the "иногда воспроизводится" and the "непонятно, как выйти".
+ *
+ * A leaf reached by descending through the LAST child of every level, at a
+ * level laid out in rows, with something above it -- that is a strip, and
+ * nothing else is.
+ */
+export function rowBelowAtTheEnd(layout: EditorLayout): number | null {
+  let orientation = layout.orientation;
+  let family = layout.groups;
+  let before = 0;
+  for (;;) {
+    const last = family.at(-1);
+    if (last === undefined) {
+      return null;
+    }
+    for (const node of family.slice(0, -1)) {
+      before += leavesIn(node);
+    }
+    if (last.groups === undefined) {
+      // A family of one is a group with nothing above it, which is an editor
+      // area holding one group -- not a strip, however it is oriented.
+      return family.length > 1 && orientation === ROWS ? before : null;
+    }
+    family = last.groups;
+    orientation = orientation === ROWS ? COLUMNS : ROWS;
+  }
+}
+
+/** How many columns a node of the tree accounts for. */
+function leavesIn(node: EditorLayoutNode): number {
+  return node.groups === undefined ? 1 : node.groups.reduce((sum, one) => sum + leavesIn(one), 0);
+}
+
+/**
  * What the group at `index` holds of the space it shares, or `null` when the
  * editor has not sized that family yet.
  *

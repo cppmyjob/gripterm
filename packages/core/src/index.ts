@@ -43,6 +43,7 @@ export {
 
 export {
   groupShare,
+  rowBelowAtTheEnd,
   withGroupShare,
   type EditorLayout,
   type EditorLayoutNode,
