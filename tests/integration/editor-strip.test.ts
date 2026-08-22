@@ -356,6 +356,74 @@ suite('the strip of our own', () => {
   });
 
   /*
+   * The FIRST half of the customer's sixth complaint, and the half that was
+   * still open on 2026-08-22: "панель с терминалами открывается на весь экран
+   * ПОСЛЕ ЗАГРУЗКИ... воспроизводится в непонятных для меня случаях."
+   *
+   * The state a window is in most often right after it starts, and the one this
+   * suite never stood the strip up from: an editor area with NOTHING in it, one
+   * empty group. `column()` splits it, and the split is a workbench command
+   * that answers `undefined` whether it did anything or not.
+   *
+   * **Measured 2026-08-22, and this is why the rule exists.** In the Cursor on
+   * that machine, `workbench.action.newGroupBelow` over an empty editor area
+   * made a group nine times out of ten and silently made none on the tenth; in
+   * another run of the same probe it threw `Invalid editor group provided!`. VS
+   * Code stable did it fifteen times out of fifteen. Unchecked, the miss made
+   * `column()` read the ACTIVE group -- the person's own and only group -- lock
+   * it, and put the terminals in it: a locked terminal group filling the editor
+   * area, which is the "на весь экран" exactly, and the next file then had to
+   * go BESIDE it.
+   *
+   * What this run can and cannot hold. It asserts the INVARIANT -- after a
+   * terminal is made from an empty area, the terminals are never the only group
+   * -- three times over, which is the thing that was false. It cannot make the
+   * command miss on demand, so under VS Code it would have passed before the
+   * fix as well; the run that failed is written down in
+   * `docs/experiments/2026-08-21-customer-feedback.md` and is reproduced with
+   * `spikes/cursor-probe`.
+   */
+  test('never leaves the terminals alone in an editor area that started empty', async () => {
+    const { gateway } = await api();
+
+    for (const attempt of [1, 2, 3]) {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await waitFor('the editor area to be one empty group', () =>
+        vscode.window.tabGroups.all.length === 1 && vscode.window.tabGroups.all[0]?.tabs.length === 0);
+
+      const name = `gripterm-m224-empty-${String(attempt)}`;
+      const handle = await gateway.create({
+        terminalId: TERMINAL_ID,
+        name,
+        cwd: os.tmpdir(),
+        env: {},
+        shellPath: null,
+        shellArgs: [],
+      });
+      try {
+        await waitFor('the terminal to get a tab', () => columnOf(name) !== undefined);
+        // The rescue is asynchronous, so the invariant is asserted once the
+        // window has settled rather than at the instant the tab appeared.
+        await waitFor(
+          `the terminals not to be the only group: ${describeGroups()}`,
+          () => vscode.window.tabGroups.all.length > 1
+        );
+
+        const strip = columnOf(name);
+        assert.ok(strip !== undefined, `the terminal lost its group: ${describeGroups()}`);
+        const elsewhere = vscode.window.tabGroups.all.filter((group) => group.viewColumn !== strip);
+        assert.ok(
+          elsewhere.length > 0,
+          `the terminals took the whole editor area: ${describeGroups()}`
+        );
+      } finally {
+        handle.dispose();
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      }
+    }
+  });
+
+  /*
    * The other half of the customer's sixth complaint, 2026-08-21: "панель с
    * терминалами открывается на весь экран... если открыть файл то слева
    * окажется окно терминала на всю высоту а справа файл. Неудобно и непонятно

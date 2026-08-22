@@ -27,6 +27,24 @@ const GET_LAYOUT = 'vscode.getEditorLayout';
 const SET_LAYOUT = 'vscode.setEditorLayout';
 
 /**
+ * How many times a split is asked for before this file believes the answer, and
+ * how long it waits in between.
+ *
+ * **Measured, and the reason the retry exists at all (2026-08-22, Cursor
+ * 1.x on Windows).** `workbench.action.newGroupBelow` does not always make a
+ * group. Asked ten times over an editor area holding one EMPTY group, it made
+ * nine and silently made none on the first; asked the same way with a file
+ * open, five out of five. In one run of the same probe it threw outright --
+ * `Invalid editor group provided!` -- from inside the workbench. The same probe
+ * in VS Code stable: fifteen out of fifteen, and never a throw. So this is a
+ * property of the editor the customer uses, on the state a window is in most
+ * often right after it starts, and it is transient: the very next call worked
+ * every time it was measured.
+ */
+const SPLIT_ATTEMPTS = 3;
+const BETWEEN_ATTEMPTS_MS = 120;
+
+/**
  * A group of the editor area that holds our terminals and nothing else.
  *
  * The owner asked for the agents to open "in a separate panel of their own, at
@@ -39,7 +57,9 @@ const SET_LAYOUT = 'vscode.setEditorLayout';
  *
  *   * `newGroupBelow` splits the ACTIVE group in two rows rather than restacking
  *     the window, so a person working in two columns gets a strip under the
- *     column they were in and keeps their columns.
+ *     column they were in and keeps their columns. **It does not always do it,
+ *     and the answer never says so** -- see `SPLIT_ATTEMPTS`, where the numbers
+ *     are. Every split here is therefore asked for and then CHECKED.
  *   * a locked group turns away an editor opened with no target -- measured: a
  *     document opened while the strip was the active group landed in the group
  *     above it -- and STILL takes ours, because we name its column outright.
@@ -106,16 +126,84 @@ export class VsCodeEditorStrip {
       return empty;
     }
 
-    await vscode.commands.executeCommand(NEW_GROUP_BELOW);
-    const column = vscode.window.tabGroups.activeTabGroup.viewColumn;
+    const made = await this._splitOff(NEW_GROUP_BELOW);
+    if (made === null) {
+      /*
+       * The editor would not make us a group, and this branch is the whole of
+       * the customer's sixth complaint (see `SPLIT_ATTEMPTS` for the numbers).
+       *
+       * What this file used to do here was read the ACTIVE group's column and
+       * carry on -- which, when the command had done nothing, was the person's
+       * OWN and only group. It then locked it. A locked group holding our
+       * terminals and filling the editor area is the trap exactly: "панель с
+       * терминалами открывается на весь экран после загрузки", and the next
+       * file the person opens has nowhere to go but BESIDE it -- "слева
+       * терминал на всю высоту, а справа файл".
+       *
+       * So the terminals still go there, because a terminal the person asked
+       * for is worth more than the shape it opens in, but NOTHING IS LOCKED and
+       * nothing is resized. An unlocked group takes the person's next file
+       * beside the terminals inside one group, which is untidy and is not a
+       * trap: everything is visible and everything can be moved. The column is
+       * remembered all the same, so `_keepCompany` recognises the group as ours
+       * and puts a group above it as soon as the tab appears.
+       */
+      const column = vscode.window.tabGroups.activeTabGroup.viewColumn;
+      this._column = column;
+      this._logger.warn('the editor would not make a group for the terminals, so they are going into the one that is there', {
+        column,
+        attempts: SPLIT_ATTEMPTS,
+      });
+      return column;
+    }
+
     // Both act on the group that is active, which is the one just made -- the
     // command focuses it, and nothing is awaited in between that could move on.
     await vscode.commands.executeCommand(LOCK_GROUP);
-    await this._askForAThird(column);
+    await this._askForAThird(made);
 
-    this._column = column;
-    this._logger.info('a group of our own was opened below the editors', { column });
-    return column;
+    this._column = made;
+    this._logger.info('a group of our own was opened below the editors', { column: made });
+    return made;
+  }
+
+  /**
+   * Asks the editor to split off a group, and answers with the column of the
+   * group that was REALLY made -- or `null` when none was.
+   *
+   * The check is the point. These are commands and not API: they answer with
+   * `undefined` whether they did anything or not, and the only evidence that a
+   * group appeared is that there is one more of them than there was. Reading
+   * `activeTabGroup` without that check is reading the group the person was
+   * already in and calling it ours, which is the defect this replaces.
+   *
+   * Retried because the failure was measured to be transient rather than a
+   * refusal -- see `SPLIT_ATTEMPTS`. A throw is one of its shapes and is caught
+   * here for the same reason: the next attempt is worth more than the stack.
+   */
+  private async _splitOff(command: string): Promise<vscode.ViewColumn | null> {
+    for (let attempt = 1; attempt <= SPLIT_ATTEMPTS; attempt += 1) {
+      const before = vscode.window.tabGroups.all.length;
+      try {
+        await vscode.commands.executeCommand(command);
+      } catch (cause: unknown) {
+        this._logger.warn('a split of the editor area threw', {
+          command,
+          attempt,
+          cause: String(cause),
+        });
+      }
+      if (vscode.window.tabGroups.all.length > before) {
+        return vscode.window.tabGroups.activeTabGroup.viewColumn;
+      }
+      this._logger.info('a split of the editor area did nothing, and is being asked for again', {
+        command,
+        attempt,
+        groups: before,
+      });
+      await new Promise((resolve) => setTimeout(resolve, BETWEEN_ATTEMPTS_MS));
+    }
+    return null;
   }
 
   /**
@@ -170,7 +258,17 @@ export class VsCodeEditorStrip {
 
     this._arranging = true;
     try {
-      await vscode.commands.executeCommand(NEW_GROUP_ABOVE);
+      if ((await this._splitOff(NEW_GROUP_ABOVE)) === null) {
+        // Nothing is written down and nothing is given up: the column stays
+        // what it was, so the next change to the tab groups brings this rule
+        // back to the same state and asks again. That matters because the state
+        // it is asking about is the trap -- a strip alone in the editor area --
+        // and the alternative to asking again is leaving the person in it.
+        this._logger.warn('the editor would not make a group above the terminals, which are alone in the editor area', {
+          column: this._column,
+        });
+        return;
+      }
       // Making a group above renumbers ours: the new one takes the column we
       // had. Read it back rather than assumed -- the whole file turns on that
       // number being right.
