@@ -1,4 +1,5 @@
 import { belongsHere } from './folder-path';
+import { isWitnessedEnd } from './terminal-state-machine';
 import { precedesBoot } from './boot-window';
 import type { LaunchIntent } from '../entities/launch-intent';
 import type { AgentListing } from '../entities/agent-record';
@@ -434,6 +435,29 @@ export function resumeIntent(entry: TerminalEntry, inputs: RestoreInputs): Resum
  */
 function mayBeRunning(entry: TerminalEntry, inputs: RestoreInputs): boolean {
   const { observed } = entry;
+  /*
+   * A witnessed end IS the evidence this predicate is asking for, and leaving it
+   * out cost the owner every conversation they had.
+   *
+   * **Measured against their own store, 2026-08-23.** Two records with real
+   * conversations behind them would not come back after a restart; the planner,
+   * run offline over the store on disk, answered `session-running` for both.
+   * Their state was `ended` -- the editor had destroyed the terminal and said so
+   * -- and their pid was `null`, so the rule below read "no pid, therefore it
+   * may be running" and refused. Nothing then started them, so nothing ever
+   * wrote a pid, so the next window refused them again. A loop with no way out
+   * of it but a reboot, which is what `precedesBoot` was quietly doing for
+   * everybody until a machine stayed up.
+   *
+   * `isWitnessedEnd` is first-hand and nothing else is let in: `ended` and
+   * `resume_failed` are `SessionEnd` arriving or the editor destroying the
+   * terminal object, and a process whose pty is gone is gone with it (A15,
+   * A29). `orphaned` and `degraded` are this build's own guesses and stay
+   * exactly as suspicious as they were.
+   */
+  if (isWitnessedEnd(observed.state)) {
+    return false;
+  }
   if (precedesBoot(observed.lastEventAt.getTime(), inputs.nowMs, inputs.uptimeSeconds)) {
     return false;
   }

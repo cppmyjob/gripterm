@@ -1,5 +1,6 @@
 import {
   ObservedState,
+  type PersistedTerminalState,
   OwnerId,
   OwnerRef,
   SessionId,
@@ -45,6 +46,8 @@ interface Sketch {
   readonly ownerId?: string;
   readonly folder?: string | null;
   readonly pid?: number | null;
+  /** What the record says happened to it. `idle` unless a case is about the end. */
+  readonly state?: PersistedTerminalState;
   readonly lastEventAt?: Date;
   readonly closedAt?: Date | null;
   readonly revision?: number;
@@ -63,7 +66,7 @@ function sketch(options: Sketch = {}): TerminalEntry {
       workspaceFolder: options.folder === undefined ? FOLDER : options.folder,
     }),
     observed: ObservedState.create({
-      state: 'idle',
+      state: options.state ?? 'idle',
       lastEventAt: options.lastEventAt ?? SINCE_BOOT,
       currentTool: null,
       lastAssistantMessage: null,
@@ -263,6 +266,44 @@ describe('establishing that the conversation is not running', () => {
     const plan = planRestore(inputsFor([sketch({ pid: null })]));
 
     expect(refusals(plan)).toStrictEqual(['session-running']);
+  });
+
+  /*
+   * **The owner, 2026-08-23, and it cost them every conversation they had.**
+   * Two records with real conversations behind them would not come back after a
+   * restart, over and over. Run offline against their own store, this planner
+   * answered `session-running` for both: their state was `ended` -- the editor
+   * had destroyed the terminal and said so -- and their pid was `null`, which
+   * the rule below read as "no evidence, so it may be running".
+   *
+   * And it could not resolve itself: nothing started them, so nothing wrote a
+   * pid, so the next window refused them for the same reason. The only way out
+   * was a reboot, which is what `precedesBoot` had been quietly providing until
+   * a machine stayed up.
+   */
+  it('takes a witnessed end as the evidence it is, whatever the pid says', () => {
+    const plan = planRestore(inputsFor([sketch({ state: 'ended', pid: null })]));
+
+    expect(refusals(plan)).toStrictEqual([]);
+    expect(plan.steps).toHaveLength(1);
+    expect(plan.steps[0]?.intent).toBe('resume');
+  });
+
+  it('takes a failed restore the same way: the process it names is gone', () => {
+    const plan = planRestore(
+      inputsFor([sketch({ state: 'resume_failed', pid: null })], { deadPids: new Set() })
+    );
+
+    expect(refusals(plan)).toStrictEqual([]);
+  });
+
+  it('still refuses a record that only LOOKS finished, because that is a guess of ours', () => {
+    // `orphaned` is this build's own inference from a pid lookup, and `degraded`
+    // from a timeout. Neither is first-hand, so neither may outrank the pid.
+    expect(refusals(planRestore(inputsFor([sketch({ state: 'orphaned' })], { deadPids: new Set() }))))
+      .toStrictEqual(['session-running']);
+    expect(refusals(planRestore(inputsFor([sketch({ state: 'degraded', pid: null })]))))
+      .toStrictEqual(['session-running']);
   });
 
   it('lets the boot outrank the pid, because pids are handed out again', () => {
