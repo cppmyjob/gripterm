@@ -93,7 +93,7 @@ function exitOf(terminal: vscode.Terminal): TerminalExit {
  * load its addon and is making editor terminals after all.
  */
 export interface StripKeeper {
-  readonly takeAwayAnEmptyStrip: () => Promise<boolean>;
+  readonly takeAwayEmptyGroups: () => Promise<number>;
   readonly standOnTheStrip: () => Promise<boolean>;
 }
 
@@ -228,19 +228,19 @@ export class VsCodeTerminalGateway implements TerminalGateway, Disposable {
   }
 
   /**
-   * The empty strip a restart brings back, taken away. Asked for once, when the
-   * window wakes -- see `VsCodeEditorStrip.takeAwayAnEmptyStrip`.
+   * The empty groups a restart brings back, taken away. Asked for once, when
+   * the window wakes -- see `VsCodeEditorStrip.takeAwayEmptyGroups`.
    *
    * Only when the terminals are set to a strip of their own: with
    * `gripterm.launch.location` at `editor` or `panel` this window has never
    * made a group below the editors, and an empty one there is somebody else's
    * to close.
    */
-  public async takeAwayAnEmptyStrip(): Promise<boolean> {
+  public async takeAwayEmptyGroups(): Promise<number> {
     if (PLACES[this._location] !== STRIP) {
-      return false;
+      return 0;
     }
-    return await this._strip.takeAwayAnEmptyStrip();
+    return await this._strip.takeAwayEmptyGroups();
   }
 
   /**

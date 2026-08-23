@@ -547,8 +547,8 @@ suite('the strip of our own', () => {
     assert.equal(stand.orientation, 1, `the stand did not come out as rows: ${JSON.stringify(stand)}`);
 
     try {
-      const took = await editorStrip.takeAwayAnEmptyStrip();
-      assert.equal(took, true, `the empty strip was left where it was: ${describeGroups()}`);
+      const took = await editorStrip.takeAwayEmptyGroups();
+      assert.equal(took, 1, `the empty strip was left where it was: ${describeGroups()}`);
       assert.equal(
         vscode.window.tabGroups.all.length,
         1,
@@ -565,35 +565,82 @@ suite('the strip of our own', () => {
   });
 
   /*
-   * The other side of the same rule, and the reason it asks the LAYOUT rather
-   * than counting tabs: an empty group at the end of an area laid out in
-   * columns is a column beside the person's editors, which this build has never
-   * made and must not take away. `rowBelowAtTheEnd` is where the two are told
-   * apart, and this is the live half of that unit.
+   * The owner, 2026-08-23, on the build that took away the empty strip at the
+   * END of the area: "повторилось также появились пустые группы" -- with three
+   * of them stacked ABOVE their terminals.
+   *
+   * Their shape, built here: editors nowhere, terminals at the bottom, empty
+   * groups above. The first rule looked at the last group, found the terminals
+   * in it and did nothing, which from the chair is a fix that did not fix
+   * anything.
    */
-  test('leaves an empty group BESIDE the editors where it is', async () => {
+  test('takes away every empty group a restart brings back, not only the last one', async () => {
     const { editorStrip } = await api();
     assert.ok(editorStrip, 'this window has no strip to keep, and the engine or the location says why');
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
 
     const file = await vscode.workspace.openTextDocument({
-      content: 'a file of the person, in the column they work in',
+      content: 'the only thing in the editor area, at the bottom of it',
       language: 'plaintext',
     });
     await vscode.window.showTextDocument(file, { viewColumn: vscode.ViewColumn.One });
-    await vscode.commands.executeCommand('workbench.action.newGroupRight');
-    await vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
-    const stand = await layoutNow();
-    assert.equal(stand.orientation, 0, `the stand did not come out as columns: ${JSON.stringify(stand)}`);
+    // Three empty groups above what is held, which is the picture they sent.
+    for (let made = 1; made <= 3; made += 1) {
+      await vscode.commands.executeCommand('workbench.action.newGroupAbove');
+    }
+    assert.equal(vscode.window.tabGroups.all.length, 4, `the stand is not four groups: ${describeGroups()}`);
 
     try {
-      const took = await editorStrip.takeAwayAnEmptyStrip();
-      assert.equal(took, false, `a column of the person's was closed as if it were ours: ${describeGroups()}`);
+      const took = await editorStrip.takeAwayEmptyGroups();
+      assert.equal(took, 3, `${String(took)} of the three empty groups went: ${describeGroups()}`);
       assert.equal(
         vscode.window.tabGroups.all.length,
-        2,
-        `the person's empty column is gone: ${describeGroups()}`
+        1,
+        `the editor area still holds empty groups: ${describeGroups()}`
       );
+      assert.notEqual(
+        columnOf('the only thing in the editor area'),
+        undefined,
+        `the person's file did not survive the tidying up: ${describeGroups()}`
+      );
+    } finally {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    }
+  });
+
+  /*
+   * And the line that keeps it from being a rule about anything else: a group
+   * with something in it is never touched, however this window feels about
+   * where it is.
+   *
+   * The price of the wider rule, named rather than hidden: an empty group a
+   * person made and has not filled yet is closed with the rest. It is only ever
+   * run in the first seconds of a window, it only ever runs when the workbench
+   * is set to close empty groups itself -- which is what makes the group a
+   * leftover rather than a choice -- and what a person loses is a split holding
+   * nothing.
+   */
+  test('never touches a group that holds anything', async () => {
+    const { editorStrip } = await api();
+    assert.ok(editorStrip, 'this window has no strip to keep, and the engine or the location says why');
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+
+    const left = await vscode.workspace.openTextDocument({
+      content: 'a file in the column the person works in',
+      language: 'plaintext',
+    });
+    const right = await vscode.workspace.openTextDocument({
+      content: 'a file in the column beside it',
+      language: 'plaintext',
+    });
+    await vscode.window.showTextDocument(left, { viewColumn: vscode.ViewColumn.One });
+    await vscode.window.showTextDocument(right, { viewColumn: vscode.ViewColumn.Two });
+    assert.equal(vscode.window.tabGroups.all.length, 2, `the stand is not two columns: ${describeGroups()}`);
+
+    try {
+      const took = await editorStrip.takeAwayEmptyGroups();
+      assert.equal(took, 0, `something was closed that had a file in it: ${describeGroups()}`);
+      assert.equal(vscode.window.tabGroups.all.length, 2, `a column with a file in it is gone: ${describeGroups()}`);
     } finally {
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     }

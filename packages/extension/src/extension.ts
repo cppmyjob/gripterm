@@ -751,8 +751,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   });
   context.subscriptions.push(view);
   /*
-   * The strip a restart brought back with nothing in it (customer, 2026-08-22:
-   * "при переоткрытии остаётся пустая панель").
+   * The groups a restart brought back with nothing in them (owner, 2026-08-22:
+   * "при переоткрытии остаётся пустая панель"; and again 2026-08-23, with three
+   * of them: "повторилось также появились пустые группы").
    *
    * Here, and this early, because what the person is looking at is the point:
    * measured in Cursor on 2026-08-22 with a real reload, the empty group came
@@ -763,8 +764,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
    * restoring the grid, which is up to three seconds, and nothing below depends
    * on the answer. Whoever asks for a strip meanwhile cancels it from inside.
    */
-  void held.strip?.takeAwayAnEmptyStrip().catch((cause: unknown) => {
-    logger.warn('the empty strip could not be looked for', { cause: String(cause) });
+  void held.strip?.takeAwayEmptyGroups().catch((cause: unknown) => {
+    logger.warn('the empty groups could not be looked for', { cause: String(cause) });
   });
 
   logger.info('the list of terminals is on screen', {

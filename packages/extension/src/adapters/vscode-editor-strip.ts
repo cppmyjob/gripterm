@@ -149,6 +149,18 @@ const AREA_LOOKS = 6;
  * that is no longer ours is abandoned rather than argued with.
  */
 /** What `workbench.editor.autoLockGroups` says about terminals, in force. */
+/**
+ * Whether the workbench closes a group when its last editor goes.
+ *
+ * `true` by default in VS Code and in Cursor (read out of both bundles). Asked
+ * rather than assumed because the answer decides whether an empty group is
+ * something the platform failed to clean up or something a person keeps on
+ * purpose.
+ */
+function closesEmptyGroups(): boolean {
+  return vscode.workspace.getConfiguration('workbench.editor').get<boolean>('closeEmptyGroups') ?? true;
+}
+
 function locksTerminals(): boolean {
   const groups = vscode.workspace
     .getConfiguration('workbench.editor')
@@ -320,56 +332,89 @@ export class VsCodeEditorStrip {
   }
 
   /**
-   * The strip a restart brings back with nothing in it, taken away.
+   * The empty groups a restart brings back, taken away.
    *
-   * **The customer, 2026-08-22, on the build that put the strip below the
-   * editors at last:** "теперь открывается в панели как нужно НО при
-   * переоткрытии остаётся пустая панель". A third of their editor area held by
-   * a group with nothing in it, every time the window opens.
+   * **The owner, 2026-08-22 and again on 2026-08-23.** First: "при
+   * переоткрытии остаётся пустая панель". Then, on the build that fixed exactly
+   * that: "повторилось также появились пустые группы" -- with a picture of
+   * THREE empty groups stacked above their terminals.
    *
-   * Ours by provenance, and by nothing the editor can be asked for: every
-   * terminal we make is `isTransient: true` (A3), so the TABS do not come back
-   * while the GROUP does -- the group is part of the grid, and the grid is
-   * restored. What is left on the screen is the outline of a strip with nothing
-   * inside it.
+   * The first rule was cut to the shape that had been measured -- an empty
+   * strip at the END of the area -- and their window is the other shape: the
+   * empty groups are ABOVE and the terminals are at the bottom, so the rule
+   * looked at the last group, found a terminal in it, and did nothing. The
+   * owner's word for that was going in circles, and they were right.
    *
-   * **Why here and not on the way out.** Measured in Cursor 3.17.8 on
-   * 2026-08-22 (`probe-empty-strip.ts`): with the last terminal of the strip
-   * disposed, the editor takes the group away by itself inside a second, locked
-   * or unlocked, with `closeEmptyGroups` at its default. A rule that tidied up
-   * after a close would be a rule for a case that does not happen; the case
-   * that does happen is a window that has just woken.
+   * Where they come from is not in doubt: every terminal we make is
+   * `isTransient: true` (A3), so the tabs do not come back from a restart while
+   * the GROUPS do -- the grid is the editor's -- and each restart that leaves a
+   * strip behind adds one (measured 2026-08-21, §4 of the protocol: "каждый
+   * перезапуск добавлял пустую группу").
    *
-   * **The price, named.** Nothing tells us that an empty group below the
-   * editors was made by us rather than by the person, and this closes it either
-   * way. What a person loses is a split holding nothing, which one command
-   * makes again -- and the gateway only asks for this when the terminals are
-   * set to a strip of their own.
+   * **Only what the editor would have done itself.** `closeEmptyGroups` is the
+   * workbench's own setting and it is on by default: with it on, a group that
+   * loses its last editor is closed by the platform, and the ONLY empty groups
+   * that survive are the ones restored that way. So this asks the setting
+   * first, and a person who turned it off keeps every empty group they made --
+   * the answer to "is an empty group wanted here" is theirs and it is already
+   * written down.
+   *
+   * **Never the last one.** An editor area with nothing in it anywhere is how
+   * every window starts, and it is nobody's problem.
    */
-  public async takeAwayAnEmptyStrip(): Promise<boolean> {
+  public async takeAwayEmptyGroups(): Promise<number> {
     if (this._arranging || this._kept() !== null) {
-      return false;
+      return 0;
+    }
+    if (!closesEmptyGroups()) {
+      this._logger.info('empty editor groups are the person`s own setting here, so they are left alone');
+      return 0;
     }
     const askedBefore = this._timesAsked();
     this._arranging = true;
     try {
       for (let look = 1; look <= AREA_LOOKS; look += 1) {
         if (vscode.window.tabGroups.all.length > 1) {
-          // One more pause before deciding: the groups come back one at a time
-          // and the question is about the LAST of them.
-          await new Promise((resolve) => setTimeout(resolve, REPAIR_WAIT_MS));
-          const empty = await this._emptyRowBelow();
-          // Counted again, because everything above it is awaited: a person who
-          // pressed the plus meanwhile has been given this very group, and it
-          // has no tab in it yet to say so.
-          if (empty === null || this._timesAsked() !== askedBefore) {
-            return false;
-          }
-          return await this._closeGroup(empty);
+          break;
         }
         await new Promise((resolve) => setTimeout(resolve, REPAIR_WAIT_MS));
       }
-      return false;
+      // One more pause before deciding: the groups come back one at a time.
+      await new Promise((resolve) => setTimeout(resolve, REPAIR_WAIT_MS));
+
+      let closed = 0;
+      /*
+       * The bound is taken ONCE. Read inside the condition it shrinks with
+       * every group closed and the loop stops halfway -- which is what the live
+       * suite caught on the owner's own shape: two of their three empty groups
+       * went and the third stayed. Closing renumbers the rest, so each round
+       * still asks the editor again rather than working from a list.
+       */
+      const rounds = vscode.window.tabGroups.all.length;
+      for (let round = 1; round <= rounds; round += 1) {
+        // Asked again every round, because each one awaits: a person who
+        // pressed the plus meanwhile has been given a group that has no tab in
+        // it yet, and it must not be closed under them.
+        if (this._timesAsked() !== askedBefore) {
+          break;
+        }
+        const groups = vscode.window.tabGroups.all;
+        if (groups.length < 2) {
+          break;
+        }
+        const empty = groups.find((group) => group.tabs.length === 0);
+        if (empty === undefined || !(await this._closeGroup(empty.viewColumn))) {
+          break;
+        }
+        closed += 1;
+      }
+      if (closed > 0) {
+        this._logger.info('the empty groups the editor brought back were taken away', {
+          closed,
+          groups: vscode.window.tabGroups.all.length,
+        });
+      }
+      return closed;
     } finally {
       this._arranging = false;
     }
@@ -503,10 +548,6 @@ export class VsCodeEditorStrip {
       });
       return false;
     }
-    this._logger.info('the empty strip the editor brought back was taken away', {
-      column,
-      groups: after,
-    });
     // Columns BEFORE the one that went keep their numbers and the ones after it
     // do not, so the focus is put back only where the number still means what
     // it meant.
