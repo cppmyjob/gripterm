@@ -114,6 +114,92 @@ async function cleanUp(storageDir: string): Promise<void> {
 }
 
 suite('the state of an agent on its tab', () => {
+  /*
+   * The owner, 2026-08-23, with a picture of three tabs: "локально при
+   * тестировании статус 1го таба почему-то остался синим. даже после того как в
+   * него вводить сообщения в терминал". Blue with `↻` is `launching`, and the
+   * row for the same record in the list said `idle` beside it -- so the record
+   * was right and the TAB was months behind it.
+   *
+   * The tab a record is paired with is remembered by terminal id, and a record
+   * gets a SECOND tab whenever its terminal is started again: a resume, a start
+   * over, a close and a new one. Nothing here was told to look at the new tab,
+   * so every later change was announced against a uri whose tab had gone --
+   * and the new one kept whatever it was drawn with the instant it appeared,
+   * which is `launching`, because that is what a terminal that has just started
+   * is.
+   */
+  test('follows the record to the tab of the terminal it is running in NOW', async () => {
+    const { gateway, registry, identity, readiness, tabs } = await api();
+    assert.equal(readiness.engine, 'editor', 'this suite is about the tabs the EDITOR draws');
+
+    const entry = recordFor(identity, 'launching');
+    registry.register(entry);
+    const spec = {
+      terminalId: { value: TAB_TERMINAL } as unknown as Spec['terminalId'],
+      name: NAME,
+      cwd: os.tmpdir(),
+      env: {},
+      shellPath: null,
+      shellArgs: [],
+    };
+
+    const first = await gateway.create(spec);
+    let second: Awaited<ReturnType<GriptermApi['gateway']['create']>> | null = null;
+    try {
+      first.show(false);
+      await until(
+        'the workbench to ask about the first tab',
+        () => tabs.uriFor(entry.terminalId) !== undefined
+      );
+      const before = tabs.uriFor(entry.terminalId);
+      assert.ok(before, 'the first tab was never paired with the record');
+
+      // What a resume does, and a start over, and the person opening the same
+      // record again after closing it: the SAME record, a new terminal.
+      first.dispose();
+      await until('the first terminal to be gone', () =>
+        !vscode.window.terminals.some((one) => one.name.includes(NAME)));
+      second = await gateway.create(spec);
+      second.show(false);
+      await until('the second tab to be drawn', () =>
+        vscode.window.tabGroups.all.some((group) =>
+          group.tabs.some((tab) => tab.label.includes(NAME))));
+
+      await until(
+        `the pairing to move to the new tab (it is still ${before.toString()})`,
+        () => tabs.uriFor(entry.terminalId)?.toString() !== before.toString()
+      );
+
+      // And what is drawn on it follows the record from then on, which is the
+      // half the owner was looking at: the badge for `idle`, not the one the
+      // terminal was born with.
+      const now = tabs.uriFor(entry.terminalId);
+      assert.ok(now);
+      const settled = entry.withObserved(
+        ObservedState.create({
+          state: 'idle',
+          lastEventAt: new Date(),
+          currentTool: null,
+          lastAssistantMessage: null,
+          cost: null,
+          contextWindow: null,
+          pid: null,
+        })
+      );
+      registry.amend(settled);
+      const drawn = tabs.provideFileDecoration(now);
+      assert.ok(drawn, 'nothing at all is drawn on the tab the terminal is in now');
+      assert.equal(drawn.badge, presentTerminal(settled).badge);
+    } finally {
+      first.dispose();
+      second?.dispose();
+      registry.forget(entry.terminalId);
+      await cleanUp(readiness.storageDir);
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    }
+  });
+
   test('pairs the tab with the record and draws the state the record is in', async () => {
     const { gateway, registry, identity, readiness, tabs } = await api();
     assert.equal(readiness.engine, 'editor', 'this suite is about the tabs the EDITOR draws');

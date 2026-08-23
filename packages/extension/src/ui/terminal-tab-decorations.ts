@@ -91,7 +91,7 @@ export class TerminalTabDecorations implements vscode.FileDecorationProvider, Di
       this._numbers.set(terminal, this._opened);
       const claimed = this._claimed.get(terminal);
       if (claimed !== undefined) {
-        this._ours.set(this._opened, claimed);
+        this._file(this._opened, claimed);
       }
     });
     this._provider = vscode.window.registerFileDecorationProvider(this);
@@ -124,7 +124,7 @@ export class TerminalTabDecorations implements vscode.FileDecorationProvider, Di
       this._claimed.set(terminal, terminalId);
       return;
     }
-    this._ours.set(number, terminalId);
+    this._file(number, terminalId);
   }
 
   /**
@@ -163,11 +163,31 @@ export class TerminalTabDecorations implements vscode.FileDecorationProvider, Di
     if (entry === undefined) {
       return undefined;
     }
-    if (!this._uris.has(terminalId.value)) {
+    /*
+     * The LAST uri wins, and that is the whole of the owner's report of
+     * 2026-08-23: "статус 1го таба почему-то остался синим", blue with the
+     * `launching` badge, beside a row for the same record that said `idle`.
+     *
+     * A record gets a second tab whenever its terminal is started again -- a
+     * resume, a start over, a close and a new one -- and what stood here kept
+     * the FIRST one for ever. Every change after that was announced against a
+     * uri whose tab had gone, so the new tab kept whatever it was drawn with
+     * the instant it appeared, which is `launching`: what a terminal that has
+     * just started is. Measured 2026-08-23, and this is the line it printed:
+     * "waited 20000 ms for the pairing to move to the new tab (it is still
+     * vscode-terminal:/ext-dev/1)".
+     *
+     * Safe because a record has one terminal at a time. The tab of the one
+     * before it is gone, and `_file` has already dropped the number it was
+     * filed under, so nothing can pair a record back to a tab that closed.
+     */
+    const paired = this._uris.get(terminalId.value);
+    if (paired?.toString() !== uri.toString()) {
       this._uris.set(terminalId.value, uri);
       this._options.logger.info('a terminal tab was paired with its record', {
         terminalId: terminalId.value,
         uri: uri.toString(),
+        ...(paired === undefined ? {} : { instead: paired.toString() }),
       });
     }
 
@@ -181,6 +201,32 @@ export class TerminalTabDecorations implements vscode.FileDecorationProvider, Di
       tooltip: `${shown.label} — ${stateWords(shown.state)}`,
       ...(shown.colorId === null ? {} : { color: new vscode.ThemeColor(shown.colorId) }),
     };
+  }
+
+  /**
+   * Files a number under a record, and lets go of every number that record was
+   * filed under before it.
+   *
+   * One record has one terminal at a time, so an older number names a terminal
+   * that has closed. Left in place it would be a uri that still answers with
+   * our record -- and the pairing, which now follows the tab it was last asked
+   * about, could be pulled back to a tab that is not there.
+   */
+  private _file(number: number, terminalId: TerminalId): void {
+    for (const [was, mine] of this._ours) {
+      /*
+       * By value, and not by `equals`. Everything that keys on a terminal in
+       * this build keys on `.value` -- the gateway's handles do -- and a
+       * comparison that needs a METHOD on the id makes this event handler
+       * throw where they do not. Measured 2026-08-23: it threw inside
+       * `onDidOpenTerminal`, the workbench swallowed it, and the terminal was
+       * simply never filed. A silent handler is a bad place to need a method.
+       */
+      if (mine.value === terminalId.value && was !== number) {
+        this._ours.delete(was);
+      }
+    }
+    this._ours.set(number, terminalId);
   }
 
   private _onChange(change: RegistryChange): void {
