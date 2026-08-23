@@ -15,6 +15,8 @@ import {
   type AgentCommand,
   type AgentCommandFactory,
   type LaunchIntent,
+  type LaunchNote,
+  type LaunchTrace,
   type LaunchRequest,
   type LaunchStrategy,
   type RegistryChange,
@@ -89,12 +91,36 @@ class RefusingGateway implements TerminalGateway {
   }
 }
 
+/**
+ * The trace, kept in a list instead of on a disk.
+ *
+ * What is asserted through it is not "a file was written" -- that is
+ * `FileLaunchTrace`'s own test -- but that the service says the three things a
+ * start is judged by, and says them in an order that is evidence: what was
+ * launched, and then whether the editor ever named a process for it.
+ */
+class RecordingTrace implements LaunchTrace {
+  public readonly notes: { readonly terminalId: string, readonly note: LaunchNote }[] = [];
+
+  public note(terminalId: TerminalId, note: LaunchNote): void {
+    this.notes.push({ terminalId: terminalId.value, note });
+  }
+
+  /** Every note of that kind, which is how each case below reads its answer. */
+  public of<Kind extends LaunchNote['what']>(what: Kind): Extract<LaunchNote, { what: Kind }>[] {
+    return this.notes
+      .map((one) => one.note)
+      .filter((note): note is Extract<LaunchNote, { what: Kind }> => note.what === what);
+  }
+}
+
 interface Stand {
   readonly clock: FixedClock;
   readonly logger: RecordingLogger;
   readonly registry: SessionRegistry;
   readonly gateway: InMemoryTerminalGateway;
   readonly commands: StubAgentCommands;
+  readonly trace: RecordingTrace;
   readonly lifecycle: TerminalLifecycleService;
 }
 
@@ -109,6 +135,7 @@ function stand(strategy: LaunchStrategy = new ProcessLaunchStrategy()): Stand {
   });
   const gateway = new InMemoryTerminalGateway();
   const commands = new StubAgentCommands();
+  const trace = new RecordingTrace();
   const lifecycle = new TerminalLifecycleService({
     registry,
     gateway,
@@ -118,8 +145,9 @@ function stand(strategy: LaunchStrategy = new ProcessLaunchStrategy()): Stand {
     clock,
     owner: makeOwnerRef(),
     logger,
+    trace,
   });
-  return { clock, logger, registry, gateway, commands, lifecycle };
+  return { clock, logger, registry, gateway, commands, trace, lifecycle };
 }
 
 /**
@@ -171,6 +199,100 @@ function signals(registry: SessionRegistry): string[] {
   });
   return seen;
 }
+
+/**
+ * The owner closed Cursor and opened it again on 2026-08-23. Of three records,
+ * one came back and two stood there empty and silent. Everything needed to say
+ * why had been written -- to the window's Output panel, which dies with the
+ * window, and by the time the question was asked there was nothing left to read
+ * but the shape of the store: `pid: null` on two records, no events after the
+ * restart, transcripts untouched. Enough to rule things out; not enough to name
+ * a cause.
+ *
+ * So the same three facts go to disk beside the record. These are the rules
+ * about WHAT is said and what is deliberately not.
+ */
+describe('TerminalLifecycleService writes down what it started', () => {
+  it('says what was launched, with which intent, before the terminal exists', async () => {
+    const { lifecycle, trace } = stand();
+
+    const entry = await lifecycle.launch(request());
+
+    const [started] = trace.of('start');
+    expect(started).toBeDefined();
+    expect(started?.intent).toBe('launch');
+    expect(started?.engine).toBe('editor');
+    expect(started?.executable).toBe(EXECUTABLE);
+    expect(started?.session).toBe(entry.sessionId.value);
+    expect(trace.notes[0]?.terminalId).toBe(entry.terminalId.value);
+  });
+
+  it('carries the flag NAMES and never a value a person typed', async () => {
+    const { lifecycle, trace } = stand();
+
+    const entry = await lifecycle.launch(request());
+
+    const [started] = trace.of('start');
+    // The stub's command is `--session-id <the conversation>`: the flag is
+    // named, the value is counted and not written.
+    expect(started?.flags).toEqual(['--session-id']);
+    expect(started?.args).toBe(2);
+    expect(started?.flags.join(' ')).not.toContain(entry.sessionId.value);
+  });
+
+  it('says which process the editor named, once it has named one', async () => {
+    const { lifecycle, gateway, trace } = stand();
+    gateway.pid = 4242;
+
+    await lifecycle.launch(request());
+    await flush();
+
+    expect(trace.of('pid').map((note) => note.pid)).toEqual([4242]);
+    expect(trace.of('no-pid')).toHaveLength(0);
+  });
+
+  it('says out loud that the editor named NO process, which is the shape the owner met', async () => {
+    const { lifecycle, gateway, trace } = stand();
+    gateway.pid = null;
+
+    await lifecycle.launch(request());
+    await flush();
+
+    expect(trace.of('no-pid')).toHaveLength(1);
+    expect(trace.of('pid')).toHaveLength(0);
+  });
+
+  it('says that a start failed, with the words it failed with', async () => {
+    const clock = new FixedClock(STARTED_AT);
+    const logger = new RecordingLogger();
+    const registry = new SessionRegistry({
+      stateMachine: new TerminalStateMachine(),
+      reader: new HookEventParser(),
+      clock,
+      logger,
+    });
+    const trace = new RecordingTrace();
+    const lifecycle = new TerminalLifecycleService({
+      registry,
+      gateway: new RefusingGateway(),
+      commands: new StubAgentCommands(),
+      strategy: new ProcessLaunchStrategy(),
+      ids: new SequentialIdGenerator(),
+      clock,
+      owner: makeOwnerRef(),
+      logger,
+      trace,
+    });
+
+    await expect(lifecycle.launch(request())).rejects.toThrow('the editor refused');
+
+    // Both lines, in this order: a start that was tried and a start that ended.
+    // One without the other reads as "nothing happened", which is the one thing
+    // that was NOT true.
+    expect(trace.notes.map((one) => one.note.what)).toEqual(['start', 'failed']);
+    expect(trace.of('failed')[0]?.reason).toContain('the editor refused');
+  });
+});
 
 describe('TerminalLifecycleService starts a terminal', () => {
   it('puts the record in the list only once the terminal exists', async () => {

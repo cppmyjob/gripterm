@@ -119,6 +119,7 @@ export { type IdGenerator } from './domain/ports/id-generator';
 export { type Clock } from './domain/ports/clock';
 export { type Scheduler } from './domain/ports/scheduler';
 export { type Disposable } from './domain/ports/disposable';
+export { type LaunchNote, type LaunchTrace } from './domain/ports/launch-trace';
 export { type Logger } from './domain/ports/logger';
 export { type HookEventSink } from './domain/ports/hook-event-sink';
 export {
@@ -244,6 +245,10 @@ export {
   type RestoreInputSources,
 } from './infrastructure/restore-inputs';
 export { SystemIdGenerator } from './infrastructure/system-id-generator';
+export {
+  FileLaunchTrace,
+  type FileLaunchTraceOptions,
+} from './infrastructure/store/file-launch-trace';
 export {
   DEFAULT_JOURNAL_POLICY,
   FileEventJournal,

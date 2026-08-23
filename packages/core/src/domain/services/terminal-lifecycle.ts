@@ -14,6 +14,7 @@ import type { IdGenerator } from '../ports/id-generator';
 import type { LaunchIntent } from '../entities/launch-intent';
 import type { LaunchRecipe } from '../entities/launch-recipe';
 import type { LaunchStrategy } from './launch-strategy';
+import type { LaunchTrace } from '../ports/launch-trace';
 import type { Logger } from '../ports/logger';
 import type { OwnerRef } from '../entities/owner-ref';
 import type { PersistedTerminalState } from '../entities/terminal-state';
@@ -31,6 +32,15 @@ export interface TerminalLifecycleOptions {
   /** This window, as recorded on every terminal it creates. One owner per window (M1.13). */
   readonly owner: OwnerRef;
   readonly logger: Logger;
+  /**
+   * Where a start writes down what it did, so that the answer outlives the
+   * window (owner, 2026-08-23 -- see `LaunchTrace`).
+   *
+   * Optional because a lifecycle can be built with no store behind it: the
+   * contract suite makes several per run, and a window that is not sharing has
+   * no directory to write beside.
+   */
+  readonly trace?: LaunchTrace;
 }
 
 /** What a new terminal needs that is not the same for all of them. */
@@ -259,7 +269,36 @@ export class TerminalLifecycleService implements Disposable {
     // published here and not earlier: a launch that never produced a terminal
     // leaves no row stuck in `launching` for the life of the window, and the
     // person who pressed the button is told by the caller instead.
-    const handle = await this._options.gateway.create(plan.spec);
+    /*
+     * Written down BEFORE the create, and on disk rather than only in the log:
+     * the one question the owner's window could not answer on 2026-08-23 was
+     * whether a restore had asked for `--resume` at all, and by the time it was
+     * asked the window -- and its Output panel with it -- was gone.
+     *
+     * Flag names only, never values: see `LaunchNote`.
+     */
+    this._options.trace?.note(terminalId, {
+      what: 'start',
+      intent,
+      engine: this._options.gateway.engine,
+      executable: command.executable,
+      flags: command.args.filter((one) => one.startsWith('--')),
+      args: command.args.length,
+      session: starting.sessionId.value,
+      cwd: starting.launch.cwd,
+    });
+
+    let handle: TerminalHandle;
+    try {
+      handle = await this._options.gateway.create(plan.spec);
+    } catch (cause: unknown) {
+      // The throw goes on to the caller untouched -- who tells the person is
+      // not this method's business. What is its business is that the store
+      // says a start was tried and how it ended, which is the difference
+      // between "nothing happened" and "this failed".
+      this._options.trace?.note(terminalId, { what: 'failed', reason: String(cause) });
+      throw cause;
+    }
     // The engine goes in from the gateway that just answered, not from the
     // setting that was read at activation, and not before the create either: a
     // record saying `own` for a terminal the editor made would hand
@@ -471,11 +510,17 @@ export class TerminalLifecycleService implements Disposable {
     const { terminalId } = handle;
     const pid = await handle.processId();
     if (pid === null) {
+      // The shape two of the owner's three records were left in on 2026-08-23,
+      // and the reason this goes to disk as well as to the log: a terminal with
+      // no process is one the editor made and never started, and nothing else
+      // in the store says so.
+      this._options.trace?.note(terminalId, { what: 'no-pid' });
       this._options.logger.info('the editor did not say which process the terminal is running', {
         terminalId: terminalId.value,
       });
       return;
     }
+    this._options.trace?.note(terminalId, { what: 'pid', pid });
     const current = this._options.registry.get(terminalId);
     if (current === undefined) {
       return;

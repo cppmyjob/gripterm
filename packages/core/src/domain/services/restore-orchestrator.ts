@@ -68,11 +68,32 @@ export interface RestoreOrchestratorOptions {
   readonly logger: Logger;
   /** Defaults to `DEFAULT_RESUME_TIMEOUT_MS`. */
   readonly resumeTimeoutMs?: number;
+  /**
+   * How a person is told that a conversation did not come back after all.
+   *
+   * Optional, like the gateway's own: the domain suites build orchestrators
+   * with nobody to tell, and a restore that told nobody would still be a
+   * restore. What it must never be is silent to the PERSON while being loud in
+   * a log -- the owner's own words for the class, 2026-08-23: the row said
+   * `idle` and the conversation was gone.
+   */
+  readonly announce?: (message: string) => void;
 }
 
 /** One restore between its start and the first thing that settles it. */
 interface Pending {
   timer: Disposable | null;
+  /**
+   * The conversation this restore asked the CLI to continue, or `null` when it
+   * was never asked to continue one.
+   *
+   * Kept so that the first event can be compared against it. A `--resume` that
+   * cannot find its conversation does not fail: the CLI starts a NEW one and
+   * says so in `SessionStart`, the record follows the new id because that is
+   * what a record must do, and the row then shows a perfectly healthy agent
+   * with none of the person's history behind it.
+   */
+  readonly asked: string | null;
 }
 
 /**
@@ -233,7 +254,14 @@ export class RestoreOrchestrator implements Disposable {
     // Marked as waiting BEFORE the start rather than after it, so that there is
     // no instant in which the terminal exists, has been registered, and is not
     // being waited for.
-    this._waiting.set(entry.terminalId.value, { timer: null });
+    this._waiting.set(entry.terminalId.value, {
+      timer: null,
+      // Only a `resume` asks for a conversation by name. A `launch` step is a
+      // record whose conversation was never spoken in, and a new one there is
+      // the answer rather than a loss -- the owner made that distinction
+      // themselves on 2026-08-23, about their own three records.
+      asked: step.intent === 'resume' ? adopted.sessionId.value : null,
+    });
     try {
       // Two ways back, and the step says which (owner's decision 2026-08-21).
       // `launch` is for a record whose conversation was never spoken in: there
@@ -305,9 +333,11 @@ export class RestoreOrchestrator implements Disposable {
       return;
     }
     const { entry } = change;
+    const asked = this._waiting.get(entry.terminalId.value)?.asked ?? null;
     if (!this._forget(entry.terminalId)) {
       return;
     }
+    this._checkItIsTheSameConversation(entry, asked);
 
     if (isWitnessedEnd(entry.observed.state)) {
       // The restore is over and there is nothing to reveal -- the pane went with
@@ -321,6 +351,42 @@ export class RestoreOrchestrator implements Disposable {
       return;
     }
     this._options.lifecycle.reveal(entry.terminalId);
+  }
+
+  /**
+   * Did the conversation we asked for come back, or a different one?
+   *
+   * **The owner, 2026-08-23.** Three records, one restart; the one that spoke
+   * reported a conversation with a NEW id and `source: startup`, and its row
+   * showed a green tick and the word `idle`. In that case nothing was lost --
+   * that record had never been spoken in, so a new conversation is all the CLI
+   * could have given it -- but the SHAPE is the one that must never be quiet:
+   * we asked for a conversation by name, something else came back, and the list
+   * said everything was fine.
+   *
+   * So it is said out loud exactly when it means a loss: the step asked for a
+   * resume, and the id that answered is not the id it asked for. A record that
+   * was started fresh on purpose says nothing, because nothing of the person's
+   * went missing.
+   *
+   * What it costs to be wrong here is one sentence in a notification. What it
+   * costs to stay quiet is the person believing their history is behind a row
+   * that has none.
+   */
+  private _checkItIsTheSameConversation(entry: TerminalEntry, asked: string | null): void {
+    if (asked === null || entry.sessionId.value === asked) {
+      return;
+    }
+    this._options.logger.warn('a conversation did not come back: the agent started a new one instead', {
+      terminalId: entry.terminalId.value,
+      asked,
+      answered: entry.sessionId.value,
+    });
+    this._options.announce?.(
+      `"${entry.metadata.displayName}" did not come back: Claude Code could not continue that conversation `
+      + 'and started a new one in the same terminal. The old conversation is still on disk -- '
+      + 'run "Gripterm: Show Record" to see which one it was.'
+    );
   }
 
   /**

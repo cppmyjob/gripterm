@@ -9,6 +9,7 @@ import {
   BaseWriter,
   ClaudeCodeCommandFactory,
   FileEventJournal,
+  FileLaunchTrace,
   FileOwnerPresence,
   FileSessionSettingsStore,
   FileTerminalRepository,
@@ -672,6 +673,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     clock,
     owner: ownerRefFor(identity),
     logger,
+    // Beside the record and not only in the Output panel: the panel dies with
+    // the window, and the question a person asks the next morning is about the
+    // window that is gone (owner, 2026-08-23 -- see `LaunchTrace`).
+    trace: new FileLaunchTrace({ layout: storage, clock, logger }),
   });
   context.subscriptions.push(lifecycle);
 
@@ -852,6 +857,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
       lifecycle,
       scheduler: new SystemScheduler(),
       logger,
+      // Out loud, because the row cannot say it: a conversation that did not
+      // come back leaves a perfectly healthy-looking agent behind (owner,
+      // 2026-08-23).
+      announce: (message) => { announcer.say('warning', message); },
     });
   if (orchestrator !== null) {
     context.subscriptions.push(orchestrator);

@@ -166,6 +166,8 @@ interface Stand {
   readonly lifecycle: TerminalLifecycleService;
   readonly base: AbandonedBase;
   readonly scheduler: FakeScheduler;
+  /** Everything the orchestrator told the PERSON, as opposed to the log. */
+  readonly said: string[];
   readonly orchestrator: RestoreOrchestrator;
 }
 
@@ -194,14 +196,16 @@ function stand(address: ListeningAddress = FIRST_PORT): Stand {
   });
   const base = new AbandonedBase(owner);
   const scheduler = new FakeScheduler();
+  const said: string[] = [];
   const orchestrator = new RestoreOrchestrator({
     repository: base,
     registry,
     lifecycle,
     scheduler,
     logger,
+    announce: (message) => { said.push(message); },
   });
-  return { clock, logger, registry, gateway, commands, lifecycle, base, scheduler, orchestrator };
+  return { clock, logger, registry, gateway, commands, lifecycle, base, scheduler, said, orchestrator };
 }
 
 /** A record left behind by a window that is gone, already in the base. */
@@ -229,6 +233,22 @@ function announce(stand_: Stand, entry: TerminalEntry, source: 'resume' | 'start
     kind: 'SessionStart',
     sessionId: entry.sessionId,
     source,
+    promptId: null,
+    cwd: null,
+    transcriptPath: null,
+  });
+}
+
+/**
+ * A hook from a conversation that is NOT the one the record named: what the CLI
+ * sends when `--resume` could not find what it was pointed at and began a new
+ * conversation instead.
+ */
+function announceAnother(stand_: Stand, entry: TerminalEntry, sessionId: SessionId): void {
+  stand_.registry.ingest(entry.terminalId, {
+    kind: 'SessionStart',
+    sessionId,
+    source: 'startup',
     promptId: null,
     cwd: null,
     transcriptPath: null,
@@ -471,6 +491,57 @@ describe('a record that moved while the plan was being carried out', () => {
 
     expect(report.attempts.map((one) => one.outcome)).toStrictEqual(['contested']);
     expect(here.gateway.specs).toStrictEqual([]);
+  });
+});
+
+/**
+ * **The owner, 2026-08-23.** They closed Cursor, opened it again, and one of
+ * three records answered -- with a conversation that was not the one it named,
+ * and a row showing a green tick and the word `idle`. In that case nothing was
+ * lost: that record had never been spoken in, so a new conversation was all the
+ * CLI could give it. The SHAPE is what these are about -- we asked for a
+ * conversation by name, something else answered, and nothing said so.
+ */
+describe('RestoreOrchestrator, when the conversation that answers is a different one', () => {
+  it('tells the person, because the row will look perfectly healthy', async () => {
+    const here = stand();
+    const entry = abandoned(here);
+
+    await here.orchestrator.run(planFor(entry));
+    announceAnother(here, entry, SessionId.fromString(SECOND_SESSION));
+
+    expect(here.said).toHaveLength(1);
+    expect(here.said[0]).toContain(entry.metadata.displayName);
+    expect(
+      here.logger.warnings.some((line) => line.message.includes('did not come back'))
+    ).toBe(true);
+  });
+
+  it('says nothing when the conversation it asked for is the one that answers', async () => {
+    const here = stand();
+    const entry = abandoned(here);
+
+    await here.orchestrator.run(planFor(entry));
+    announce(here, entry);
+
+    expect(here.said).toEqual([]);
+  });
+
+  it('says nothing about a record that was started fresh on purpose', async () => {
+    const here = stand();
+    const entry = abandoned(here);
+    // `launch`, which the planner chooses for a conversation nothing was ever
+    // said in: there is nothing to lose, and a new id is the answer rather than
+    // a failure. This is the case the owner corrected me on.
+    const plan: RestorePlan = {
+      steps: [{ entry, expectedRevision: entry.revision, force: false, intent: 'launch' as const }],
+      skipped: [],
+    };
+
+    await here.orchestrator.run(plan);
+    announceAnother(here, entry, SessionId.fromString(SECOND_SESSION));
+
+    expect(here.said).toEqual([]);
   });
 });
 
