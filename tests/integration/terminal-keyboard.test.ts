@@ -5,6 +5,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { GriptermApi } from '../../packages/extension/src/extension';
+import { askTheClipboard, underTheClipboard } from './clipboard-of-this-window';
+import type { ClipboardDoor, ClipboardVerdict } from './clipboard-of-this-window';
 
 /**
  * The keyboard of our own panel: what reaches the agent, and what must not.
@@ -149,6 +151,58 @@ async function clipboardHolding(what: string): Promise<string> {
 
 async function showPanel(): Promise<void> {
   await vscode.commands.executeCommand('gripterm.workbench.focus');
+}
+
+/**
+ * The EDITOR's clipboard, which is the one the extension is handed.
+ *
+ * Deliberately not our page, our channel or our command: this is what the tests
+ * below are measured AGAINST, so a build that has lost its paste on a machine
+ * whose clipboard works must still come out red. Only a machine with no
+ * clipboard to give comes out refused.
+ */
+const EDITORS_CLIPBOARD: ClipboardDoor = {
+  read: async () => await vscode.env.clipboard.readText(),
+  write: async (text) => { await vscode.env.clipboard.writeText(text); },
+};
+
+async function theClipboard(): Promise<ClipboardVerdict> {
+  return await askTheClipboard(EDITORS_CLIPBOARD);
+}
+
+/** Said once per run: five identical paragraphs are five chances to stop reading. */
+let refusalSaid = false;
+
+function sayOnce(refusal: string): void {
+  if (refusalSaid) {
+    return;
+  }
+  refusalSaid = true;
+  // Straight to the run's own output. A refusal nobody can see is a skip, and a
+  // skip is the thing this exists instead of.
+  console.log(`\n  ===> GRIPTERM REFUSES ${refusal}\n`);
+}
+
+/**
+ * A test that cannot work without the clipboard of the machine it runs on.
+ *
+ * Declared this way rather than checked inside each body, so that WHICH tests
+ * depend on the room is visible in the source at the point where they are named.
+ * When the clipboard is there this is `test` and nothing else; when it is not,
+ * the test is REFUSED with the condition named -- neither passed nor failed --
+ * and the reasoning for that is in `clipboard-of-this-window.ts`.
+ */
+function testNeedingTheClipboard(title: string, body: () => Promise<void>): void {
+  test(title, async function (this: Mocha.Context) {
+    await underTheClipboard(
+      theClipboard,
+      (verdict: ClipboardVerdict): never => {
+        sayOnce(verdict.refusal);
+        return this.skip();
+      },
+      body
+    );
+  });
 }
 
 /** One terminal of ours, on the panel this window is really using. */
@@ -338,11 +392,19 @@ async function untilSeen(
   codes: string
 ): Promise<void> {
   const { keyboard } = await api();
+  // Marked HERE rather than reported as the last few. `refusals` is the whole
+  // window's, for the whole run, and two tests of this suite refuse on purpose:
+  // a wait that printed the last three attached `ctrl+j`/`ctrl+r` refusals left
+  // by PASSING tests to a failure that had nothing to do with them, and sent a
+  // clipboard the machine would not give away to be read as a focus defect
+  // (2026-08-24). A refusal is evidence only if it happened while this waited.
+  const refusedBefore = keyboard.refusals.length;
   await until(what, () => answersWith(bridge, codes).length > since, SETTLES_WITHIN_MS).catch(
     (cause: unknown) => {
+      const during = keyboard.refusals.slice(refusedBefore);
       throw new Error(
         `${String(cause)} -- the process answered ${JSON.stringify(sawLines(bridge).slice(-6))}` +
-        `, and this window refused: ${keyboard.refusals.slice(-3).join(' | ')}`
+        `, and while it waited this window refused: ${during.length === 0 ? 'nothing' : during.join(' | ')}`
       );
     }
   );
@@ -560,7 +622,7 @@ suite('the keyboard of our own panel', () => {
     }
   });
 
-  test('a paste arrives whole, which is what the agent needs of it', async () => {
+  testNeedingTheClipboard('a paste arrives whole, which is what the agent needs of it', async () => {
     // The defect this step exists to avoid: text written straight into the pty
     // loses the bracketed-paste markers, a multi-line paste becomes a run of
     // Enter presses, and Claude Code sends the first line as a finished prompt.
@@ -610,7 +672,7 @@ suite('the keyboard of our own panel', () => {
     }
   });
 
-  test('Ctrl+C copies when something is selected, and interrupts when nothing is', async () => {
+  testNeedingTheClipboard('Ctrl+C copies when something is selected, and interrupts when nothing is', async () => {
     // The owner's decision of 2026-08-18 and the editor's own rule for its
     // terminal. Both halves are here because the interesting one is the pair:
     // a build that always copied would take the interrupt away from an agent,
@@ -645,7 +707,7 @@ suite('the keyboard of our own panel', () => {
     }
   });
 
-  test('Shift+Insert pastes exactly once, and the once is the editor doing it', async () => {
+  testNeedingTheClipboard('Shift+Insert pastes exactly once, and the once is the editor doing it', async () => {
     /*
      * Measured by hand on 2026-08-20, in Cursor with every other extension
      * switched off: this press put the clipboard in TWICE. The editor pastes it
@@ -676,7 +738,7 @@ suite('the keyboard of our own panel', () => {
     }
   });
 
-  test('Ctrl+V pastes exactly once, and nothing of ours goes in front of it', async () => {
+  testNeedingTheClipboard('Ctrl+V pastes exactly once, and nothing of ours goes in front of it', async () => {
     /*
      * Two measurements by hand on 2026-08-20, and both are held here.
      *
@@ -711,7 +773,7 @@ suite('the keyboard of our own panel', () => {
     }
   });
 
-  test('the right button copies what is selected', async () => {
+  testNeedingTheClipboard('the right button copies what is selected', async () => {
     const { workbench } = await api();
     const theirs = await vscode.env.clipboard.readText();
     const stand = await Stand.start('05');
