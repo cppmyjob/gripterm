@@ -247,12 +247,22 @@ suite('the launch pipeline', () => {
   });
 
   /**
-   * M2.1 against the real profile directory, which is the only place the
-   * question is real: the unit tests build a store in a temporary folder, and
-   * this machine has one that M1 already wrote settings files into. Adopting
-   * that directory rather than refusing it is the whole milestone.
+   * M2.1: a directory that already exists is adopted and versioned, not refused.
+   *
+   * This test used to make its claim about `~/.gripterm` itself, because until
+   * Ш1 that WAS the store the run opened -- and that is exactly what Ш1 ended.
+   * A suite must not announce a window, seed records or start `claude` in the
+   * store somebody keeps their own conversations in, so the run now carries its
+   * own, seeded by `.vscode-test.mjs` through `--user-data-dir`.
+   *
+   * What was lost with the move is named rather than quietly kept: the old
+   * assertion proved adoption of a directory THIS MACHINE'S M1 had written into
+   * months earlier, and no seeded directory proves that. What is left is the
+   * general claim -- a store the run did not create is brought to version 1 --
+   * plus the assertion that matters more now, that the store is not the
+   * person's. The lost half is in the register.
    */
-  test('brought the storage directory this machine already had up to version 1', async () => {
+  test('brought the storage directory it was given up to version 1', async () => {
     const { readiness } = await api();
 
     assert.equal(
@@ -260,10 +270,19 @@ suite('the launch pipeline', () => {
       'ready',
       readiness.storage.kind === 'refused' ? readiness.storage.reason : ''
     );
-    const marker = join(homedir(), '.gripterm', 'version');
+
+    // The point of Ш1, asserted from inside the window rather than only by the
+    // hash taken around the run: whatever else is true, this is not their store.
+    assert.notEqual(
+      readiness.storageDir,
+      join(homedir(), '.gripterm'),
+      'the run is using the store of whoever owns this machine'
+    );
+
+    const marker = join(readiness.storageDir, 'version');
     assert.equal(readFileSync(marker, 'utf8').trim(), '1', `${marker} does not say version 1`);
-    assert.ok(statSync(join(homedir(), '.gripterm', 'owners')).isDirectory(), 'no owners/');
-    assert.ok(statSync(join(homedir(), '.gripterm', 'terminals')).isDirectory(), 'no terminals/');
+    assert.ok(statSync(join(readiness.storageDir, 'owners')).isDirectory(), 'no owners/');
+    assert.ok(statSync(join(readiness.storageDir, 'terminals')).isDirectory(), 'no terminals/');
   });
 
   test('found the Claude Code this machine will actually run', async () => {

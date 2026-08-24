@@ -10,6 +10,7 @@
   "scripts": {
     "build": "tsc --build",
     "build:extension": "node packages/extension/esbuild.js",
+    "seed:dev-host": "node tools/seed-dev-host.mjs",
     "clean": "tsc --build --clean",
     "typecheck": "tsc --build && tsc -p tsconfig.eslint.json",
     "lint": "eslint . --max-warnings 0",

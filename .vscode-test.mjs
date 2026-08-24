@@ -1,7 +1,8 @@
 import { defineConfig } from '@vscode/test-cli';
-import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { hostUserData } from './tools/host-user-data.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const COMPILED = join(here, 'out', 'tests', 'integration');
@@ -52,26 +53,18 @@ function suitesUnderOwn() {
   return [...present].filter((name) => !NOT_UNDER_OWN.has(name)).map((name) => join(COMPILED, name));
 }
 
-/**
- * A user data directory of our own for the second run, with the engine set in it.
+/*
+ * Both runs get a user data directory of their own, and with it a store of their
+ * own. That is the whole of the isolation: `gripterm.storage.path` is read from
+ * the window's settings, and until it was written there every suite ran against
+ * `~/.gripterm` -- the store belonging to whoever owns this machine.
  *
- * The setting is the honest way in: `gripterm.terminal.engine` takes effect when
- * the window starts, so an engine cannot be switched inside a running suite, and
- * a window that read the setting is the only window that proves the setting
- * works. Seeded here rather than by hand so that the second run cannot be the
- * first run wearing a different label -- and `engine-in-effect.test.js` asserts
- * from inside that the engine which answered is the one asked for.
+ * The second run also gets the engine, and by setting rather than by hand:
+ * `gripterm.terminal.engine` takes effect when the window starts, so an engine
+ * cannot be switched inside a running suite, and a window that read the setting
+ * is the only window that proves the setting works. `engine-in-effect.test.js`
+ * asserts from inside that the engine which answered is the one asked for.
  */
-function userDataWithOwnEngine() {
-  const directory = join(here, '.vscode-test', 'user-data-own');
-  mkdirSync(join(directory, 'User'), { recursive: true });
-  writeFileSync(
-    join(directory, 'User', 'settings.json'),
-    `${JSON.stringify({ 'gripterm.terminal.engine': 'own' }, null, 2)}\n`,
-    'utf8'
-  );
-  return directory;
-}
 
 // Downloads a real VS Code and runs the integration suite inside it, so that
 // "works in VS Code" is checked rather than assumed. The bundled extension is
@@ -82,6 +75,7 @@ export default defineConfig([
     files: 'out/tests/integration/**/*.test.js',
     extensionDevelopmentPath: 'packages/extension',
     version: 'stable',
+    launchArgs: [`--user-data-dir=${hostUserData('integration')}`],
     mocha: { timeout: TIMEOUT_MS },
   },
   {
@@ -89,7 +83,9 @@ export default defineConfig([
     files: suitesUnderOwn(),
     extensionDevelopmentPath: 'packages/extension',
     version: 'stable',
-    launchArgs: [`--user-data-dir=${userDataWithOwnEngine()}`],
+    launchArgs: [
+      `--user-data-dir=${hostUserData('own', { 'gripterm.terminal.engine': 'own' })}`,
+    ],
     mocha: { timeout: TIMEOUT_MS },
   },
 ]);

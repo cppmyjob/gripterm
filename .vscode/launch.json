@@ -5,9 +5,12 @@
       "name": "Run Extension",
       "type": "extensionHost",
       "request": "launch",
-      "args": ["--extensionDevelopmentPath=${workspaceFolder}/packages/extension"],
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/packages/extension",
+        "--user-data-dir=${workspaceFolder}/.vscode-test/user-data-dev"
+      ],
       "outFiles": ["${workspaceFolder}/packages/extension/dist/**/*.js"],
-      "preLaunchTask": "npm: build:extension"
+      "preLaunchTask": "prepare: dev host"
     }
   ]
 }

@@ -64,7 +64,16 @@ pnpm test:vsix      # packages, installs the archive into a profile of its own, 
 ```
 
 Press <kbd>F5</kbd> to launch an Extension Development Host with the extension
-loaded.
+loaded. Its `preLaunchTask` builds the bundle and writes a user data directory
+under `.vscode-test/`, and that second half is not optional: outside a released
+window Gripterm refuses to open a store it was not pointed at.
+
+That refusal is why every run carries its own store. `gripterm.storage.path`
+defaults to `~/.gripterm`, which is where a person's terminals, conversations
+and trash live -- a suite that announced a window there, seeded records there or
+swept that trash could not take any of it back. So the test runners write the
+setting into the user data they hand to VS Code, and the extension fails to
+activate rather than fall back to the default in a test or development host.
 
 The workspace is a pnpm monorepo of two packages. `@gripterm/core` holds the
 domain and infrastructure and **must not import the editor API** — that boundary

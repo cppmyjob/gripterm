@@ -14,6 +14,18 @@
       "problemMatcher": "$tsc",
       "group": "build",
       "label": "npm: build"
+    },
+    {
+      "type": "npm",
+      "script": "seed:dev-host",
+      "problemMatcher": [],
+      "label": "npm: seed:dev-host"
+    },
+    {
+      "label": "prepare: dev host",
+      "dependsOn": ["npm: build:extension", "npm: seed:dev-host"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
     }
   ]
 }

@@ -12,6 +12,18 @@ export interface StorageDirChoice {
    * `null` when there was nothing configured at all, which is not a refusal.
    */
   readonly refused: string | null;
+  /**
+   * Whether the path below came from the person's settings or from the default.
+   *
+   * `refused !== null` always means `false` here: a value we would not use is
+   * not a value that put us anywhere. It is a separate field because `refused:
+   * null` says two different things -- "you asked for this and got it" and "you
+   * asked for nothing" -- and a caller that MUST NOT guess where the store is
+   * has to tell them apart. That caller exists: a test host and a development
+   * host both run on top of somebody's real profile, and the default path is
+   * exactly the one directory they must never be handed by accident.
+   */
+  readonly configured: boolean;
 }
 
 /**
@@ -39,17 +51,25 @@ export function chooseStorageDir(params: {
     // Not configured. The empty string is the manifest's own default, and a
     // person clearing the box means "go back to the default" rather than "put
     // it at the root of the drive".
-    return { path: fallback, refused: null };
+    return { path: fallback, refused: null, configured: false };
   }
   if (typeof configured !== 'string') {
-    return { path: fallback, refused: 'the configured storage path is not a string' };
+    return {
+      path: fallback,
+      refused: 'the configured storage path is not a string',
+      configured: false,
+    };
   }
 
   const expanded = expandHome(configured.trim(), params.home);
   if (!isAbsolute(expanded)) {
-    return { path: fallback, refused: 'the configured storage path is not absolute' };
+    return {
+      path: fallback,
+      refused: 'the configured storage path is not absolute',
+      configured: false,
+    };
   }
-  return { path: expanded, refused: null };
+  return { path: expanded, refused: null, configured: true };
 }
 
 function expandHome(configured: string, home: string): string {

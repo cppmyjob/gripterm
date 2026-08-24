@@ -211,8 +211,25 @@ export function readTerminalEngine(logger: Logger): TerminalEngine {
  * window WATCHING a directory nothing writes to: a list that never changes and
  * never says why. A reload re-creates all of it, in order, and the manifest says
  * so on the setting.
+ *
+ * Outside a production window this refuses instead of falling back, and the
+ * refusal is thrown rather than reported. Both halves are deliberate.
+ *
+ * REFUSES, because the default path is the store the person keeps their own
+ * terminals and conversations in, and a test host or a development host running
+ * on it is not a mistake that shows up as a failing assertion -- it shows up as
+ * `claude --resume` starting on somebody's real conversation, as records
+ * appearing in their list, and as batches leaving their trash. A run that was
+ * pointed nowhere asked for the default by not asking, and by not asking it
+ * cannot have meant that one.
+ *
+ * THROWN, because the guard has to act before anything else does. A refusal
+ * carried in the API is read by a test, and a test runs after activation is
+ * over -- after the store has been opened, the window announced and the survey
+ * begun. There is no assertion that can un-write those. Activation failing is
+ * the only refusal that arrives in time, and every suite sees it at once.
  */
-export function readStorageDir(logger: Logger): string {
+export function readStorageDir(logger: Logger, mode: vscode.ExtensionMode): string {
   const configured = vscode.workspace.getConfiguration(SECTION).get<unknown>(STORAGE_PATH);
   const choice = chooseStorageDir({ configured, home: homedir() });
   if (choice.refused !== null) {
@@ -222,6 +239,18 @@ export function readStorageDir(logger: Logger): string {
       reason: choice.refused,
       using: choice.path,
     });
+  }
+  if (mode !== vscode.ExtensionMode.Production && !choice.configured) {
+    const host = mode === vscode.ExtensionMode.Test ? 'a test host' : 'a development host';
+    const why = choice.refused === null ? 'is not set' : `was refused -- ${choice.refused}`;
+    throw new Error(
+      `Gripterm will not open a store it was not pointed at: this window is ${host}, ` +
+        `and the setting ${SECTION}.${STORAGE_PATH} ${why}, so the store would have been ` +
+        `${choice.path} -- the one this person actually keeps their terminals in. Point ` +
+        'the setting at a directory the run owns, the way .vscode-test.mjs, ' +
+        'tests/acceptance/run.mjs and tests/vsix/run.mjs write it into the user data ' +
+        'they hand to VS Code.'
+    );
   }
   return choice.path;
 }

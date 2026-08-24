@@ -10,6 +10,7 @@ describe('where the store lives', () => {
       expect(chooseStorageDir({ configured, home: HOME })).toStrictEqual({
         path: DEFAULT,
         refused: null,
+        configured: false,
       });
     }
   });
@@ -20,6 +21,7 @@ describe('where the store lives', () => {
     expect(chooseStorageDir({ configured: elsewhere, home: HOME })).toStrictEqual({
       path: elsewhere,
       refused: null,
+      configured: true,
     });
   });
 
@@ -39,6 +41,7 @@ describe('where the store lives', () => {
 
     expect(choice.path).toBe(DEFAULT);
     expect(choice.refused).toContain('not absolute');
+    expect(choice.configured).toBe(false);
   });
 
   it('refuses a value that is not a string at all', () => {
@@ -48,11 +51,30 @@ describe('where the store lives', () => {
 
     expect(choice.path).toBe(DEFAULT);
     expect(choice.refused).toContain('not a string');
+    expect(choice.configured).toBe(false);
   });
 
   it('ignores the whitespace a person leaves around a pasted path', () => {
     const elsewhere = join('D:', 'work', 'store');
 
     expect(chooseStorageDir({ configured: `  ${elsewhere}  `, home: HOME }).path).toBe(elsewhere);
+  });
+
+  /*
+   * The distinction the refusal in `readStorageDir` rests on. `refused: null`
+   * covers two opposite answers -- "we used what you asked for" and "you asked
+   * for nothing" -- and a test host must be able to tell them apart, because
+   * the second one silently hands it the store of whoever owns the machine.
+   * Without this flag the guard would have to compare paths against the default
+   * and would then also refuse a person who deliberately configured that very
+   * directory, which is a different question.
+   */
+  it('says whether the path came from the person or from the default', () => {
+    expect(chooseStorageDir({ configured: undefined, home: HOME }).configured).toBe(false);
+    expect(chooseStorageDir({ configured: DEFAULT, home: HOME })).toStrictEqual({
+      path: DEFAULT,
+      refused: null,
+      configured: true,
+    });
   });
 });
