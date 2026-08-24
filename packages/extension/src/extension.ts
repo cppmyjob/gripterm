@@ -1044,14 +1044,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
    * Two windows starting at once may sweep the same batch. Whichever loses
    * meets a directory that is already gone, says so and carries on -- there is
    * nothing to be right about in a batch neither of them wanted.
+   *
+   * Never in a test host, and for a heavier reason than `surveyTheMachine` has:
+   * the integration runner leaves a test host pointed at the person's own
+   * store, and `trash/` is the only way back from `remove()`, from the presence
+   * sweep and from `forgetClosedTerminals`. Reading their conversations is
+   * rude; deleting the batches their undo depends on cannot be taken back by
+   * any suite. A test that wants a pass over the trash asks for one, the way
+   * the integration suite already drives the survey and the sweep.
    */
   if (cleaner !== null) {
-    void cleaner.collect().catch((cause: unknown) => {
-      logger.warn('the trash could not be swept at activation, so it may hold more than it should', {
-        reason: String(cause),
+    if (context.extensionMode === vscode.ExtensionMode.Test) {
+      logger.info('the trash was left as it is, because a test host must not remove batches somebody may still need');
+    } else {
+      void cleaner.collect().catch((cause: unknown) => {
+        logger.warn('the trash could not be swept at activation, so it may hold more than it should', {
+          reason: String(cause),
+        });
       });
-    });
-    cleaner.start();
+      cleaner.start();
+    }
   }
 
   // `appName` is logged beside the kind we made of it, unconditionally. An
