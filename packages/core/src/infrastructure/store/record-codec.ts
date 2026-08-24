@@ -7,7 +7,7 @@ import { ObservedState } from '../../domain/entities/observed-state';
 import { OwnerId } from '../../domain/entities/owner-id';
 import { OwnerRef, isEditorKind, isOwnerKind } from '../../domain/entities/owner-ref';
 import { SessionId } from '../../domain/entities/session-id';
-import { TerminalEntry } from '../../domain/entities/terminal-entry';
+import { TerminalEntry, type ClosedBy } from '../../domain/entities/terminal-entry';
 import { TerminalId } from '../../domain/entities/terminal-id';
 import { ValidationError } from '../../domain/errors/gripterm-error';
 import { isPermissionMode } from '../../domain/entities/permission-mode';
@@ -77,6 +77,12 @@ export interface RecordDocument {
   readonly order?: number | null;
   readonly createdAt: number;
   readonly closedAt: number | null;
+  /**
+   * Which hand closed it. Optional and NOT a schema bump, for the same reason
+   * `engine` and `order` above are not: a build that has never heard of it
+   * reads the record exactly as it did before, and absence has a meaning.
+   */
+  readonly closedBy?: string | null;
   readonly revision: number;
 }
 
@@ -152,6 +158,7 @@ export function encodeRecord(entry: TerminalEntry): RecordDocument {
     order: entry.order,
     createdAt: entry.createdAt.getTime(),
     closedAt: entry.closedAt === null ? null : entry.closedAt.getTime(),
+    closedBy: entry.closedBy,
     revision: entry.revision,
   };
 }
@@ -218,6 +225,7 @@ export function decodeEntry(record: unknown, observed: unknown): EntryDecode {
         : requireNumber(document.order, 'order'),
       createdAt,
       closedAt: nullableNumberToDate(document.closedAt, 'closedAt'),
+      closedBy: decodeClosedBy(document.closedBy),
       revision: requireNumber(document.revision, 'revision'),
     });
 
@@ -335,6 +343,23 @@ function names(raw: unknown): readonly string[] {
  * be asserting knowledge it does not have. One row back is recoverable; one
  * conversation ended is not.
  */
+/**
+ * Lenient where `engine` is strict, and the difference is argued rather than
+ * inherited.
+ *
+ * A record whose `closedBy` this build cannot read is a record a NEWER build
+ * wrote, and refusing it outright would take a person's whole conversation away
+ * over one word. Unknown is read as `editor`, which is the answer that keeps the
+ * record: the cost of being wrong is a row that a person has to sweep by hand,
+ * against a conversation that no longer exists.
+ */
+function decodeClosedBy(raw: unknown): ClosedBy | null {
+  if (raw === undefined || raw === null) {
+    return null;
+  }
+  return requireString(raw, 'closedBy') === 'person' ? 'person' : 'editor';
+}
+
 function decodeEngine(raw: unknown): TerminalEngine {
   if (raw === undefined) {
     return 'editor';

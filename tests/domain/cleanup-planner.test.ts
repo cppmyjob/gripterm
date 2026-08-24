@@ -15,6 +15,7 @@ import type {
   AgentListing,
   CleanupPlan,
   CleanupReason,
+  ClosedBy,
   RestoreInputs,
   TerminalEntry,
   TranscriptIndex,
@@ -46,6 +47,11 @@ interface Sketch {
   readonly pid?: number | null;
   readonly lastEventAt?: Date;
   readonly closedAt?: Date | null;
+  /**
+   * Which hand closed it, defaulting to the one every test here meant before
+   * the two could be told apart: the person, through our own list.
+   */
+  readonly closedBy?: ClosedBy | null;
 }
 
 /** A record of a window that is gone, in this window's folder, spoken in. */
@@ -70,6 +76,7 @@ function sketch(options: Sketch = {}): TerminalEntry {
       pid: options.pid === undefined ? CLAUDE_PID : options.pid,
     }),
     closedAt: options.closedAt ?? null,
+    closedBy: options.closedBy === undefined ? 'person' : options.closedBy,
     revision: 0,
   });
 }
@@ -294,7 +301,7 @@ describe('deciding what may be taken out of the store', () => {
   });
 
   it('explains every reason it can give', () => {
-    const reasons: readonly CleanupReason[] = ['closed', 'never-spoken'];
+    const reasons: readonly CleanupReason[] = ['closed', 'closed-in-the-editor', 'never-spoken'];
 
     for (const reason of reasons) {
       expect(explainCleanup(reason).length).toBeGreaterThan(0);
@@ -385,6 +392,51 @@ describe('deciding what may be taken out of the store without asking', () => {
 
     expect(restored.size).toBeGreaterThan(0);
     expect(forgotten.filter((id) => restored.has(id))).toStrictEqual([]);
+  });
+
+  /*
+   * The owner's machine, 2026-08-24, measured rather than imagined: one
+   * `workbench.action.closeAllEditors` -- a keystroke the editor documents as
+   * tidying tabs -- stamped every conversation in the window "do not bring this
+   * back", and the next activation moved all of them into the trash without
+   * asking. The record stayed, in the trash, until the retention swept it or a
+   * forward jump of the clock did; from the chair it was every conversation
+   * gone for a keypress.
+   *
+   * Three of them here because one would pass on the old rule by accident: what
+   * separates the two hands is not how many went at once -- there is no signal
+   * for that, measured -- but which act the build actually witnessed.
+   */
+  it('leaves every conversation the editor took away, however many went at once', () => {
+    const gesture = [
+      sketch({ closedAt: new Date(NOW - MINUTE_MS), closedBy: 'editor' }),
+      sketch({
+        terminalId: TERMINAL_B,
+        sessionId: SESSION_B,
+        closedAt: new Date(NOW - MINUTE_MS),
+        closedBy: 'editor',
+      }),
+    ];
+    const world = inputsFor(gesture, { transcripts: transcriptsFor(SESSION_A, SESSION_B) });
+
+    // A person who means it still reaches them, from the cleanup command.
+    expect(planCleanup(world).sweep.map((item) => item.reason)).toStrictEqual([
+      'closed-in-the-editor',
+      'closed-in-the-editor',
+    ]);
+    // Nothing goes while nobody is looking.
+    expect(planUnaskedCleanup(world)).toStrictEqual({ sweep: [], kept: 2 });
+  });
+
+  /*
+   * And the records written before this build could tell the hands apart. There
+   * is nothing on disk to read, so nothing here claims to know -- and the side
+   * it falls to is the one whose mistake a person can undo.
+   */
+  it('leaves a record closed before this build could tell which hand did it', () => {
+    const entry = sketch({ closedAt: new Date(NOW - MINUTE_MS), closedBy: null });
+
+    expect(planUnaskedCleanup(inputsFor([entry]))).toStrictEqual({ sweep: [], kept: 1 });
   });
 
   it('plans nothing out of nothing', () => {

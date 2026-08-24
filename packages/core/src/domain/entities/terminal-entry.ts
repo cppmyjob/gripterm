@@ -9,6 +9,28 @@ import type { TerminalId } from './terminal-id';
 
 const INITIAL_REVISION = 0;
 
+/**
+ * Which hand closed a terminal, measured 2026-08-24 to be two different things
+ * the editor reports with one word.
+ *
+ * `person` is our own Close, reached through our list: they were reading the
+ * row, they meant that conversation, and nothing else went with it.
+ *
+ * `editor` is the terminal going away with `reason: 'user'` -- the cross on the
+ * tab, and ALSO every bulk gesture the editor offers. Measured on this build:
+ * one `workbench.action.closeAllEditors` closes every conversation in the
+ * window and each one arrives as its own event, `closed: 1`, within fifty
+ * milliseconds of the others. There is no signal in the platform that separates
+ * "I am done with this conversation" from "I am tidying my tabs", and this
+ * build does not pretend to have one.
+ *
+ * So it stops guessing at the intention and narrows the CONSEQUENCE instead:
+ * both hands stop a record coming back by itself, and only `person` may feed
+ * the sweep that moves records out of the store while nobody is looking. What
+ * a misread costs is then one row a person did not want, and not a conversation.
+ */
+export type ClosedBy = 'person' | 'editor';
+
 /** The stored form. `Date`s are held as epoch milliseconds -- see `createdAt`. */
 interface TerminalEntryState {
   readonly terminalId: TerminalId;
@@ -21,6 +43,7 @@ interface TerminalEntryState {
   readonly engine: TerminalEngine;
   readonly createdAtMs: number;
   readonly closedAtMs: number | null;
+  readonly closedBy: ClosedBy | null;
   readonly revision: number;
   /** Where the person put this terminal among the others, or `null`. See `placement`. */
   readonly order: number | null;
@@ -36,6 +59,11 @@ export interface CreateTerminalEntryParams {
   readonly createdAt: Date;
   readonly sessionIdHistory?: readonly SessionId[];
   readonly closedAt?: Date | null;
+  /**
+   * Which of the two acts closed it, or `null` for a record written before this
+   * build could tell them apart.
+   */
+  readonly closedBy?: ClosedBy | null;
   readonly revision?: number;
   /**
    * Which engine made the terminal, defaulting to `editor`.
@@ -169,6 +197,18 @@ export class TerminalEntry {
   }
 
   /**
+   * Which act closed it, and `null` when nothing did -- or when the record was
+   * written by a build that could not tell.
+   *
+   * Read by the cleanup planner and by nothing else, because it answers one
+   * question: may this record be taken out of the store while nobody is
+   * looking. See `ClosedBy`.
+   */
+  public get closedBy(): ClosedBy | null {
+    return this._state.closedBy;
+  }
+
+  /**
    * Optimistic concurrency for `record.json`. Advanced by the repository on
    * write -- and by `adoptedBy`, which is the one change to this record that
    * IS the compare-and-swap. See the note there.
@@ -212,6 +252,7 @@ export class TerminalEntry {
       engine: params.engine ?? 'editor',
       createdAtMs: params.createdAt.getTime(),
       closedAtMs: closedAt === null ? null : closedAt.getTime(),
+      closedBy: closedAt === null ? null : (params.closedBy ?? null),
       revision,
       order: params.order ?? null,
     });
@@ -348,16 +389,25 @@ export class TerminalEntry {
    * already ours, and what moves is one field of it.
    */
   public reopened(): TerminalEntry {
-    return this._state.closedAtMs === null ? this : this._withState({ closedAtMs: null });
+    return this._state.closedAtMs === null
+      ? this
+      : this._withState({ closedAtMs: null, closedBy: null });
   }
 
-  /** Idempotent: the first close wins, so a second one cannot move the timestamp. */
-  public withClosed(at: Date): TerminalEntry {
+  /**
+   * Idempotent: the first close wins, so a second one cannot move the timestamp
+   * -- nor the hand it names.
+   *
+   * `by` is not decoration. Both hands write the same `closedAt` and mean the
+   * same thing to the restore predicate, and only one of them may feed the
+   * sweep that moves records out of the store unasked. See `ClosedBy`.
+   */
+  public withClosed(at: Date, by: ClosedBy): TerminalEntry {
     if (this._state.closedAtMs !== null) {
       return this;
     }
     TerminalEntry._assertClosable(at, this._state.createdAtMs);
-    return this._withState({ closedAtMs: at.getTime() });
+    return this._withState({ closedAtMs: at.getTime(), closedBy: by });
   }
 
   /**

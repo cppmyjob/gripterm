@@ -295,7 +295,7 @@ describe('a burst of events', () => {
     registry.ingest(TERMINAL, preToolUse('Edit'));
     expect(scheduler.live).toHaveLength(1);
 
-    registry.amend(makeEntry({ terminalId: OTHER }).withClosed(OBSERVED_AT));
+    registry.amend(makeEntry({ terminalId: OTHER }).withClosed(OBSERVED_AT, 'person'));
     await settle();
 
     expect(ids(store.written).sort()).toStrictEqual([OTHER_UUID, TERMINAL_UUID].sort());
@@ -443,7 +443,7 @@ describe('when the window goes', () => {
     // proves anything. An event alone would leave a writer that is still
     // listening looking exactly like one that is not: it would arm a timer that
     // this scheduler never fires, and the test would pass on the silence.
-    registry.amend(makeEntry().withClosed(OBSERVED_AT));
+    registry.amend(makeEntry().withClosed(OBSERVED_AT, 'person'));
     registry.ingest(TERMINAL, turnEnded(null));
     await settle();
 

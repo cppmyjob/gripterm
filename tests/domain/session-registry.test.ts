@@ -232,7 +232,7 @@ describe('SessionRegistry holds this window terminals', () => {
     // rename (M2.7). Not an event, so nothing moved and nobody is interrupted.
     const { registry, changes } = stand(null);
     registry.register(makeEntry());
-    const closed = makeEntry().withClosed(CREATED_AT);
+    const closed = makeEntry().withClosed(CREATED_AT, 'person');
 
     registry.amend(closed);
 

@@ -284,29 +284,45 @@ describe('adoptedBy', () => {
 
 describe('withClosed', () => {
   it('closes, and stops being restorable', () => {
-    const closed = makeEntry().withClosed(CLOSED_AT);
+    const closed = makeEntry().withClosed(CLOSED_AT, 'person');
 
     expect(closed.closedAt?.getTime()).toBe(CLOSED_AT.getTime());
     expect(closed.isRestorable()).toBe(false);
   });
 
-  it('is idempotent: the first close wins', () => {
-    const closed = makeEntry().withClosed(CLOSED_AT);
-    const again = closed.withClosed(new Date(CLOSED_AT.getTime() + 60_000));
+  it('is idempotent: the first close wins, and so does the hand it names', () => {
+    const closed = makeEntry().withClosed(CLOSED_AT, 'person');
+    const again = closed.withClosed(new Date(CLOSED_AT.getTime() + 60_000), 'editor');
 
     expect(again).toBe(closed);
     expect(again.closedAt?.getTime()).toBe(CLOSED_AT.getTime());
+    expect(again.closedBy).toBe('person');
+  });
+
+  /*
+   * Both hands stop the record coming back by itself. What they do not share is
+   * the right to feed the sweep that empties the store unasked -- see
+   * `ClosedBy` and the cleanup planner -- and that is the whole reason this
+   * field exists rather than being inferred later from something else.
+   */
+  it('remembers which hand closed it', () => {
+    expect(makeEntry().withClosed(CLOSED_AT, 'person').closedBy).toBe('person');
+    expect(makeEntry().withClosed(CLOSED_AT, 'editor').closedBy).toBe('editor');
+  });
+
+  it('says nothing about a hand while nothing has closed it', () => {
+    expect(makeEntry().closedBy).toBeNull();
   });
 
   it('refuses a close that precedes creation', () => {
-    expect(() => makeEntry().withClosed(new Date(CREATED_AT.getTime() - 1))).toThrow(
+    expect(() => makeEntry().withClosed(new Date(CREATED_AT.getTime() - 1), 'person')).toThrow(
       ValidationError
     );
   });
 
   it('refuses an invalid closedAt, whether it arrives at create or at close', () => {
     expect(() => makeEntry({ closedAt: new Date('nope') })).toThrow(ValidationError);
-    expect(() => makeEntry().withClosed(new Date('nope'))).toThrow(ValidationError);
+    expect(() => makeEntry().withClosed(new Date('nope'), 'person')).toThrow(ValidationError);
   });
 
   it('is not set by a process exiting -- only a mutator sets it', () => {
@@ -340,8 +356,15 @@ describe('reopened', () => {
    * nothing could ever resume, and the only offer on it was to start a NEW
    * conversation -- which walks away from the one they wanted.
    */
+  it('takes the hand back with the close, so nothing is left half-closed', () => {
+    const reopened = makeEntry().withClosed(CLOSED_AT, 'editor').reopened();
+
+    expect(reopened.closedAt).toBeNull();
+    expect(reopened.closedBy).toBeNull();
+  });
+
   it('undoes a close, so the record can be resumed again', () => {
-    const closed = makeEntry().withClosed(CLOSED_AT);
+    const closed = makeEntry().withClosed(CLOSED_AT, 'person');
 
     const reopened = closed.reopened();
 
@@ -352,7 +375,7 @@ describe('reopened', () => {
   it('keeps everything else about the record', () => {
     // The name, the task, the notes and the conversation are why a person is
     // asking for it back at all.
-    const closed = makeEntry().withClosed(CLOSED_AT);
+    const closed = makeEntry().withClosed(CLOSED_AT, 'person');
 
     const reopened = closed.reopened();
 

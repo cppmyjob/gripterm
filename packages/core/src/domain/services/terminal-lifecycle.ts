@@ -383,6 +383,13 @@ export class TerminalLifecycleService implements Disposable {
    * for a deliberate close (A15). Tying `closedAt` to the code would still
    * declare every terminal rubbish at the first restart. `reason` is the field
    * that separates them, and it was there all along (A29).
+   *
+   * **What `reason` does NOT separate, measured 2026-08-24:** the cross on one
+   * tab from `workbench.action.closeAllEditors`, which wears the same word and
+   * takes every conversation in the window with it. Both still stop a record
+   * coming back by itself; only this one, the one a person reached through our
+   * own list, is allowed to feed the sweep that empties the store unasked. That
+   * is what the `ClosedBy` argument carries.
    */
   public close(terminalId: TerminalId): void {
     const entry = this._options.registry.get(terminalId);
@@ -396,7 +403,7 @@ export class TerminalLifecycleService implements Disposable {
     // Before the destruction, so that a listener told the terminal has ended
     // already sees the record as closed rather than being told twice about one
     // act (M2's persistence subscribes here).
-    this._options.registry.amend(entry.withClosed(this._options.clock.now()));
+    this._options.registry.amend(entry.withClosed(this._options.clock.now(), 'person'));
 
     const watched = this._watched.get(terminalId.value);
     if (watched === undefined) {
@@ -574,8 +581,14 @@ export class TerminalLifecycleService implements Disposable {
     if (entry === undefined) {
       return;
     }
-    this._options.registry.amend(entry.withClosed(this._options.clock.now()));
-    this._options.logger.info('a terminal was closed by the person, so its record will not come back', {
+    this._options.registry.amend(entry.withClosed(this._options.clock.now(), 'editor'));
+    /*
+     * The sentence says less than it used to, because this build knows less
+     * than it claimed to. The editor reports one word for the cross on a tab
+     * and for every gesture that closes many at once (measured 2026-08-24), so
+     * "the person closed this" was a guess wearing the clothes of a fact.
+     */
+    this._options.logger.info('a terminal went away in the editor, so its record will not come back by itself', {
       terminalId: terminalId.value,
     });
   }

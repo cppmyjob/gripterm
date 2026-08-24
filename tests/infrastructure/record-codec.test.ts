@@ -458,6 +458,65 @@ describe('the engine that made the terminal', () => {
  * every record written before today has no arrangement, and the honest reading
  * of that silence is the moment the terminal was made (`placement`).
  */
+/**
+ * Which hand closed the terminal (measured 2026-08-24).
+ *
+ * Optional in exactly the way `engine` and `order` are, and for the same
+ * reason: prior builds refuse a whole base over the directory version and the
+ * migrator does not rewrite records, so a new field has to have a meaning for
+ * its own absence. Here that meaning is the cautious one -- nobody established
+ * which hand it was, so the record is not swept while nobody is looking.
+ */
+describe('which hand closed the terminal', () => {
+  const CLOSED = new Date(Date.parse('2026-08-24T10:00:00.000Z'));
+  const closedGood = JSON.parse(
+    JSON.stringify(encodeRecord(makeEntry({ closedAt: CLOSED, closedBy: 'editor' })))
+  ) as Record<string, unknown>;
+
+  it('writes the hand into the document', () => {
+    expect(encodeRecord(makeEntry({ closedAt: CLOSED, closedBy: 'person' })).closedBy).toBe('person');
+  });
+
+  it('writes nothing about a hand when nothing closed it', () => {
+    expect(encodeRecord(makeEntry()).closedBy).toBeNull();
+  });
+
+  it.each(['person', 'editor'] as const)('survives a round trip as %p', (hand) => {
+    const decode = loaded(
+      JSON.parse(JSON.stringify(encodeRecord(makeEntry({ closedAt: CLOSED, closedBy: hand }))))
+    );
+
+    expect(decode.kind).toBe('ok');
+    expect(decode.kind === 'ok' ? decode.entry.closedBy : null).toBe(hand);
+  });
+
+  it('reads a record written before the field existed as nobody established', () => {
+    const older = Object.fromEntries(Object.entries(closedGood).filter(([key]) => key !== 'closedBy'));
+
+    const decode = loaded(older);
+
+    expect(decode.kind).toBe('ok');
+    expect(decode.kind === 'ok' ? decode.entry.closedBy : 'nothing').toBeNull();
+  });
+
+  /*
+   * Lenient where `engine` is strict, and the difference is argued rather than
+   * copied: a word this build has never heard of was written by a NEWER build,
+   * and refusing the record over it would take a person's whole conversation
+   * away. It falls to the hand that keeps the record instead.
+   */
+  it.each(['machine', '', 'Person', 'PERSON'])('reads the unknown hand %p as the editor', (closedBy) => {
+    const decode = loaded({ ...closedGood, closedBy });
+
+    expect(decode.kind).toBe('ok');
+    expect(decode.kind === 'ok' ? decode.entry.closedBy : null).toBe('editor');
+  });
+
+  it('refuses a hand that is not even a string', () => {
+    expect(loaded({ ...closedGood, closedBy: 7 }).kind).toBe('broken');
+  });
+});
+
 describe('the place a person gave the terminal', () => {
   const good = JSON.parse(JSON.stringify(encodeRecord(makeEntry()))) as Record<string, unknown>;
 

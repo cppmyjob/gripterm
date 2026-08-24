@@ -646,6 +646,21 @@ describe('TerminalLifecycleService closes a terminal', () => {
     );
   });
 
+  /*
+   * The hand, and it is this one that carries the right to be forgotten
+   * unasked: a person reached this through our own list, reading the row, and
+   * meant that conversation and no other. The editor's word cannot say as much
+   * -- see the close-by-the-editor case above.
+   */
+  it('names our own list as the hand that closed it', async () => {
+    const { lifecycle, registry } = stand();
+    const entry = await lifecycle.launch(request());
+
+    lifecycle.close(entry.terminalId);
+
+    expect(registry.get(entry.terminalId)?.closedBy).toBe('person');
+  });
+
   it('destroys the terminal and ends the record', async () => {
     const { lifecycle, registry, gateway } = stand();
     const entry = await lifecycle.launch(request());
@@ -736,6 +751,7 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
     readonly restorable: boolean;
     readonly event: unknown;
     readonly closedAt: Date | null;
+    readonly closedBy: string | null;
   }> {
     const { lifecycle, registry, gateway, logger } = stand();
     const entry = await lifecycle.launch(request());
@@ -756,6 +772,7 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
       restorable: after?.isRestorable() ?? false,
       event: closeEvents(logger).at(-1),
       closedAt: after?.closedAt ?? null,
+      closedBy: after?.closedBy ?? null,
     };
   }
 
@@ -858,10 +875,23 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
    * a record wrongly kept costs a person a row they have to close again, and a
    * record wrongly closed costs them a conversation that never comes back.
    */
-  it('closes the record for good when the person closed the terminal', async () => {
+  /*
+   * Renamed 2026-08-24, because the old name claimed more than the editor says.
+   * `reason: 'user'` is the word it uses for the cross on one tab AND for every
+   * gesture that closes many at once -- `workbench.action.closeAllEditors` was
+   * measured doing exactly that, one event per conversation, `closed: 1` each,
+   * inside fifty milliseconds. Nothing in the platform separates them.
+   *
+   * So the record stops coming back by itself, as the owner asked, and it says
+   * `editor` about the hand -- which is what keeps a bulk gesture out of the
+   * sweep that empties the store unasked. See `ClosedBy` and the cleanup
+   * planner, where that half is decided and tested.
+   */
+  it('stops a record coming back by itself when the terminal went away in the editor', async () => {
     expect(await closing(undefined, 'launch', 'user')).toMatchObject({
       restorable: false,
       closedAt: STARTED_AT,
+      closedBy: 'editor',
     });
   });
 

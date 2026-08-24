@@ -398,6 +398,7 @@ export {
 } from './domain/json/json-readers';
 export {
   TerminalEntry,
+  type ClosedBy,
   type CreateTerminalEntryParams,
 } from './domain/entities/terminal-entry';
 

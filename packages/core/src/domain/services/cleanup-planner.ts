@@ -12,8 +12,16 @@ import type { TerminalEntry } from '../entities/terminal-entry';
  * is not on this list, and the absence is the design.
  */
 export type CleanupReason =
-  /** A person closed its terminal, and its window is gone. */
+  /** A person closed its terminal THROUGH OUR LIST, and its window is gone. */
   | 'closed'
+  /**
+   * Its terminal went away in the editor and its window is gone.
+   *
+   * A separate reason from `closed` because the editor says one word for two
+   * acts -- see `ClosedBy` -- and this is the one where nobody established what
+   * the person meant.
+   */
+  | 'closed-in-the-editor'
   /** Nothing was ever said in its conversation, and its window is gone. */
   | 'never-spoken';
 
@@ -31,6 +39,8 @@ export interface CleanupPlan {
 
 const CLEANUP_WORDS: Readonly<Record<CleanupReason, string>> = {
   'closed': 'its terminal was closed and the window that owned it is gone',
+  'closed-in-the-editor':
+    'its terminal went away in the editor and the window that owned it is gone -- which may have been one cross on one tab, or a command that closed everything at once',
   'never-spoken':
     'nothing was ever said in its conversation, and the window that opened it is gone -- a window that opens its project again would start it in a NEW conversation',
 };
@@ -115,6 +125,21 @@ export function planCleanup(inputs: RestoreInputs): CleanupPlan {
  */
 const UNASKED: Readonly<Record<CleanupReason, boolean>> = {
   'closed': true,
+  /*
+   * The third reason, and the decision this record exists to force.
+   *
+   * Measured 2026-08-24: one `workbench.action.closeAllEditors` -- a keystroke
+   * the editor documents as tidying tabs -- stamps every conversation in the
+   * window "do not bring this back", and until this line existed the next
+   * activation moved every one of them into the trash without asking. What a
+   * person got for pressing it was the loss of everything the product is for.
+   *
+   * They still do not come back by themselves: that is `closedAt`, and it is
+   * what the owner asked for about the cross on a tab. What they no longer do
+   * is leave the store while nobody is looking. A person who meant it sweeps
+   * them from the cleanup command, reading the sentence above.
+   */
+  'closed-in-the-editor': false,
   'never-spoken': false,
 };
 
@@ -210,7 +235,14 @@ function reasonFor(entry: TerminalEntry, inputs: RestoreInputs): CleanupReason |
 
   const refusal = refusalAnywhere(entry, inputs);
   if (refusal === 'closed') {
-    return 'closed';
+    /*
+     * `null` falls to the cautious side, and that is the whole of the rule for
+     * records written before this build: nothing on disk says which hand closed
+     * them, so nothing here claims to know. The cost is named rather than
+     * hidden -- such a record stays a row until a person sweeps it from the
+     * cleanup command -- and it is the cost that can be undone.
+     */
+    return entry.closedBy === 'person' ? 'closed' : 'closed-in-the-editor';
   }
   // Every other refusal is a state of the world that may move: a conversation
   // the CLI is running stops, a listing that failed succeeds next time. Only
