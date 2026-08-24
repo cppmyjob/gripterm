@@ -61,7 +61,16 @@ pnpm lint           # eslint, zero warnings allowed
 pnpm test           # builds, then unit tests
 pnpm test:integration   # downloads a real VS Code and runs inside it, twice: once per engine
 pnpm test:vsix      # packages, installs the archive into a profile of its own, runs it
+pnpm test:stand     # opens and closes a real editor four times over one folder, and judges the layout
 ```
+
+`pnpm test:stand` is the one run here that cannot be done inside a single
+window: it asks whether the window a person comes back to is the window they
+left, and the defect it exists for only shows from one sitting to the next. It
+is in two halves — a measurer that starts the editor and writes down what it
+saw, and a judge that is a pure function of that recording — so both "it goes
+red on a broken layout" and "it goes green on a healthy one" are checked by
+`npx jest tests/stand` with no editor at all.
 
 Press <kbd>F5</kbd> to launch an Extension Development Host with the extension
 loaded, or start one by hand with `--extensionDevelopmentPath`. Either way it

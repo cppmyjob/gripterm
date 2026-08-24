@@ -1,0 +1,16 @@
+{
+  "name": "gripterm-stand-observer",
+  "displayName": "Gripterm: the observer of the two-sitting stand",
+  "description": "Loaded beside the product into a real development host by tests/stand/run.mjs. Writes down what the editor area looked like; judges nothing. Not a product, never packaged.",
+  "private": true,
+  "version": "0.0.0",
+  "publisher": "gripterm-stand",
+  "engines": {
+    "vscode": "^1.94.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {}
+}

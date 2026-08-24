@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.integration.json",
+  // The judge of the two-sitting stand, compiled so that `tests/stand/run.mjs`
+  // can require it after a run. Built by the same rules as the integration suite
+  // and kept out of its glob on purpose: nothing here runs inside an editor.
+  //
+  // The suite that checks the judge is excluded rather than compiled: it is a
+  // Jest suite, `npx jest` reads it from source through ts-jest, and compiling
+  // it here would only put a second copy of it under `out/`.
+  "include": ["tests/stand/**/*.ts"],
+  "exclude": ["tests/stand/**/*.test.ts"]
+}

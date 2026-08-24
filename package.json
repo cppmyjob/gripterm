@@ -21,7 +21,9 @@
     "test:integration": "pnpm run build && pnpm run build:extension && pnpm run build:integration && vscode-test",
     "package": "pnpm run build && pnpm run build:extension && pnpm --filter gripterm run package",
     "test:vsix": "tsc -p tsconfig.vsix.json && node tests/vsix/run.mjs",
-    "test:acceptance": "pnpm run build && pnpm run build:extension && tsc -p tsconfig.acceptance.json && node tests/acceptance/run.mjs"
+    "test:acceptance": "pnpm run build && pnpm run build:extension && tsc -p tsconfig.acceptance.json && node tests/acceptance/run.mjs",
+    "build:stand": "tsc -p tsconfig.stand.json",
+    "test:stand": "pnpm run build && pnpm run build:extension && pnpm run build:stand && node tests/stand/run.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
