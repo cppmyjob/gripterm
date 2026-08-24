@@ -5,6 +5,21 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
+ * Where a run keeps its records, by label.
+ *
+ * Named here and not spelled twice, because two things now have to agree about
+ * it: the settings a window is handed, and the seed laid in that store before
+ * the window opens (`tools/seed-restorable-record.mjs`). A seed in one directory
+ * and a window pointed at another is a run that silently proves nothing.
+ *
+ * @param {string} label distinguishes one run's directories from another's
+ * @returns {string} the directory `gripterm.storage.path` will name
+ */
+export function runStore(label) {
+  return join(ROOT, '.vscode-test', `store-${label}`);
+}
+
+/**
  * A user data directory of the run's own, with a store of the run's own in it.
  *
  * Every window we start ourselves gets one. Without it the extension host reads
@@ -27,7 +42,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
  */
 export function hostUserData(label, settings = {}) {
   const directory = join(ROOT, '.vscode-test', `user-data-${label}`);
-  const store = join(ROOT, '.vscode-test', `store-${label}`);
+  const store = runStore(label);
   mkdirSync(join(directory, 'User'), { recursive: true });
   mkdirSync(store, { recursive: true });
   writeFileSync(

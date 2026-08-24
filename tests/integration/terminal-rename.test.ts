@@ -90,6 +90,32 @@ suite('renaming the tab of a terminal', () => {
     try {
       handle.show(true);
       await waitFor('the terminal to become the active one', () => vscode.window.activeTerminal === terminal);
+      /*
+       * **And then wait for the terminal to actually exist, which is not the
+       * same moment -- measured 2026-08-24, Ш2.**
+       *
+       * `window.activeTerminal` is a mirror the workbench pushes to the
+       * extension host, and it can arrive BEFORE the workbench has an active
+       * terminal instance to rename. `renameWithArg` names no target: it renames
+       * whatever the workbench calls active, so a rename issued in that window
+       * lands on nothing and is lost without a word.
+       *
+       * This suite got away with it until activation really restored a record.
+       * Isolated to two lines in `probe-rename-after-restore.ts`: make a
+       * terminal EDITOR, never reveal it, destroy it -- which is exactly what a
+       * restore does with a conversation that ends at once -- and the next
+       * terminal's rename fails here every time. With `processId` awaited it
+       * passes every time, in about half a second.
+       *
+       * `processId` and not a duration on purpose: what is being waited for is
+       * the terminal being real, and a sleep would be a guess at how long that
+       * takes on somebody else's machine. What it does NOT cover is the product
+       * hazard the same measurement found -- a rename issued before the process
+       * is up is silently dropped. In this build nothing issues one there (a
+       * name from `SessionStart` cannot arrive before the process that sends
+       * it), which is why it is written down rather than defended against.
+       */
+      await terminal.processId;
 
       handle.rename('gripterm-rename-after');
 

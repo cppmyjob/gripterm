@@ -17,10 +17,17 @@ import type { GriptermApi } from '../../packages/extension/src/extension';
  * This is also where A26 was measured, by the assertion below failing: the
  * refusal does NOT end the process when `claude` is the terminal's own process.
  *
- * The suite deliberately does NOT let activation restore anything. In a test
- * host that would adopt this machine's records and start `claude --resume` on
- * the person's own conversations as a side effect of running tests, so the
- * extension refuses it and this drives the orchestrator itself.
+ * **This suite drives the orchestrator by hand, and after Ш2 that is a choice
+ * rather than the only way.** It is the `--resume` half: a conversation asked
+ * for by name, refused by the CLI, and settled on the exit code -- which needs a
+ * step built here, because a step the PLANNER produced for a record with no
+ * transcript is a `launch` instead (owner's decision 2026-08-21). What
+ * activation does by itself is `activation-restore.test.ts`.
+ *
+ * A promise this suite used to hold and no longer does (§9): it asserted that a
+ * test host restores NOTHING and says "test host" as the reason. That refusal
+ * was removed on 2026-08-24 -- see `surveyTheMachine` -- so the assertion went
+ * with the thing it was about, in the same change.
  */
 
 const RESTORED_TERMINAL = '5c6d7e8f-9a0b-4c1d-8e2f-3a4b5c6d7e8f';
@@ -135,17 +142,6 @@ async function cleanUp(storageDir: string): Promise<void> {
 }
 
 suite('bringing conversations back', () => {
-  test('activation restores nothing in a test host, and says why', async () => {
-    // The guard is the whole reason this suite may run on a machine that has
-    // real records in `~/.gripterm`.
-    const { readiness } = await api();
-
-    // `assert.equal` narrows the union, which is why the reason can be read
-    // straight off it on the next line.
-    assert.equal(readiness.restore.kind, 'skipped');
-    assert.match(readiness.restore.reason, /test host/u);
-  });
-
   test('a record left by a window that is gone is adopted, started, and settled by the exit', async () => {
     const gripterm = await api();
     const { repository, restore, readiness } = gripterm;

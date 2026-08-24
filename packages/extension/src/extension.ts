@@ -202,9 +202,13 @@ export interface Readiness {
  * What activation did about the records left behind by windows that are gone.
  *
  * Three answers and not two, because "we did not try" and "we tried and it broke"
- * send a person to different places -- and because the first of them is the
- * normal answer in a test host, where starting somebody's conversations would be
- * a side effect of running a test suite.
+ * send a person to different places: the first is a window with no shared store
+ * to read, the second is a fault worth reporting.
+ *
+ * Until 2026-08-24 `skipped` was also the standing answer in a test host, which
+ * made this field the one place a run could see that the restore had not
+ * executed -- and the only place, because nothing else could see it either. It
+ * is now read the other way round: `activation-restore.test.ts` asserts `ran`.
  */
 export type RestoreSummary =
   | { readonly kind: 'skipped', readonly reason: string }
@@ -1014,7 +1018,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   await endTheirProcesses({ context, reconciler, logger });
 
   // One reading for both of the decisions below -- see `surveyTheMachine`.
-  const world = await surveyTheMachine({ context, gather, logger });
+  const world = await surveyTheMachine({ gather, logger });
   const restore = await bringTerminalsBack({
     world,
     orchestrator,
@@ -1052,13 +1056,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
    * meets a directory that is already gone, says so and carries on -- there is
    * nothing to be right about in a batch neither of them wanted.
    *
-   * Never in a test host, and for a heavier reason than `surveyTheMachine` has:
-   * the integration runner leaves a test host pointed at the person's own
-   * store, and `trash/` is the only way back from `remove()`, from the presence
-   * sweep and from `forgetClosedTerminals`. Reading their conversations is
-   * rude; deleting the batches their undo depends on cannot be taken back by
-   * any suite. A test that wants a pass over the trash asks for one, the way
-   * the integration suite already drives the survey and the sweep.
+   * **Never in a test host, and the reason has changed under it -- so it is
+   * restated rather than left standing.** It was written when the runner left a
+   * test host pointed at the person's own store; that is no longer true (Ш1),
+   * and `surveyTheMachine`'s twin of this refusal was removed on 2026-08-24
+   * because a store the run owns bounds everything done inside it. This one is
+   * not bounded the same way: `trash/` is the only way back from `remove()`,
+   * from the presence sweep and from `forgetClosedTerminals`, and `collect()` is
+   * the single operation in this build that empties it for good. A store of the
+   * run's own makes those batches the run's own, but it does not make deleting
+   * them undoable, and this change measured nothing about that.
+   *
+   * **What would take it off**, so that it is a decision with a condition rather
+   * than a fixture: a run that seeds a batch of its own, sweeps, and asserts what
+   * went and what stayed -- the way the integration suite already drives the
+   * survey and the reconciliation. Until then a test that wants a pass over the
+   * trash asks for one.
    */
   if (cleaner !== null) {
     if (context.extensionMode === vscode.ExtensionMode.Test) {
@@ -1162,8 +1175,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
  * one thing a person notices about M2.
  *
  * It refuses in three situations, and each refusal is a sentence rather than a
- * silence. Two of them are `surveyTheMachine`'s -- a test host, and a window
- * with no shared base to read -- and the third is its own:
+ * silence. Two of them are `surveyTheMachine`'s -- a window with no shared base
+ * to read, and a machine that could not be read -- and the third is its own:
  *
  *   * **a launch pipeline that would refuse.** Every start would throw, and each
  *     one would leave a record adopted by this window with no process behind it
@@ -1236,11 +1249,21 @@ type MachineSurvey =
  * Ends the processes of windows that are gone, before anything else looks at the
  * machine (M3.5, O4).
  *
- * **Refused in a test host, for a sharper version of `surveyTheMachine`'s
- * reason.** That one would start somebody's conversations as a side effect of a
- * test run; this one would END them, and nothing takes that back. The
- * integration suite drives the pass explicitly instead, over a record and a
- * process it made itself.
+ * **Refused in a test host -- and this is now the ONLY refusal of that shape
+ * left at activation, which is why it says why it stays.** `surveyTheMachine`
+ * had one and lost it on 2026-08-24: everything downstream of reading the
+ * machine happens INSIDE the store -- a record is adopted, a terminal is
+ * started, a closed record is moved to `trash/` -- so a run that owns its store
+ * bounds all of it, and the extension refuses to open a store it was not pointed
+ * at (`readStorageDir`). None of that reasoning reaches this line. Ending a
+ * process is not an operation on the store: it takes a pid a record happens to
+ * carry and kills whatever holds that number on the machine the run is on --
+ * which may be a conversation somebody is in the middle of, and which no
+ * directory of ours makes reversible. `gripterm.storage.path` cannot bound it,
+ * so the mode is still the honest question here.
+ *
+ * The integration suite drives the pass explicitly instead, over a record and a
+ * process it made itself (`orphan-processes.test.ts`).
  *
  * A window with no shared base has no other window's records to read, so there
  * is nothing for it to do here.
@@ -1274,21 +1297,40 @@ async function endTheirProcesses(parts: {
   }
 }
 
+/**
+ * Reads the machine, in every window -- including a test host.
+ *
+ * **A test host was refused here until 2026-08-24, and the refusal was the wrong
+ * shape of the right rule.** What it was guarding against is real: a suite that
+ * ran would adopt this machine's records, start `claude --resume` on the
+ * person's own conversations and move their closed ones into the trash, as a
+ * side effect of running tests. But it guarded by asking WHO IS ASKING, and the
+ * danger is WHICH STORE IS OPEN -- so the price of it was that the restore
+ * executed in no run anywhere, and no stand could show that a window brings
+ * anything back at all. The plan calls that being blind (Ш2); the owner's own
+ * S01 -- "I opened the project and yesterday's agents came back" -- had nothing
+ * behind it but the fact that it had never been seen to fail.
+ *
+ * **What replaced it, and it is the reason this may be removed at all:**
+ * `readStorageDir` THROWS in a test host whose `gripterm.storage.path` is not
+ * set, so a window pointed at `~/.gripterm` never reaches this line -- it never
+ * finishes activating. That refusal is keyed on the thing that decides the harm,
+ * it acts before anything else does, and it cannot be satisfied by accident. The
+ * two are not interchangeable and the removal of one required the other; see the
+ * doc comment there for why it throws rather than reports.
+ *
+ * **`endTheirProcesses` keeps its own test-host refusal, and the difference is
+ * not squeamishness.** Everything this function leads to is confined to the
+ * store: adoption, a start, a move into `trash/`. A store that belongs to the
+ * run therefore bounds all of it, and the trash bounds the rest. Ending a
+ * process is not in the store and not in any store -- it reaches out of the
+ * directory the run owns and kills whatever a pid names on the machine the run
+ * happens to be on, and no directory of ours makes that reversible.
+ */
 async function surveyTheMachine(parts: {
-  readonly context: vscode.ExtensionContext;
   readonly gather: (() => Promise<RestoreInputs>) | null;
   readonly logger: Logger;
 }): Promise<MachineSurvey> {
-  if (parts.context.extensionMode === vscode.ExtensionMode.Test) {
-    // A suite that ran would adopt this machine's records and start `claude
-    // --resume` on the person's own conversations -- and, since M2.20, would
-    // also move their closed ones into the trash -- as a side effect of running
-    // tests. The integration suite drives both explicitly instead.
-    return {
-      kind: 'unread',
-      reason: 'this is a test host, and a test run must not touch anybody\'s conversations',
-    };
-  }
   if (parts.gather === null) {
     return { kind: 'unread', reason: 'this window is not reading the shared store' };
   }

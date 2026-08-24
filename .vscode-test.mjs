@@ -2,8 +2,9 @@ import { defineConfig } from '@vscode/test-cli';
 import { readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { hostUserData } from './tools/host-user-data.mjs';
+import { hostUserData, runStore } from './tools/host-user-data.mjs';
 import { refuseStaleBuilds } from './tools/refuse-stale-builds.mjs';
+import { seedRestorableRecord } from './tools/seed-restorable-record.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const COMPILED = join(here, 'out', 'tests', 'integration');
@@ -71,6 +72,21 @@ function suitesUnderOwn() {
 // older than its source measures code nobody wrote today, and says green about
 // it. That cost a day on 2026-08-24 -- see tools/refuse-stale-builds.mjs.
 refuseStaleBuilds();
+
+/*
+ * A record of a window that is gone, laid in each run's store before either host
+ * exists.
+ *
+ * Here rather than in a suite because of WHEN it has to be there: the extension
+ * activates on `onStartupFinished`, decides what to bring back, and is finished
+ * with the question before mocha loads its first file. A record written by a
+ * test would be a record the restore has already walked past, and the whole of
+ * S01 -- "the terminals came back by themselves" -- would stay unmeasurable.
+ * `activation-restore.test.js` reads what activation did with this.
+ */
+for (const label of ['integration', 'own']) {
+  seedRestorableRecord(runStore(label));
+}
 
 // Downloads a real VS Code and runs the integration suite inside it, so that
 // "works in VS Code" is checked rather than assumed. The bundled extension is
