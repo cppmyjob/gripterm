@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import {
   DEFAULT_JOURNAL_POLICY,
   DEFAULT_TOAST_SIGNALS,
@@ -198,6 +199,13 @@ export function readTerminalEngine(logger: Logger): TerminalEngine {
   return DEFAULT_TERMINAL_ENGINE;
 }
 
+/** Where the store landed, and what the person has to be told about it. */
+export interface StorageDirDecision {
+  readonly path: string;
+  /** Said once, when the window is not using the store its person would expect. */
+  readonly announce: string | null;
+}
+
 /**
  * Where the store lives, as the person configured it.
  *
@@ -212,24 +220,32 @@ export function readTerminalEngine(logger: Logger): TerminalEngine {
  * never says why. A reload re-creates all of it, in order, and the manifest says
  * so on the setting.
  *
- * Outside a production window this refuses instead of falling back, and the
- * refusal is thrown rather than reported. Both halves are deliberate.
+ * Outside a production window the default is not used, and the two hosts are
+ * answered differently because the two hosts differ in one decisive way: whether
+ * anybody is there to read.
  *
- * REFUSES, because the default path is the store the person keeps their own
- * terminals and conversations in, and a test host or a development host running
- * on it is not a mistake that shows up as a failing assertion -- it shows up as
- * `claude --resume` starting on somebody's real conversation, as records
- * appearing in their list, and as batches leaving their trash. A run that was
- * pointed nowhere asked for the default by not asking, and by not asking it
- * cannot have meant that one.
+ * A TEST host is REFUSED, and the refusal is THROWN. Refused, because the
+ * default path is the store the person keeps their own terminals and
+ * conversations in, and a suite running there does not show up as a failing
+ * assertion -- it shows up as `claude --resume` starting on somebody's real
+ * conversation, as records appearing in their list, and as batches leaving their
+ * trash. Thrown, because the guard has to act before anything else does: a
+ * refusal carried in the API is read by a test, and a test runs after activation
+ * is over. Activation failing is the only refusal that arrives in time.
  *
- * THROWN, because the guard has to act before anything else does. A refusal
- * carried in the API is read by a test, and a test runs after activation is
- * over -- after the store has been opened, the window announced and the survey
- * begun. There is no assertion that can un-write those. Activation failing is
- * the only refusal that arrives in time, and every suite sees it at once.
+ * A DEVELOPMENT host is given a store of its own instead, under this extension's
+ * `globalStorageUri`, and told so out loud. Refusing here was tried and was
+ * wrong: this window is launched by hand as often as by F5 --
+ * `cursor --extensionDevelopmentPath=...` carries no user data directory and no
+ * setting -- and a refusal there stops the person from running their own product
+ * with no way out that the message can name. Their store still cannot be reached
+ * by accident; it can be reached on purpose, by setting the path to it, which is
+ * the deliberate act I.3 asks for and not a default.
  */
-export function readStorageDir(logger: Logger, mode: vscode.ExtensionMode): string {
+export function readStorageDir(
+  logger: Logger,
+  context: Pick<vscode.ExtensionContext, 'extensionMode' | 'globalStorageUri'>
+): StorageDirDecision {
   const configured = vscode.workspace.getConfiguration(SECTION).get<unknown>(STORAGE_PATH);
   const choice = chooseStorageDir({ configured, home: homedir() });
   if (choice.refused !== null) {
@@ -237,22 +253,37 @@ export function readStorageDir(logger: Logger, mode: vscode.ExtensionMode): stri
       setting: `${SECTION}.${STORAGE_PATH}`,
       configured,
       reason: choice.refused,
-      using: choice.path,
     });
   }
-  if (mode !== vscode.ExtensionMode.Production && !choice.configured) {
-    const host = mode === vscode.ExtensionMode.Test ? 'a test host' : 'a development host';
-    const why = choice.refused === null ? 'is not set' : `was refused -- ${choice.refused}`;
+  if (choice.configured || context.extensionMode === vscode.ExtensionMode.Production) {
+    return { path: choice.path, announce: null };
+  }
+
+  const why = choice.refused === null ? 'is not set' : `was refused -- ${choice.refused}`;
+  if (context.extensionMode === vscode.ExtensionMode.Test) {
     throw new Error(
-      `Gripterm will not open a store it was not pointed at: this window is ${host}, ` +
-        `and the setting ${SECTION}.${STORAGE_PATH} ${why}, so the store would have been ` +
-        `${choice.path} -- the one this person actually keeps their terminals in. Point ` +
-        'the setting at a directory the run owns, the way .vscode-test.mjs, ' +
+      'Gripterm will not open a store it was not pointed at: this window is a test ' +
+        `host, and the setting ${SECTION}.${STORAGE_PATH} ${why}, so the store would ` +
+        `have been ${choice.path} -- the one this person actually keeps their terminals ` +
+        'in. Point the setting at a directory the run owns, the way .vscode-test.mjs, ' +
         'tests/acceptance/run.mjs and tests/vsix/run.mjs write it into the user data ' +
         'they hand to VS Code.'
     );
   }
-  return choice.path;
+
+  const ours = join(context.globalStorageUri.fsPath, 'store');
+  logger.warn('this development host was given a store of its own', {
+    setting: `${SECTION}.${STORAGE_PATH}`,
+    reason: why,
+    using: ours,
+    insteadOf: choice.path,
+  });
+  return {
+    path: ours,
+    announce:
+      `Gripterm is a development host here, so it opened a store of its own at ${ours} ` +
+      `rather than ${choice.path}. Set ${SECTION}.${STORAGE_PATH} to work against another one.`,
+  };
 }
 
 /**

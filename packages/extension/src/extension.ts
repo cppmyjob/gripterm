@@ -608,7 +608,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     endOwnTerminals({ gateway, entries: registry.own(), endProcess: sendKillSignal, logger });
   farewell = endOwnProcesses;
 
-  const storage = new StorageLayout(readStorageDir(logger, context.extensionMode));
+  const storageChoice = readStorageDir(logger, context);
+  // Said, not merely logged: a window quietly looking at a store that is not the
+  // person's shows an empty list and no reason for it, which is the shape of
+  // every "my terminals are gone" report.
+  if (storageChoice.announce !== null) {
+    announcer.say('warning', storageChoice.announce);
+  }
+  const storage = new StorageLayout(storageChoice.path);
   const store = await prepareStorage(storage, logger);
   const shared = await shareTheBase({ context, storage, store, registry, identity, clock, logger });
   // Per activation, held in memory, never written down: it is only meaningful
