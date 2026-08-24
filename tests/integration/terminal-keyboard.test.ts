@@ -5,8 +5,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { GriptermApi } from '../../packages/extension/src/extension';
-import { askTheClipboard, underTheClipboard } from './clipboard-of-this-window';
-import type { ClipboardDoor, ClipboardVerdict } from './clipboard-of-this-window';
+import { testNeeding, theClipboard, theKeyboard } from './room-of-this-run';
+import { whyTheKeyboardIsElsewhere } from './keyboard-of-this-window';
 
 /**
  * The keyboard of our own panel: what reaches the agent, and what must not.
@@ -154,55 +154,38 @@ async function showPanel(): Promise<void> {
 }
 
 /**
- * The EDITOR's clipboard, which is the one the extension is handed.
+ * A test that cannot work unless this window holds the keyboard.
  *
- * Deliberately not our page, our channel or our command: this is what the tests
- * below are measured AGAINST, so a build that has lost its paste on a machine
- * whose clipboard works must still come out red. Only a machine with no
- * clipboard to give comes out refused.
+ * Every test below that presses a key -- which is every test below except the
+ * one that reads the manifest -- goes through `attach`, and `attach` waits for
+ * the keyboard to be inside the terminal. On 2026-08-24 a full `own` run went
+ * ELEVEN red, and the eleven were exactly the tests that make that wait: these
+ * five, the five clipboard ones under them, and `redrawing the half does not
+ * take the keyboard out of the terminal` in `terminal-details`, which builds no
+ * terminal of its own and shares nothing else with them. Every test in both
+ * files that does not make that wait passed, and the clipboard detector was
+ * asked and answered `ours` -- correctly, as the same suite on the same locked
+ * machine passed all eleven half an hour later.
+ *
+ * Declared this way rather than checked inside each body, so that WHICH tests
+ * depend on the room is visible where they are named. The reasoning is in
+ * `keyboard-of-this-window.ts`, including the measurement that a LOCKED
+ * workstation is NOT this condition.
  */
-const EDITORS_CLIPBOARD: ClipboardDoor = {
-  read: async () => await vscode.env.clipboard.readText(),
-  write: async (text) => { await vscode.env.clipboard.writeText(text); },
-};
-
-async function theClipboard(): Promise<ClipboardVerdict> {
-  return await askTheClipboard(EDITORS_CLIPBOARD);
-}
-
-/** Said once per run: five identical paragraphs are five chances to stop reading. */
-let refusalSaid = false;
-
-function sayOnce(refusal: string): void {
-  if (refusalSaid) {
-    return;
-  }
-  refusalSaid = true;
-  // Straight to the run's own output. A refusal nobody can see is a skip, and a
-  // skip is the thing this exists instead of.
-  console.log(`\n  ===> GRIPTERM REFUSES ${refusal}\n`);
+function testNeedingTheKeyboard(title: string, body: () => Promise<void>): void {
+  testNeeding([theKeyboard], title, body);
 }
 
 /**
- * A test that cannot work without the clipboard of the machine it runs on.
+ * A test that needs the keyboard AND the clipboard of the machine it runs on.
  *
- * Declared this way rather than checked inside each body, so that WHICH tests
- * depend on the room is visible in the source at the point where they are named.
- * When the clipboard is there this is `test` and nothing else; when it is not,
- * the test is REFUSED with the condition named -- neither passed nor failed --
- * and the reasoning for that is in `clipboard-of-this-window.ts`.
+ * The keyboard is asked first because it is the cheaper question and the earlier
+ * dependency: these five reach the clipboard only after `attach` has put the
+ * keyboard inside the terminal, so a window that has not got one never gets as
+ * far as needing the other.
  */
 function testNeedingTheClipboard(title: string, body: () => Promise<void>): void {
-  test(title, async function (this: Mocha.Context) {
-    await underTheClipboard(
-      theClipboard,
-      (verdict: ClipboardVerdict): never => {
-        sayOnce(verdict.refusal);
-        return this.skip();
-      },
-      body
-    );
-  });
+  testNeeding([theKeyboard, theClipboard], title, body);
 }
 
 /** One terminal of ours, on the panel this window is really using. */
@@ -314,15 +297,17 @@ async function keyboardIntoTerminal(): Promise<void> {
   while (!keyboard.focused) {
     if (Date.now() - started > FOCUS_WITHIN_MS) {
       const report = await workbench.measure('the suite is asking why the keyboard is elsewhere', SETTLES_WITHIN_MS);
+      // Two facts and not one. `documentFocused` alone said THE ROOM whenever
+      // the page had no keyboard, and the page has none whenever the editor
+      // never gave the webview one -- so a panel this build failed to reveal
+      // printed a sentence about somebody else's browser. The window's own
+      // state is the half that belongs to the room; the page's is ours.
+      const windowHoldsIt = vscode.window.state.focused;
       throw new Error(
         `waited ${String(FOCUS_WITHIN_MS)} ms for the keyboard to be inside the terminal. ` +
-        (report.documentFocused
-          ? 'The page has the keyboard and the terminal did not take it, which is ours to answer for. '
-          : 'THE EDITOR WINDOW DOES NOT HOLD THE KEYBOARD: something else on this machine does, ' +
-            'and no view can ask for what the window has not got. Run this gate on a machine ' +
-            'nobody is using (measured 2026-08-18: with a person at the keyboard the foreground ' +
-            'belonged to their browser and their other editor for four fifths of a run). ') +
-        `panel visible: ${String(workbench.visible)}, report: ${JSON.stringify(report)}, ` +
+        whyTheKeyboardIsElsewhere(windowHoldsIt, report.documentFocused) +
+        `window holds the keyboard: ${String(windowHoldsIt)}, panel visible: ${String(workbench.visible)}, ` +
+        `report: ${JSON.stringify(report)}, ` +
         `refusals: ${workbench.refusals.slice(-4).join(' | ')}`
       );
     }
@@ -486,7 +471,7 @@ suite('the keyboard of our own panel', () => {
     }
   });
 
-  test('a chord pressed on the page reaches the agent, and reaches it once', async () => {
+  testNeedingTheKeyboard('a chord pressed on the page reaches the agent, and reaches it once', async () => {
     /*
      * The whole road, in one press: the page dispatches the key on xterm's own
      * textarea, the editor forwards it out of the webview, our context key lets
@@ -524,7 +509,7 @@ suite('the keyboard of our own panel', () => {
     }
   });
 
-  test('a chord pressed while the keyboard is elsewhere reaches nobody', async () => {
+  testNeedingTheKeyboard('a chord pressed while the keyboard is elsewhere reaches nobody', async () => {
     // Both halves of the guard at once: the context key is down, so the editor
     // never runs our command, and xterm has been told to keep out of this chord,
     // so nothing answers it on the page either. A build that lost either one
@@ -550,7 +535,7 @@ suite('the keyboard of our own panel', () => {
     }
   });
 
-  test('a chord the editor took reaches the agent as the byte a terminal expects', async () => {
+  testNeedingTheKeyboard('a chord the editor took reaches the agent as the byte a terminal expects', async () => {
     // The command is what a keybinding runs, so this is the path a real press
     // takes from the moment the editor has decided whose the chord is.
     const { keyboard } = await api();
@@ -572,7 +557,7 @@ suite('the keyboard of our own panel', () => {
     }
   });
 
-  test('a chord goes nowhere while the keyboard is in the other half', async () => {
+  testNeedingTheKeyboard('a chord goes nowhere while the keyboard is in the other half', async () => {
     const { workbench, keyboard } = await api();
     const stand = await Stand.start('02');
     try {
@@ -599,7 +584,7 @@ suite('the keyboard of our own panel', () => {
     }
   });
 
-  test('a chord goes nowhere while the panel is hidden', async () => {
+  testNeedingTheKeyboard('a chord goes nowhere while the panel is hidden', async () => {
     const { keyboard } = await api();
     const stand = await Stand.start('03');
     try {

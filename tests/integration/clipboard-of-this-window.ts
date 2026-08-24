@@ -3,8 +3,8 @@
  * it is not.
  *
  * **The condition, named.** On Windows the clipboard belongs to the interactive
- * DESKTOP, not to a process. While the workstation is locked, every process on
- * that desktop is refused it: `OpenClipboard` answers `ERROR_ACCESS_DENIED` (5)
+ * DESKTOP, not to a process, and while the workstation is locked every process on
+ * that desktop CAN be refused it: `OpenClipboard` answers `ERROR_ACCESS_DENIED` (5)
  * with `GetOpenClipboardWindow()` reporting no holder at all, and Electron --
  * and therefore `vscode.env.clipboard` -- swallows the write and reads back an
  * empty string without raising anything. A disconnected remote session and
@@ -19,6 +19,16 @@
  * second and a half each, and the keyboard reached the terminal in every one of
  * the eleven. So this is NOT the editor's focus and NOT the product; it is the
  * room, and nothing an extension can do reaches it.
+ *
+ * **Amended later the same day, and the amendment matters.** A lock is not
+ * always this. Measured 2026-08-24 at 21:42 with the workstation locked --
+ * `LogonUI` and `LockApp` running, `GetForegroundWindow()` returning `NULL` --
+ * `OpenClipboard(NULL)` SUCCEEDED with no holder, and all eleven tests of
+ * `terminal-keyboard` passed in 22 seconds. So a locked desktop is one road to a
+ * clipboard nobody can have rather than the condition itself, and the sentence
+ * below is right to say what was WRITTEN and what CAME BACK instead of reading a
+ * lock state. The eleven reds of that afternoon were not this condition at all:
+ * they were the keyboard of the window, and that is `keyboard-of-this-window.ts`.
  *
  * **Why the measurement goes through the editor's own clipboard.** The door
  * handed in below is `vscode.env.clipboard` -- the same object the extension is
@@ -35,18 +45,21 @@
  * out loud, with the condition named, never in silence.
  */
 
+import { underTheRoom } from './room-this-runs-in';
+import type { RoomVerdict } from './room-this-runs-in';
+
 /** The clipboard, as the two calls this needs of it. `vscode.env.clipboard` is one. */
 export interface ClipboardDoor {
   readonly read: () => Promise<string>;
   readonly write: (text: string) => Promise<void>;
 }
 
-export interface ClipboardVerdict {
-  /** Whether a nonce written through the door came back through it. */
-  readonly ours: boolean;
-  /** What to say when it did not. Empty when it did. */
-  readonly refusal: string;
-}
+/**
+ * One condition of the room, and since 2026-08-24 not the only one: `ours` is
+ * whether a nonce written through the door came back through it, and `refusal`
+ * is what to say when it did not.
+ */
+export type ClipboardVerdict = RoomVerdict;
 
 /**
  * The nonce, and it is a sentence rather than a number for a reason: it lands on
@@ -67,13 +80,16 @@ function refusalSaying(what: string): string {
     'THIS SUITE NEEDS THE CLIPBOARD OF THE MACHINE IT RUNS ON, AND THIS MACHINE ' +
     `WOULD NOT GIVE IT: ${what}. ` +
     'On Windows the clipboard belongs to the interactive desktop rather than to a ' +
-    'process, so a LOCKED workstation takes it from everything running on that ' +
-    'desktop -- as does a disconnected remote session, and another application ' +
+    'process, so a locked workstation can take it from everything running on that ' +
+    'desktop -- as can a disconnected remote session, and another application ' +
     'holding the clipboard open. Measured 2026-08-24 with the lock screen up: ' +
-    'OpenClipboard answers ERROR_ACCESS_DENIED with no other window holding it, ' +
-    'and vscode.env.clipboard reads back empty after its own write. Nothing in an ' +
-    'extension can take that back. This is the ROOM and not the build: unlock the ' +
-    'machine, leave it unlocked, and run the gate again.'
+    'OpenClipboard answered ERROR_ACCESS_DENIED with no other window holding it, ' +
+    'and vscode.env.clipboard read back empty after its own write. Measured the ' +
+    'same day, also locked: it answered perfectly well -- so the lock is a road to ' +
+    'this and not the condition, which is why what is reported above is what was ' +
+    'written and what came back. Nothing in an extension can take that back. This ' +
+    'is the ROOM and not the build: unlock the machine, leave it unlocked, and run ' +
+    'the gate again.'
   );
 }
 
@@ -131,34 +147,16 @@ export async function askTheClipboard(
  * Runs a test that cannot work without the clipboard, and refuses instead of
  * failing when the clipboard is not there.
  *
- * Asked TWICE, and the second time is the whole reason this is a function rather
- * than a `suiteSetup`. The gate is meant to run unattended while somebody uses
- * the machine, so the screen lock timer can fire in the middle of it: a suite
- * that only checked at the start would start green and go red four minutes in,
- * with nothing about the build having changed. The second ask happens only on
- * the way out of a failure, so it costs nothing on a passing run.
- *
- * `refuse` never returns -- Mocha's own `this.skip()` does not either -- so a
- * refusal cannot be mistaken for a pass by anything downstream of it.
+ * The mechanism -- ask before, ask again on the way out of a failure, never let
+ * a refusal cover a build -- moved to `room-this-runs-in` on 2026-08-24, when it
+ * turned out the clipboard was one condition of the room rather than the only
+ * one. This is that, with the clipboard as its single condition, and it is kept
+ * for the tests that need nothing else.
  */
 export async function underTheClipboard(
   ask: () => Promise<ClipboardVerdict>,
   refuse: (verdict: ClipboardVerdict) => never,
   body: () => Promise<void>
 ): Promise<void> {
-  const before = await ask();
-  if (!before.ours) {
-    refuse(before);
-  }
-  try {
-    await body();
-  } catch (cause: unknown) {
-    const after = await ask();
-    if (!after.ours) {
-      refuse(after);
-    }
-    // The clipboard was there before and it is there now, so whatever went wrong
-    // in between is ours to answer for.
-    throw cause;
-  }
+  await underTheRoom([ask], refuse, body);
 }

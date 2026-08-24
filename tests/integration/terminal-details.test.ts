@@ -16,6 +16,7 @@ import {
 } from '../../packages/core/src/index';
 import type { GriptermApi } from '../../packages/extension/src/extension';
 import type { DetailsReport, ViewReport } from '../../packages/webview/src/protocol';
+import { testNeeding, theKeyboard } from './room-of-this-run';
 
 /**
  * The details half of the panel: the record, and the history it comes from.
@@ -360,7 +361,12 @@ suite('the details half of the panel', () => {
    * the host says what it believes (`keyboard.focused`), so a lost focus and a
    * lost message are told apart.
    */
-  test('redrawing the half does not take the keyboard out of the terminal', async () => {
+  // The one test in this file that waits for the keyboard, and therefore the
+  // one that a room can take away: on 2026-08-24 it was the eleventh red of a
+  // run whose other ten were in `terminal-keyboard`, and nothing else in this
+  // file failed. `keyboard-of-this-window.ts` has the condition and the
+  // measurement.
+  testNeeding([theKeyboard], 'redrawing the half does not take the keyboard out of the terminal', async () => {
     const { workbench, keyboard, metadata } = await api();
     const terminalId = TerminalId.fromString(TERMINAL_UUID);
 
