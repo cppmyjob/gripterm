@@ -3,6 +3,7 @@ import { readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hostUserData } from './tools/host-user-data.mjs';
+import { refuseStaleBuilds } from './tools/refuse-stale-builds.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const COMPILED = join(here, 'out', 'tests', 'integration');
@@ -65,6 +66,11 @@ function suitesUnderOwn() {
  * is the only window that proves the setting works. `engine-in-effect.test.js`
  * asserts from inside that the engine which answered is the one asked for.
  */
+
+// Before anything is launched, and not as a courtesy: a host given a bundle
+// older than its source measures code nobody wrote today, and says green about
+// it. That cost a day on 2026-08-24 -- see tools/refuse-stale-builds.mjs.
+refuseStaleBuilds();
 
 // Downloads a real VS Code and runs the integration suite inside it, so that
 // "works in VS Code" is checked rather than assumed. The bundled extension is
