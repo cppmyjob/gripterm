@@ -6,6 +6,7 @@ import {
   RepositoryWatcher,
   StorageLayout,
   SystemScheduler,
+  describeDetails,
   watchedName,
 } from '../../packages/core/src/index';
 import type { DirectoryEvents, DirectoryHandle, DirectoryWatch } from '../../packages/core/src/index';
@@ -444,6 +445,13 @@ describe('the platform itself', () => {
     watcher.dispose();
 
     expect(logger.errors).toHaveLength(2);
-    expect(String(logger.errors[0]?.details?.reason)).toContain('ENOENT');
+    // The failure itself and not a rendering of it (Ш3): `code` is what a branch
+    // reacts to, and the string this used to carry threw it away along with the
+    // stack -- so a log line could not be compared with the decision the code
+    // took. The promise here is the one it always was: the reason a root could
+    // not be watched reaches the log.
+    const rendered = describeDetails(logger.errors[0]?.details);
+    expect(rendered).toContain('"code":"ENOENT"');
+    expect(rendered).toContain('"stack":');
   });
 });

@@ -105,6 +105,8 @@ export interface FileOwnerPresenceOptions {
 export class FileOwnerPresence implements OwnerPresence {
   private _announced: PresenceRecord | null = null;
   private _retired = false;
+  /** The last verdict said out loud per owner, so a repeat is not said twice. See `_answer`. */
+  private readonly _said = new Map<string, OwnerLiveness>();
 
   constructor(private readonly _options: FileOwnerPresenceOptions) {}
 
@@ -147,25 +149,26 @@ export class FileOwnerPresence implements OwnerPresence {
   public async livenessOf(ownerId: OwnerId): Promise<OwnerLiveness> {
     const path = this._ownerFileOrNull(ownerId);
     if (path === null) {
-      return 'unknown';
+      return this._answer(ownerId, 'unknown', 'its id could not name a presence file');
     }
 
     const read = await this._readAt(path, ownerId.value);
     if (read.kind === 'ok') {
-      return this._verdict(read.record);
+      const [liveness, rule] = this._verdict(read.record);
+      return this._answer(ownerId, liveness, rule);
     }
     if (read.kind === 'absent') {
       // The one place absence is evidence: `retire()` removes the file, and
       // nothing else does until the reconciler (M2.12) collects a window it has
       // already established as dead.
-      return 'dead';
+      return this._answer(ownerId, 'dead', 'it has no presence file, and only retiring removes one');
     }
 
     this._options.logger.warn('an owner file could not be read, so its window is not established as gone', {
       path,
       reason: read.reason,
     });
-    return 'unknown';
+    return this._answer(ownerId, 'unknown', 'its presence file could not be read');
   }
 
   /**
@@ -196,7 +199,7 @@ export class FileOwnerPresence implements OwnerPresence {
           name,
           fileName,
           identity: read.record.identity,
-          liveness: this._verdict(read.record),
+          liveness: this._verdict(read.record)[0],
         });
         continue;
       }
@@ -324,13 +327,41 @@ export class FileOwnerPresence implements OwnerPresence {
       // not a failure: the migrator creates it at activation, and a fresh
       // profile reaches this first.
       this._options.logger.info('no window has announced itself on this machine yet', {
-        reason: String(cause),
+        cause,
       });
       return [];
     }
   }
 
-  private _verdict(record: PresenceRecord): OwnerLiveness {
+  /**
+   * The verdict, and WHICH RULE PRODUCED IT, in the log (Ш3).
+   *
+   * `dead` is the one answer that authorises another window to take somebody's
+   * conversation, and until this line existed nothing wrote down which of the
+   * two rules reached it -- a heartbeat older than the boot, or a pid nothing
+   * answers for. All four verdicts were silent, so "the terminals did not come
+   * back because their window is still there" arrived in a support log as
+   * nothing at all.
+   *
+   * **Once per owner per CHANGE, and not per call.** This is asked on every
+   * restore and on every reconciliation pass, so a line per call would be a log
+   * made of one repeated sentence -- and the moment worth reading is exactly the
+   * moment the answer moved. `Reconciler._strangers` keeps the same shape for
+   * the same reason.
+   */
+  private _answer(ownerId: OwnerId, liveness: OwnerLiveness, rule: string): OwnerLiveness {
+    if (this._said.get(ownerId.value) !== liveness) {
+      this._said.set(ownerId.value, liveness);
+      this._options.logger.info('a window was asked whether it is still there', {
+        ownerId: ownerId.value,
+        liveness,
+        rule,
+      });
+    }
+    return liveness;
+  }
+
+  private _verdict(record: PresenceRecord): readonly [OwnerLiveness, string] {
     const nowMs = this._options.clock.now().getTime();
     const heartbeatMs = record.heartbeatAt.getTime();
 
@@ -340,12 +371,14 @@ export class FileOwnerPresence implements OwnerPresence {
     // and Windows hands out pids again aggressively. Without this line a stranger
     // holding a dead window's pid would leave its records `unknown` forever.
     if (precedesBoot(heartbeatMs, nowMs, this._uptimeSeconds())) {
-      return 'dead';
+      return ['dead', 'its heartbeat predates the boot of this machine'];
     }
     if (!isProcessThere(record.identity.pid, this._options.probe ?? sendSignalZero)) {
-      return 'dead';
+      return ['dead', 'no process answers for its pid'];
     }
-    return nowMs - heartbeatMs < FRESH_HEARTBEAT_MS ? 'live' : 'unknown';
+    return nowMs - heartbeatMs < FRESH_HEARTBEAT_MS
+      ? ['live', 'its heartbeat is fresh']
+      : ['unknown', 'its heartbeat has gone stale, and the window is still there'];
   }
 
   private _uptimeSeconds(): number {
@@ -368,7 +401,7 @@ export class FileOwnerPresence implements OwnerPresence {
     } catch (cause: unknown) {
       this._options.logger.warn('an owner id could not name a presence file', {
         ownerId: ownerId.value,
-        reason: String(cause),
+        cause,
       });
       return null;
     }

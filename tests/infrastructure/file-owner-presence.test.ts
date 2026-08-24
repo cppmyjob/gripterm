@@ -101,6 +101,107 @@ async function readOwnerFile(ownerId: string): Promise<PresenceDocument> {
   return JSON.parse(text) as PresenceDocument;
 }
 
+/*
+ * WHICH RULE ANSWERED, in the log (Ш3).
+ *
+ * `dead` is the one answer that authorises another window to take a
+ * conversation, and until now nothing wrote down which of the two rules
+ * produced it -- a heartbeat that predates the boot, or a pid nothing answers
+ * for. The verdicts themselves were silent altogether, so "the terminals did
+ * not come back because their window is still there" arrived in a support log
+ * as nothing at all, and the question could only be answered by rerunning the
+ * planner over the folder.
+ *
+ * Once per owner per CHANGE, and not per call. `livenessOf` is asked on every
+ * restore and every reconciliation pass, so a line per call would be a log made
+ * of one repeated sentence -- and the moment worth reading is exactly the moment
+ * the answer moved. `Reconciler._strangers` already keeps this shape.
+ */
+describe('which liveness rule answered, said once per change', () => {
+  it('names the rule behind a fresh heartbeat', async () => {
+    await writeOwnerFile(MINE, documentFor(NOW));
+
+    await expect(presenceOf().livenessOf(OwnerId.fromString(MINE))).resolves.toBe('live');
+
+    expect(logger.infos).toHaveLength(1);
+    expect(logger.infos[0]?.message).toContain('window');
+    expect(logger.infos[0]?.details).toEqual({
+      ownerId: MINE,
+      liveness: 'live',
+      rule: 'its heartbeat is fresh',
+    });
+  });
+
+  it('names the rule behind a dead window: the pid nothing answers for', async () => {
+    await writeOwnerFile(MINE, documentFor(NOW, 4242));
+
+    await expect(presenceOf({ probe: goneFor(4242) }).livenessOf(OwnerId.fromString(MINE)))
+      .resolves.toBe('dead');
+
+    expect(logger.infos[0]?.details).toEqual({
+      ownerId: MINE,
+      liveness: 'dead',
+      rule: 'no process answers for its pid',
+    });
+  });
+
+  it('names the rule behind a dead window: a heartbeat older than the boot', async () => {
+    // A heartbeat from before this machine started cannot have been written by
+    // anything running now, whoever holds that pid today.
+    await writeOwnerFile(MINE, documentFor(new Date(NOW.getTime() - BOOTED_HOURS_AGO_S * 1000 - 1000)));
+
+    await expect(presenceOf().livenessOf(OwnerId.fromString(MINE))).resolves.toBe('dead');
+
+    expect(logger.infos[0]?.details).toEqual({
+      ownerId: MINE,
+      liveness: 'dead',
+      rule: 'its heartbeat predates the boot of this machine',
+    });
+  });
+
+  it('names the rule behind a window that is there and not talking', async () => {
+    await writeOwnerFile(MINE, documentFor(NOW_A_MINUTE_AGO));
+
+    await expect(presenceOf().livenessOf(OwnerId.fromString(MINE))).resolves.toBe('unknown');
+
+    expect(logger.infos[0]?.details).toEqual({
+      ownerId: MINE,
+      liveness: 'unknown',
+      rule: 'its heartbeat has gone stale, and the window is still there',
+    });
+  });
+
+  it('names the rule behind a window with no file at all', async () => {
+    await expect(presenceOf().livenessOf(OwnerId.fromString(MINE))).resolves.toBe('dead');
+
+    expect(logger.infos[0]?.details).toEqual({
+      ownerId: MINE,
+      liveness: 'dead',
+      rule: 'it has no presence file, and only retiring removes one',
+    });
+  });
+
+  it('says it once, and again only when the answer moves', async () => {
+    const presence = presenceOf();
+    await writeOwnerFile(MINE, documentFor(NOW));
+
+    await presence.livenessOf(OwnerId.fromString(MINE));
+    await presence.livenessOf(OwnerId.fromString(MINE));
+    await presence.livenessOf(OwnerId.fromString(MINE));
+    expect(logger.infos).toHaveLength(1);
+
+    await writeOwnerFile(MINE, documentFor(NOW_A_MINUTE_AGO));
+    await presence.livenessOf(OwnerId.fromString(MINE));
+
+    expect(logger.infos).toHaveLength(2);
+    expect(logger.infos[1]?.details).toEqual({
+      ownerId: MINE,
+      liveness: 'unknown',
+      rule: 'its heartbeat has gone stale, and the window is still there',
+    });
+  });
+});
+
 describe('the liveness table of §4.8', () => {
   it('calls a window with no file dead, because only retiring removes one', async () => {
     await expect(presenceOf().livenessOf(OwnerId.fromString(MINE))).resolves.toBe('dead');

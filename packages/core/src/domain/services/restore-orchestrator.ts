@@ -246,7 +246,7 @@ export class RestoreOrchestrator implements Disposable {
       this._options.logger.info('a record was not restored, because it moved while the plan was being carried out', {
         terminalId: entry.terminalId.value,
         expectedRevision: step.expectedRevision,
-        reason: String(cause),
+        cause,
       });
       return { ...named, outcome: 'contested', reason: String(cause) };
     }
@@ -280,7 +280,7 @@ export class RestoreOrchestrator implements Disposable {
       this._options.registry.ingest(entry.terminalId, processGone(adopted.observed.pid));
       this._options.logger.error('a record was adopted and its terminal could not be started', {
         terminalId: entry.terminalId.value,
-        reason: String(cause),
+        cause,
       });
       return { ...named, outcome: 'unstartable', reason: String(cause) };
     }

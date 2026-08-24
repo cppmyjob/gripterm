@@ -214,7 +214,7 @@ export class FileEventJournal implements EventJournal {
     } catch (cause: unknown) {
       logger.warn('the event journal could not be pruned, so it may grow past its limits', {
         terminalId: terminalId.value,
-        reason: String(cause),
+        cause,
       });
     }
   }

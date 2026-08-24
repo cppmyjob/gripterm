@@ -335,6 +335,37 @@ describe('HookEventServer: what it turns away', () => {
     expect(journal.appended).toHaveLength(0);
   });
 
+  /*
+   * The two refusals nothing wrote down (Ш3).
+   *
+   * `logger.ts` justifies this port's existence by "the receiver has three
+   * failures that are invisible by construction", and these two were a fourth
+   * and a fifth: a request that is not a POST, and a path this build cannot
+   * parse. Both are what contract drift looks like from here -- a proxy in the
+   * way, a `settings.json` left over from a previous activation naming an old
+   * port, a forwarder from another build -- and "my hooks are not arriving" is
+   * the commonest question this product is asked.
+   */
+  it('says so when a request is not a POST, instead of turning it away in silence', async () => {
+    const { address, logger } = await start();
+
+    await post(address, eventPath(), '', { Authorization: `Bearer ${TOKEN}` }, 'GET');
+    await settle();
+
+    const said = logger.warnings.find((line) => line.message.includes('was not a POST'));
+    expect(said?.details).toMatchObject({ method: 'GET' });
+  });
+
+  it('says so when a path cannot be read as one of ours, instead of a bare 404', async () => {
+    const { address, logger } = await start();
+
+    await post(address, '/metrics', BODY);
+    await settle();
+
+    const said = logger.warnings.find((line) => line.message.includes('did not name a terminal'));
+    expect(said?.details).toMatchObject({ path: '/metrics' });
+  });
+
   it('checks the token before it reads a body', async () => {
     // Order, not politeness: an unauthenticated peer on loopback must not be
     // able to make us allocate. With the cap set below the body size, a reader

@@ -54,6 +54,24 @@ describe('the layout of the store', () => {
     expect(layout.ownerFile(ownerId)).toBe(join(BASE, 'owners', `${ownerId.value}.json`));
   });
 
+  /*
+   * The log goes in the store so that "send me the .gripterm folder" is the
+   * whole of what a person is ever asked for. One file per window, named the way
+   * the presence file is named -- and refused for the same reasons, because a
+   * log file is a path formed from an id somebody else's window chose.
+   */
+  it('names a log file after the window that wrote it, in a directory of their own', () => {
+    const ownerId = OwnerId.fromString('7f1c4e2a-0b33-4a55-9c11-2d3e4f556677');
+    expect(layout.logsDir).toBe(join(BASE, 'logs'));
+    expect(layout.logFile(ownerId)).toBe(join(BASE, 'logs', `${ownerId.value}.log`));
+  });
+
+  it('refuses an owner id that could leave the logs directory', () => {
+    expect(() => layout.logFile(OwnerId.fromString('..'))).toThrow(ValidationError);
+    expect(() => layout.logFile(OwnerId.fromString('a/b'))).toThrow(ValidationError);
+    expect(() => layout.logFile(OwnerId.fromString('con'))).toThrow(ValidationError);
+  });
+
   it('accepts the punctuation an id may legitimately carry', () => {
     for (const raw of ['a', '0', 'window-1.host_2', 'abcdef0123456789']) {
       expect(() => layout.ownerFile(OwnerId.fromString(raw))).not.toThrow();

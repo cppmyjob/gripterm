@@ -242,7 +242,7 @@ export class TerminalStage implements TerminalAudience, vscode.Disposable {
       const what = 'the Gripterm panel did not come up, so no agent was started — it would have run where you cannot see it';
       this._refusals.push(what);
       this._options.logger.error('the panel did not come up in time, so a launch was refused', {
-        reason: String(cause),
+        cause,
         waitedMs: timeoutMs,
       });
       return what;

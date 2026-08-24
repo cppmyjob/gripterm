@@ -498,6 +498,45 @@ describe('the pid of the process the editor started', () => {
     );
   });
 
+  /*
+   * The two ways this method finished without a word (Ш3).
+   *
+   * Its own doc says it: "the record without one is the record that never comes
+   * back" -- `mayBeRunning` reads a missing pid as "it may still be going" and
+   * refuses every restore. So a pid that was dropped on the floor and a pid that
+   * landed have to be different things to read in a log, and until now they were
+   * the same thing: nothing.
+   */
+  it('says that the pid landed, so a record that never got one is not read as one that did', async () => {
+    const { lifecycle, gateway, logger } = stand();
+    gateway.pid = 4242;
+
+    await lifecycle.launch(request());
+    await flush();
+
+    const said = logger.infos.find((line) => line.message.includes('process the editor named'));
+    expect(said?.details).toMatchObject({ pid: 4242 });
+  });
+
+  it('says that a pid arrived for a record this window no longer holds, rather than dropping it', async () => {
+    const { lifecycle, gateway, registry, logger } = stand();
+    gateway.pid = 4242;
+    // The editor is made to answer LATE, which is the only way this order can be
+    // arranged on purpose: the record has to go while the pid is still in flight.
+    gateway.holdPid();
+
+    const entry = await lifecycle.launch(request());
+    // Between the start and the editor's answer a person deleted the row. The
+    // pid has nowhere to go, and that is a fact about a record which will now
+    // refuse every restore.
+    registry.forget(entry.terminalId);
+    gateway.releasePid();
+    await flush();
+
+    const said = logger.infos.find((line) => line.message.includes('no longer holds'));
+    expect(said?.details).toMatchObject({ terminalId: entry.terminalId.value, pid: 4242 });
+  });
+
   it('touches nothing but the pid, however far the record has moved by then', async () => {
     // The pid arrives asynchronously, and a hook can beat it: the terminal is
     // already `idle` when the editor answers. Writing back the record this

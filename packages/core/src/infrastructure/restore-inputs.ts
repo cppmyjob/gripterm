@@ -92,7 +92,7 @@ async function livenessOf(sources: RestoreInputSources, ownerId: OwnerId): Promi
   } catch (cause: unknown) {
     sources.logger.warn('a window could not be asked whether it is still there, so its terminals stay its own', {
       ownerId: ownerId.value,
-      reason: String(cause),
+      cause,
     });
     return 'unknown';
   }
@@ -131,7 +131,7 @@ async function asked<T>(
   } catch (cause: unknown) {
     logger.warn('a restore could not establish what it needs, so it will start nothing', {
       what,
-      reason: String(cause),
+      cause,
     });
     return { kind: 'unavailable', reason: String(cause) };
   }

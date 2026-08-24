@@ -785,6 +785,72 @@ describe('a record whose process is gone', () => {
   });
 });
 
+/*
+ * WHICH RULE ORPHANED IT, and which rule spared it (Ш3).
+ *
+ * `_lostItsProcess` has six ways out and the caller wrote one line, on the
+ * positive, naming the record and the pid but not the rule. Two entirely
+ * different findings -- "the pid answered nothing" and "this record was last
+ * heard from before the machine booted, so its pid means nothing at all" --
+ * arrived in a support log looking identical, and this is the only rule in the
+ * build that stamps a record `orphaned`.
+ *
+ * The negatives are said once per record per CHANGE of rule, not once per sweep:
+ * the sweep runs every thirty seconds over every record this window owns, and a
+ * line per record per pass would be a log made of one sentence. `_strangers` in
+ * this same class already keeps that shape.
+ */
+describe('which rule decided a record had lost its process', () => {
+  it('names the pid probe when that is what decided it', async () => {
+    const { reconciler, base, registry, gone, logger } = build();
+    const mine = ours();
+    base.hold(mine);
+    registry.register(mine);
+    gone.add(CLAUDE_PID);
+
+    await reconciler.sweep();
+
+    const said = logger.infos.find((line) => line.message.includes('without its process'));
+    expect(said?.details).toMatchObject({
+      terminalId: TERMINAL_UUID,
+      rule: 'nothing answers for the pid it carries',
+    });
+  });
+
+  it('names the boot rule when that is what decided it', async () => {
+    const { reconciler, base, registry, logger } = build();
+    const mine = ours({ observed: observedAs('idle', STRANGER_PID, BEFORE_BOOT) });
+    base.hold(mine);
+    registry.register(mine);
+
+    await reconciler.sweep();
+
+    const said = logger.infos.find((line) => line.message.includes('without its process'));
+    expect(said?.details).toMatchObject({
+      terminalId: TERMINAL_UUID,
+      rule: 'it was last heard from before this machine booted',
+    });
+  });
+
+  it('says why a record was left alone, once, and not again on the next sweep', async () => {
+    const { reconciler, base, registry, logger } = build();
+    const mine = ours({ observed: observedAs('working', null) });
+    base.hold(mine);
+    registry.register(mine);
+
+    await reconciler.sweep();
+    const said = logger.infos.filter((line) => line.message.includes('kept its process'));
+    expect(said).toHaveLength(1);
+    expect(said[0]?.details).toMatchObject({
+      terminalId: TERMINAL_UUID,
+      rule: 'no pid was ever recorded for it, and never being told is not evidence',
+    });
+
+    await reconciler.sweep();
+    expect(logger.infos.filter((line) => line.message.includes('kept its process'))).toHaveLength(1);
+  });
+});
+
 describe('the presence files of windows that are gone', () => {
   it('collects the file of a window established dead once no record names it', async () => {
     const { reconciler, presence } = build();

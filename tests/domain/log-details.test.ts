@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm';
 import { StorageError, describeDetails } from '../../packages/core/src/index';
 
 /**
@@ -39,6 +40,81 @@ describe('describeDetails renders what a log line carries', () => {
 
     expect(rendered).toContain('TypeError');
     expect(rendered).toContain('log-details.test.ts');
+  });
+
+  /*
+   * The half of an error a person cannot see and a program acts on.
+   *
+   * `String(cause)` -- the spelling at forty-nine of this build's logging call
+   * sites, sixty-five counting the ones that feed a `reason: string` -- renders
+   * "Error: ENOENT: no such file or directory, open 'C:/x'" and throws away
+   * `code`, `errno`, `syscall` and `path`. `code` is the field
+   * every branch in this codebase that reacts to a file system failure reads,
+   * so a log written from the string cannot be compared with the decision the
+   * code took: two failures that the product treats completely differently --
+   * a store that is not there and a store somebody else has locked -- reach a
+   * support log looking like the same kind of sentence.
+   */
+  it('keeps what a person cannot see: the code an errno error carries', () => {
+    const failure = Object.assign(new Error('ENOENT: no such file or directory, open C:/x'), {
+      code: 'ENOENT',
+      errno: -4058,
+      syscall: 'open',
+      path: 'C:/x',
+    });
+
+    const rendered = JSON.parse(describeDetails({ cause: failure })) as {
+      readonly cause: {
+        readonly code: string;
+        readonly errno: number;
+        readonly syscall: string;
+        readonly path: string;
+        readonly message: string;
+      };
+    };
+
+    expect(rendered.cause.code).toBe('ENOENT');
+    expect(rendered.cause.errno).toBe(-4058);
+    expect(rendered.cause.syscall).toBe('open');
+    expect(rendered.cause.path).toBe('C:/x');
+    expect(rendered.cause.message).toBe('ENOENT: no such file or directory, open C:/x');
+  });
+
+  /*
+   * An error made somewhere else, which is not a curiosity but the ordinary
+   * case for the failures this build logs.
+   *
+   * Measured 2026-08-24, and found by a test going red for the wrong reason:
+   * under jest's `node` environment an `fs.watch` ENOENT is NOT `instanceof
+   * Error` -- the suite runs in a vm context whose `Error` is a different
+   * function from the one Node's internals built the error with. The same split
+   * exists wherever a value crosses a realm, and what it costs is exactly the
+   * sentence: `name`, `message` and `stack` are non-enumerable, so an error that
+   * misses the branch is serialised down to its added fields and the message
+   * disappears.
+   *
+   * `Object.prototype.toString` carries the internal tag across a realm, which
+   * `instanceof` cannot.
+   */
+  it('recognises an error made in another realm, message and stack included', () => {
+    const alien = runInNewContext(
+      'Object.assign(new TypeError("the socket went away"), { code: "ECONNRESET" })'
+    ) as Error;
+
+    expect(alien instanceof Error).toBe(false);
+    const rendered = JSON.parse(describeDetails({ cause: alien })) as {
+      readonly cause: {
+        readonly name: string;
+        readonly message: string;
+        readonly stack: string;
+        readonly code: string;
+      };
+    };
+
+    expect(rendered.cause.name).toBe('TypeError');
+    expect(rendered.cause.message).toBe('the socket went away');
+    expect(rendered.cause.code).toBe('ECONNRESET');
+    expect(rendered.cause.stack).toContain('TypeError');
   });
 
   it('follows a cause chain rather than stopping at the first link', () => {

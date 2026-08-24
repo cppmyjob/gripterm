@@ -221,7 +221,7 @@ export class FileTerminalRepository implements TerminalRepository {
     } catch (cause: unknown) {
       this._options.logger.info('a discarded record left its observed snapshot behind', {
         terminalId: id.value,
-        reason: String(cause),
+        cause,
       });
     }
   }
@@ -234,7 +234,7 @@ export class FileTerminalRepository implements TerminalRepository {
       // No `terminals/` at all is an empty base, not a failure: the migrator
       // creates it at activation, and a test or a fresh profile may reach this
       // first.
-      this._options.logger.info('the store holds no terminals yet', { reason: String(cause) });
+      this._options.logger.info('the store holds no terminals yet', { cause });
       return [];
     }
   }

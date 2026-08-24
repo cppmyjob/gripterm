@@ -1,7 +1,7 @@
 import * as assert from 'node:assert/strict';
 import * as os from 'node:os';
 import * as vscode from 'vscode';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { GriptermApi } from '../../packages/extension/src/extension';
 
@@ -59,6 +59,33 @@ function describeGroups(): string {
   return vscode.window.tabGroups.all
     .map((group) => `[${String(group.viewColumn)}] ${group.tabs.map((tab) => tab.label).join(', ')}`)
     .join(' | ');
+}
+
+/**
+ * What this window has appended to its log in the store since a mark.
+ *
+ * Reading the FILE and not a double, deliberately. The whole of Ш3 is that the
+ * evidence a person can send is the store, so a suite that read a recorder
+ * inside the process would be checking something nobody can ever be given.
+ *
+ * The mark is a byte offset rather than a line count, because the log is
+ * appended to by this same window all the while -- a heartbeat, a watcher, a
+ * reconciliation -- and a test that read the whole file would pass on a line
+ * some other part of the build wrote an hour ago.
+ */
+async function markInTheLog(): Promise<number> {
+  const { readiness } = await api();
+  assert.ok(
+    readiness.logFile !== null,
+    'this window is writing no log into the store, so nothing here can be diagnosed from one'
+  );
+  return (await readFile(readiness.logFile, 'utf8')).length;
+}
+
+async function saidSince(mark: number): Promise<string> {
+  const { readiness } = await api();
+  assert.ok(readiness.logFile !== null, 'this window is writing no log into the store');
+  return (await readFile(readiness.logFile, 'utf8')).slice(mark);
 }
 
 /**
@@ -642,6 +669,123 @@ suite('the strip of our own', () => {
       assert.equal(took, 0, `something was closed that had a file in it: ${describeGroups()}`);
       assert.equal(vscode.window.tabGroups.all.length, 2, `a column with a file in it is gone: ${describeGroups()}`);
     } finally {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    }
+  });
+
+  /*
+   * THE MEASUREMENT THIS EXISTS FOR, 2026-08-23. In a sitting where five empty
+   * groups stood for forty seconds, the cleanup said NOTHING AT ALL, and the log
+   * did not allow anybody to tell which of its silent ways out it had taken. The
+   * cause had to be recovered by reading sources and comparing timestamps --
+   * which is exactly the position this product was putting its owner in, and
+   * exactly what a log is for.
+   *
+   * `takeAwayEmptyGroups` had eight outcomes and wrote a line on two of them.
+   * The three below are the ones a suite can stand up honestly; the other three
+   * silent ones -- the arranging lock, somebody pressing the plus mid-sweep, and
+   * the editor refusing to close a group -- are races this host cannot be made
+   * to enter on purpose, and they are named in the report rather than pretended
+   * about.
+   *
+   * Read out of the FILE IN THE STORE, because that file is the whole of Ш3: it
+   * is what a person can be asked for after they have closed the window.
+   */
+  test('says why it took nothing away when every group holds something', async () => {
+    const { editorStrip } = await api();
+    assert.ok(editorStrip, 'this window has no strip to keep, and the engine or the location says why');
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+
+    const left = await vscode.workspace.openTextDocument({
+      content: 'a file in the column the person works in',
+      language: 'plaintext',
+    });
+    const right = await vscode.workspace.openTextDocument({
+      content: 'a file in the column beside it',
+      language: 'plaintext',
+    });
+    await vscode.window.showTextDocument(left, { viewColumn: vscode.ViewColumn.One });
+    await vscode.window.showTextDocument(right, { viewColumn: vscode.ViewColumn.Two });
+    assert.equal(vscode.window.tabGroups.all.length, 2, `the stand is not two columns: ${describeGroups()}`);
+
+    const mark = await markInTheLog();
+    try {
+      const took = await editorStrip.takeAwayEmptyGroups();
+      assert.equal(took, 0, `something was closed that had a file in it: ${describeGroups()}`);
+
+      const said = await saidSince(mark);
+      assert.match(
+        said,
+        /the sweep of empty groups is over/,
+        `the sweep said nothing at all, so the log cannot say which way out it took: ${JSON.stringify(said)}`
+      );
+      assert.match(
+        said,
+        /every group in the editor area holds something/,
+        `the sweep did not say WHY it took nothing: ${JSON.stringify(said)}`
+      );
+    } finally {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    }
+  });
+
+  test('says why it took nothing away when the editor area holds one group', async () => {
+    const { editorStrip } = await api();
+    assert.ok(editorStrip, 'this window has no strip to keep, and the engine or the location says why');
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    assert.equal(vscode.window.tabGroups.all.length, 1, `the stand is not one group: ${describeGroups()}`);
+
+    const mark = await markInTheLog();
+    const took = await editorStrip.takeAwayEmptyGroups();
+    assert.equal(took, 0, `the only group in the area was taken: ${describeGroups()}`);
+
+    const said = await saidSince(mark);
+    assert.match(
+      said,
+      /the editor area holds one group/,
+      `the sweep did not say that an empty area is nobodys problem: ${JSON.stringify(said)}`
+    );
+  });
+
+  /*
+   * The way out the owner's own sitting most likely took, and the one that cost
+   * the most to work out: a window that has already made a group for its
+   * terminals leaves every empty group alone, and said nothing about it.
+   */
+  test('says why it took nothing away when the terminals already have a group', async () => {
+    const { gateway, editorStrip } = await api();
+    assert.ok(editorStrip, 'this window has no strip to keep, and the engine or the location says why');
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+
+    const handle = await gateway.create({
+      terminalId: TERMINAL_ID,
+      name: 'gripterm-m224-kept',
+      cwd: os.tmpdir(),
+      env: {},
+      shellPath: null,
+      shellArgs: [],
+    });
+
+    try {
+      await waitFor('the terminal to get a tab', () => columnOf('gripterm-m224-kept') !== undefined);
+      /*
+       * No extra group is made here, and that is not laziness. Inserting one
+       * ABOVE renumbers the columns, so the number this window remembers stops
+       * naming its own group and `_kept()` lets go of it -- which is a
+       * different way out, and the one the two tests above already stand on.
+       */
+      const mark = await markInTheLog();
+      const took = await editorStrip.takeAwayEmptyGroups();
+      assert.equal(took, 0, `an empty group went while the strip was ours: ${describeGroups()}`);
+
+      const said = await saidSince(mark);
+      assert.match(
+        said,
+        /the terminals already have a group of their own/,
+        `the sweep left five empty groups standing and said nothing: ${JSON.stringify(said)}`
+      );
+    } finally {
+      handle.dispose();
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     }
   });

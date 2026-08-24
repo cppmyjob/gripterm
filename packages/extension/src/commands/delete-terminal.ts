@@ -196,7 +196,7 @@ async function sweep(parts: {
   } catch (cause: unknown) {
     logger.error('a record of another window could not be thrown away', {
       terminalId,
-      reason: String(cause),
+      cause,
     });
     say('error', `Gripterm: "${label}" could not be moved out of the store, see the log.`, logger);
   }

@@ -45,7 +45,7 @@ export function registerShowRecord(
       // element in the tree it drew. The list itself is still worth opening.
       logger.warn('a record could not be selected in the list', {
         terminalId: node.terminalId.value,
-        cause: String(cause),
+        cause,
       });
       await vscode.commands.executeCommand(`${TERMINALS_VIEW_ID}.focus`);
       say('warning', `Gripterm: "${node.metadata.displayName}" is in the list below.`, logger);

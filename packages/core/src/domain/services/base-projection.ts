@@ -123,7 +123,7 @@ export class BaseProjection implements Disposable {
     } catch (cause: unknown) {
       this._options.logger.error(
         'the store could not be read, so the list may be missing what other windows are doing',
-        { reason: String(cause) }
+        { cause }
       );
     }
   }

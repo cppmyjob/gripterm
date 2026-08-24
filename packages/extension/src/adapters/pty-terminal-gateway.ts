@@ -451,7 +451,7 @@ export class PtyTerminalHandle implements TerminalHandle {
       // gone.
       this._logger.info('bytes were written to a terminal that had just ended', {
         terminalId: this.terminalId.value,
-        cause: String(cause),
+        cause,
       });
     }
   }
@@ -502,7 +502,7 @@ export class PtyTerminalHandle implements TerminalHandle {
     } catch (cause: unknown) {
       this._logger.info('a terminal that had just ended was asked to resize', {
         terminalId: this.terminalId.value,
-        cause: String(cause),
+        cause,
       });
     }
   }
@@ -530,7 +530,7 @@ export class PtyTerminalHandle implements TerminalHandle {
     } catch (cause: unknown) {
       this._logger.info('a terminal that had just ended was asked to hold its output back', {
         terminalId: this.terminalId.value,
-        cause: String(cause),
+        cause,
       });
     }
   }
@@ -544,7 +544,7 @@ export class PtyTerminalHandle implements TerminalHandle {
     } catch (cause: unknown) {
       this._logger.info('a terminal that had just ended was let go of', {
         terminalId: this.terminalId.value,
-        cause: String(cause),
+        cause,
       });
     }
   }

@@ -238,6 +238,12 @@ export class VsCodeTerminalGateway implements TerminalGateway, Disposable {
    */
   public async takeAwayEmptyGroups(): Promise<number> {
     if (PLACES[this._location] !== STRIP) {
+      // Said, and not because the answer is interesting: it is the SEVENTH
+      // silent way out of this one act, and a window that swept nothing has to
+      // be distinguishable in a log from a window that never swept (Ш3).
+      this._logger.info('the empty groups were left alone: these terminals do not live in a group of their own', {
+        location: this._location,
+      });
       return 0;
     }
     return await this._strip.takeAwayEmptyGroups();
@@ -285,7 +291,7 @@ export class VsCodeTerminalGateway implements TerminalGateway, Disposable {
       return { viewColumn: await this._strip.column(), preserveFocus: true };
     } catch (cause: unknown) {
       this._logger.warn('a group of our own could not be made, opening among the editors', {
-        cause: String(cause),
+        cause,
       });
       return vscode.TerminalLocation.Editor;
     }

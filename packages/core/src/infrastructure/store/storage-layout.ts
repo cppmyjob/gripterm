@@ -51,6 +51,18 @@ const LEGACY_JOURNAL_FILE = 'events.ndjson';
 const TRASH_DIRECTORY = 'trash';
 
 /**
+ * Where this build keeps its own log (Ш3).
+ *
+ * In the store and not beside the editor's other logs, so that the whole of
+ * what a person is ever asked for is one folder. Nothing sweeps it: the cleaner
+ * looks in `terminals/` and `trash/`, and the watcher watches `terminals/` and
+ * `owners/`, so a directory here is invisible to both -- which is deliberate,
+ * because a log that a pass could carry off is a log that is missing exactly
+ * when it is wanted.
+ */
+const LOGS_DIRECTORY = 'logs';
+
+/**
  * What the last pass over the trash leaves behind: the moment it ran (M2.15).
  *
  * In the base rather than in `trash/`, because the pass has to be able to
@@ -158,9 +170,25 @@ export class StorageLayout {
     return join(this._baseDir, TRASH_SWEEP_FILE);
   }
 
+  public get logsDir(): string {
+    return join(this._baseDir, LOGS_DIRECTORY);
+  }
+
   /** Throws `ValidationError` on an id that would not be safe as a file name. */
   public ownerFile(ownerId: OwnerId): string {
     return join(this.ownersDir, `${requireSafeOwnerId(ownerId.value)}.json`);
+  }
+
+  /**
+   * One window's log, named after the window.
+   *
+   * Refused for the same reasons the presence file is, and by the same check:
+   * this is a path formed from an id that some window CHOSE, and the file it
+   * names is opened for writing. An id that could climb out of `logs/` would be
+   * this build appending text to a path somebody else picked.
+   */
+  public logFile(ownerId: OwnerId): string {
+    return join(this.logsDir, `${requireSafeOwnerId(ownerId.value)}.log`);
   }
 
   public terminalDir(terminalId: TerminalId): string {

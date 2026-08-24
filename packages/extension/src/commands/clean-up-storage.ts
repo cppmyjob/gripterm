@@ -92,7 +92,7 @@ export function registerCleanUpStorage(parts: CleanUpStorageParts): vscode.Dispo
     try {
       await run(base, logger);
     } catch (cause: unknown) {
-      logger.error('the store could not be cleaned up', { cause: String(cause) });
+      logger.error('the store could not be cleaned up', { cause });
       say('error', 'Gripterm: the store could not be cleaned up, see the log.', logger);
     }
   });

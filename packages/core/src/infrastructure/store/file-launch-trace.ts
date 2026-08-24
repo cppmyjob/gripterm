@@ -69,7 +69,7 @@ export class FileLaunchTrace implements LaunchTrace {
     } catch (cause: unknown) {
       this._options.logger.warn('what a terminal was started with could not be written down', {
         terminalId: terminalId.value,
-        cause: String(cause),
+        cause,
       });
     }
   }

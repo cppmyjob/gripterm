@@ -112,6 +112,20 @@ const REPAIR_WAIT_MS = 500;
 const AREA_LOOKS = 6;
 
 /**
+ * Why a sweep of the empty groups stopped, in the words the log carries.
+ *
+ * A union rather than free text, so that adding a way out of the loop below
+ * without giving it a sentence does not compile. The five members are the five
+ * ways the loop can end, and every one of them was silent until Ш3.
+ */
+type SweepEnd =
+  | 'every empty group was taken away'
+  | 'somebody asked for a group of terminals while the sweep was running'
+  | 'the editor area holds one group, and an area with nothing in it is nobody`s problem'
+  | 'every group in the editor area holds something'
+  | 'the editor would not close a group that had nothing in it';
+
+/**
  * A group of the editor area that holds our terminals and nothing else.
  *
  * The owner asked for the agents to open "in a separate panel of their own, at
@@ -363,7 +377,15 @@ export class VsCodeEditorStrip {
    * every window starts, and it is nobody's problem.
    */
   public async takeAwayEmptyGroups(): Promise<number> {
-    if (this._arranging || this._kept() !== null) {
+    if (this._arranging) {
+      this._logger.info('the empty groups were left alone: this window is in the middle of arranging its own');
+      return 0;
+    }
+    const ours = this._kept();
+    if (ours !== null) {
+      this._logger.info('the empty groups were left alone: the terminals already have a group of their own', {
+        column: ours,
+      });
       return 0;
     }
     if (!closesEmptyGroups()) {
@@ -383,6 +405,7 @@ export class VsCodeEditorStrip {
       await new Promise((resolve) => setTimeout(resolve, REPAIR_WAIT_MS));
 
       let closed = 0;
+      let why: SweepEnd = 'every empty group was taken away';
       /*
        * The bound is taken ONCE. Read inside the condition it shrinks with
        * every group closed and the loop stops halfway -- which is what the live
@@ -396,24 +419,46 @@ export class VsCodeEditorStrip {
         // pressed the plus meanwhile has been given a group that has no tab in
         // it yet, and it must not be closed under them.
         if (this._timesAsked() !== askedBefore) {
+          why = 'somebody asked for a group of terminals while the sweep was running';
           break;
         }
         const groups = vscode.window.tabGroups.all;
         if (groups.length < 2) {
+          why = 'the editor area holds one group, and an area with nothing in it is nobody`s problem';
           break;
         }
         const empty = groups.find((group) => group.tabs.length === 0);
-        if (empty === undefined || !(await this._closeGroup(empty.viewColumn))) {
+        if (empty === undefined) {
+          why = 'every group in the editor area holds something';
+          break;
+        }
+        if (!(await this._closeGroup(empty.viewColumn))) {
+          why = 'the editor would not close a group that had nothing in it';
           break;
         }
         closed += 1;
       }
-      if (closed > 0) {
-        this._logger.info('the empty groups the editor brought back were taken away', {
-          closed,
-          groups: vscode.window.tabGroups.all.length,
-        });
-      }
+      /*
+       * ONE LINE, ALWAYS, AND THIS IS THE POINT OF THE METHOD RATHER THAN A
+       * DECORATION ON IT (Ш3).
+       *
+       * Measured 2026-08-23: in a sitting where five empty groups stood for
+       * forty seconds, this said NOTHING -- it wrote a line only when it had
+       * closed something -- and the log did not allow anybody to tell which of
+       * its six silent ways out it had taken. The cause had to be recovered by
+       * reading sources and comparing timestamps, which is precisely the
+       * position this product was putting its owner in.
+       *
+       * `column()` in this same file learnt the identical lesson on 2026-08-22
+       * and its comment says so: a path that says nothing cannot be diagnosed
+       * from a log, and a log is all there is when the window is somebody
+       * else's.
+       */
+      this._logger.info('the sweep of empty groups is over', {
+        closed,
+        why,
+        groups: vscode.window.tabGroups.all.length,
+      });
       return closed;
     } finally {
       this._arranging = false;
@@ -535,7 +580,7 @@ export class VsCodeEditorStrip {
     try {
       await vscode.commands.executeCommand(CLOSE_GROUP);
     } catch (cause: unknown) {
-      this._logger.warn('closing the empty strip threw', { column, cause: String(cause) });
+      this._logger.warn('closing the empty strip threw', { column, cause });
       return false;
     }
     await new Promise((resolve) => setTimeout(resolve, BETWEEN_ATTEMPTS_MS));
@@ -566,7 +611,7 @@ export class VsCodeEditorStrip {
     try {
       await vscode.commands.executeCommand(command);
     } catch (cause: unknown) {
-      this._logger.warn('a focus of an editor group threw', { column, cause: String(cause) });
+      this._logger.warn('a focus of an editor group threw', { column, cause });
       return false;
     }
     return vscode.window.tabGroups.activeTabGroup.viewColumn === column;
@@ -595,7 +640,7 @@ export class VsCodeEditorStrip {
         this._logger.warn('a split of the editor area threw', {
           command,
           attempt,
-          cause: String(cause),
+          cause,
         });
       }
       if (vscode.window.tabGroups.all.length > before) {

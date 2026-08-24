@@ -109,7 +109,7 @@ export function registerResumeTerminal(parts: ResumeTerminalParts): vscode.Dispo
     } catch (cause: unknown) {
       logger.error('a terminal could not be resumed', {
         terminalId: terminalId.value,
-        cause: String(cause),
+        cause,
       });
       say('error', `Gripterm: ${reason(cause)}`, logger);
     }

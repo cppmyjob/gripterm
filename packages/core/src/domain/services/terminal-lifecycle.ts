@@ -530,9 +530,29 @@ export class TerminalLifecycleService implements Disposable {
     this._options.trace?.note(terminalId, { what: 'pid', pid });
     const current = this._options.registry.get(terminalId);
     if (current === undefined) {
+      /*
+       * The pid has nowhere to go, and it goes into the log instead (Ш3).
+       *
+       * Silence here and silence on success were the same silence, and this
+       * method's own doc says why that could not stand: a record with no pid is
+       * a record `mayBeRunning` refuses to restore for ever. So "the editor
+       * never named a process" and "it named one and we had already let the
+       * record go" have to be different things to read afterwards.
+       */
+      this._options.logger.info('a process was named for a terminal this window no longer holds', {
+        terminalId: terminalId.value,
+        pid,
+      });
       return;
     }
     this._options.registry.amend(current.withObserved(current.observed.withPid(pid)));
+    // Once per terminal, at its start. This is the value every later restore of
+    // that record is decided on (`mayBeRunning`), so whether it ever landed is
+    // the first thing anybody reading a "it did not come back" log needs.
+    this._options.logger.info('the process the editor named was written onto the record', {
+      terminalId: terminalId.value,
+      pid,
+    });
   }
 
   /**

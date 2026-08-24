@@ -174,7 +174,7 @@ export class RepositoryWatcher implements Disposable {
       // that refused to activate over it would show nothing at all.
       this._options.logger.error(
         'a store directory could not be watched, so changes other windows make there will not be seen',
-        { path, reason: String(cause) }
+        { path, cause }
       );
     }
   }
@@ -202,7 +202,7 @@ export class RepositoryWatcher implements Disposable {
   private _onBlind(path: string, cause: unknown): void {
     this._options.logger.error(
       'a store directory stopped reporting changes; this window will not see other windows there until it is reloaded',
-      { path, reason: String(cause) }
+      { path, cause }
     );
     this._schedule();
   }
@@ -230,7 +230,7 @@ export class RepositoryWatcher implements Disposable {
         // it. The subscriber that failed is named as far as it can be; the
         // others still get their signal.
         this._options.logger.error('a listener failed while reacting to a change in the store', {
-          reason: String(cause),
+          cause,
         });
       }
     }

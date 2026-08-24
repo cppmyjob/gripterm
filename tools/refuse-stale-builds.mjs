@@ -68,8 +68,14 @@ export function refuseStaleBuilds() {
   }
 }
 
-/** The newest modification time under any of these directories, or `null` for none. */
-function newest(directories) {
+/**
+ * The newest modification time under any of these directories, or `null` for none.
+ *
+ * Exported for `tools/explain-store.mjs`, which needs the same question about a
+ * different build: it answers out of `packages/core/dist`, and an answer from a
+ * stale planner is a sentence somebody acts on about code that is not theirs.
+ */
+export function newest(directories) {
   let found = null;
   for (const directory of directories) {
     const at = newestUnder(join(ROOT, directory));

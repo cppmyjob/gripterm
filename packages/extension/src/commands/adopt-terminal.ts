@@ -150,7 +150,7 @@ export function registerAdoptTerminal(parts: AdoptTerminalParts): vscode.Disposa
     } catch (cause: unknown) {
       logger.error('a terminal could not be taken over', {
         terminalId: terminalId.value,
-        cause: String(cause),
+        cause,
       });
       say('error', `Gripterm: "${label}" could not be taken over, see the log.`, logger);
     }

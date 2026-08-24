@@ -197,12 +197,27 @@ export interface ReconcilerOptions {
  * map (§4.3), which is what makes the way back free: a heartbeat that comes back
  * simply stops the overlay applying.
  */
+/**
+ * Whether a record has lost its process, and WHICH RULE said so.
+ *
+ * A pair rather than a boolean, because the boolean was the whole defect: six
+ * ways out of one rule, one line in the log, and no way afterwards to tell
+ * which of them ran. This is the only rule in the build that stamps a record
+ * `orphaned`.
+ */
+interface OrphanVerdict {
+  readonly gone: boolean;
+  readonly rule: string;
+}
+
 export class Reconciler implements Disposable {
   private readonly _options: ReconcilerOptions;
   private readonly _listeners = new Set<ReconcileListener>();
   private _liveness: ReadonlyMap<string, OwnerLiveness>;
   /** Conversations already mentioned, so that a log line is news rather than noise. */
   private _mentioned: ReadonlySet<string> = new Set();
+  /** The last "left alone" rule said per record, so a steady state is not said twice. See `_sayItWasSpared`. */
+  private readonly _spared = new Map<string, string>();
   /**
    * Whether `owners/` has been READ, which is what makes an absence mean
    * anything (see `livenessOf`). Distinct from `_sweptAtMs`, which is stamped
@@ -475,7 +490,7 @@ export class Reconciler implements Disposable {
       };
     } catch (cause: unknown) {
       this._options.logger.warn('a reconciliation pass could not read the machine, so it changed nothing', {
-        reason: String(cause),
+        cause,
       });
       return null;
     }
@@ -510,7 +525,7 @@ export class Reconciler implements Disposable {
     } catch (cause: unknown) {
       this._options.logger.warn(
         'the machine could not be read, so no process of a window that is gone was ended',
-        { reason: String(cause) }
+        { cause }
       );
       return null;
     }
@@ -532,7 +547,7 @@ export class Reconciler implements Disposable {
       // the process may simply have finished. The wait below is what decides.
       this._options.logger.info('a process being ended did not take the signal', {
         pid: candidate.pid,
-        cause: String(cause),
+        cause,
       });
     }
 
@@ -606,7 +621,9 @@ export class Reconciler implements Disposable {
     const gone: string[] = [];
 
     for (const entry of this._options.registry.own()) {
-      if (!this._lostItsProcess(entry, listed, nowMs, uptimeSeconds)) {
+      const verdict = this._lostItsProcess(entry, listed, nowMs, uptimeSeconds);
+      if (!verdict.gone) {
+        this._sayItWasSpared(entry, verdict.rule);
         continue;
       }
       // Always accepted and always a move: the record came out of `own()`, and
@@ -617,6 +634,12 @@ export class Reconciler implements Disposable {
       this._options.logger.info('a terminal was found without its process', {
         terminalId: entry.terminalId.value,
         pid: entry.observed.pid,
+        // WHICH of the two rules decided it (Ш3). "The pid answered nothing" and
+        // "this was last heard from before the machine booted, so its pid means
+        // nothing at all" are entirely different findings, and until this field
+        // existed they reached a support log looking identical -- on the only
+        // rule in this build that stamps a record `orphaned`.
+        rule: verdict.rule,
       });
     }
     return gone;
@@ -639,13 +662,13 @@ export class Reconciler implements Disposable {
     listed: ReadonlySet<string> | null,
     nowMs: number,
     uptimeSeconds: number
-  ): boolean {
+  ): OrphanVerdict {
     const { observed } = entry;
     if (observed.state === 'orphaned' || isWitnessedEnd(observed.state)) {
-      return false;
+      return { gone: false, rule: 'its conversation is already known to be over' };
     }
     if (listed !== null && entry.claimsAnyOf(listed)) {
-      return false;
+      return { gone: false, rule: 'the CLI names its conversation among the ones it is running' };
     }
     /*
      * The window's own hand, and it outranks every inference below.
@@ -678,18 +701,46 @@ export class Reconciler implements Disposable {
           state: observed.state,
         });
       }
-      return false;
+      return { gone: false, rule: 'this window is still holding its terminal' };
     }
     if (precedesBoot(observed.lastEventAt.getTime(), nowMs, uptimeSeconds)) {
-      return true;
+      return { gone: true, rule: 'it was last heard from before this machine booted' };
     }
     if (observed.pid === null) {
       // A machine with no `node` on PATH has no `SessionStart` forwarder and so
       // no pid on any record (H1). Reading "we were never told" as "the process
       // is gone" would mark every terminal on such a machine dead while they run.
-      return false;
+      return { gone: false, rule: 'no pid was ever recorded for it, and never being told is not evidence' };
     }
-    return !this._options.isRunning(observed.pid);
+    return this._options.isRunning(observed.pid)
+      ? { gone: false, rule: 'the pid it carries is answering' }
+      : { gone: true, rule: 'nothing answers for the pid it carries' };
+  }
+
+  /**
+   * Why a record was LEFT ALONE, said once per record per change of rule (Ш3).
+   *
+   * The sweep runs every thirty seconds over every record this window owns, so a
+   * line per record per pass would be a log made of one repeated sentence -- and
+   * the moment worth reading is the moment the answer moved. `_strangers` in
+   * this class already keeps that shape, for the same reason.
+   *
+   * It matters because the five ways this rule says "no" are five different
+   * facts about somebody's conversation, and a person reading a log could not
+   * tell any of them from the sweep never having looked at that record at all.
+   */
+  private _sayItWasSpared(entry: TerminalEntry, rule: string): void {
+    const said = this._spared.get(entry.terminalId.value);
+    if (said === rule) {
+      return;
+    }
+    this._spared.set(entry.terminalId.value, rule);
+    this._options.logger.info('a terminal kept its process, as far as this window can tell', {
+      terminalId: entry.terminalId.value,
+      pid: entry.observed.pid,
+      state: entry.observed.state,
+      rule,
+    });
   }
 
   /**
@@ -743,7 +794,7 @@ export class Reconciler implements Disposable {
         // up over one locked file is a machine nobody sweeps.
         this._options.logger.warn('a presence file could not be collected', {
           fileName: row.fileName,
-          reason: String(cause),
+          cause,
         });
       }
     }

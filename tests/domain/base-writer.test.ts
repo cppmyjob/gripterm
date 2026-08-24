@@ -7,6 +7,7 @@ import {
   SessionRegistry,
   TerminalId,
   TerminalStateMachine,
+  describeDetails,
   type HookEventContext,
   type PreToolUseEvent,
   type StopEvent,
@@ -386,7 +387,31 @@ describe('when the store refuses a write', () => {
     expect(store.attempts).toBe(1);
     expect(logger.errors[0]?.message).toContain('could not be written to the store');
     expect(logger.errors[0]?.details?.terminalId).toBe(TERMINAL_UUID);
-    expect(String(logger.errors[0]?.details?.reason)).toContain('ENOSPC');
+    expect(String(logger.errors[0]?.details?.cause)).toContain('ENOSPC');
+  });
+
+  /*
+   * The half of a failure a person cannot see, and the reason this line was
+   * changed rather than added to (Ш3).
+   *
+   * `String(cause)` renders the sentence and drops everything else: no `code`,
+   * no stack, no chain. `code` is what every branch in this build that reacts to
+   * a file system failure reads, so a log written from the string cannot be
+   * compared against the decision the code took -- a full disk and a locked
+   * file arrive looking like the same kind of sentence.
+   */
+  it('carries the failure itself, so its code and its stack reach the log', async () => {
+    const { registry, store, logger, writer } = stand();
+    writer.start();
+    store.failWith(Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' }));
+
+    registry.register(makeEntry());
+    await settle();
+
+    const rendered = describeDetails(logger.errors[0]?.details);
+    expect(rendered).toContain('"code":"ENOSPC"');
+    expect(rendered).toContain('"stack":');
+    expect(rendered).toContain('no space left on device');
   });
 });
 

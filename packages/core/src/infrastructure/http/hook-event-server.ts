@@ -114,12 +114,31 @@ export class HookEventServer {
 
   private _handle(request: IncomingMessage, response: ServerResponse): void {
     if (request.method !== 'POST') {
+      /*
+       * Said, and it was not until Ш3.
+       *
+       * This port's own doc justifies the `Logger` by "the receiver has three
+       * failures that are invisible by construction". These two were a fourth
+       * and a fifth: a request that is not a POST, and a path this build cannot
+       * read -- both turned away with a status code and no trace anywhere. They
+       * are exactly what contract drift looks like from here: a proxy in the
+       * way, a `settings.json` left from a previous activation naming an old
+       * port, a forwarder out of another build. And "my hooks are not arriving"
+       * is the commonest question this product is asked.
+       */
+      this._options.logger.warn('a request to the hook port was not a POST, so it was turned away', {
+        method: request.method ?? null,
+        path: request.url ?? null,
+      });
       answer(response, STATUS_METHOD_NOT_ALLOWED);
       return;
     }
 
     const terminalId = parseHookEventPath(request.url);
     if (terminalId === null) {
+      this._options.logger.warn('a request to the hook port did not name a terminal, so it was turned away', {
+        path: request.url ?? null,
+      });
       answer(response, STATUS_NOT_FOUND);
       return;
     }

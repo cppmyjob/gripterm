@@ -71,7 +71,7 @@ export class OwnerHeartbeat implements Disposable {
       // reconciler (M2.12). Worth a line, because the window it names will look
       // `unknown` for that minute rather than plainly gone.
       this._options.logger.warn('this window could not remove its presence file', {
-        reason: String(cause),
+        cause,
       });
     }
   }
@@ -96,7 +96,7 @@ export class OwnerHeartbeat implements Disposable {
       await this._options.presence.heartbeat();
     } catch (cause: unknown) {
       this._options.logger.warn('this window could not write its heartbeat', {
-        reason: String(cause),
+        cause,
       });
     }
     if (this._announced) {

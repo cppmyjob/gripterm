@@ -43,7 +43,7 @@ function render(value: unknown, seen: WeakSet<object>): unknown {
   if (typeof value === 'bigint') {
     return value.toString();
   }
-  if (value instanceof Error) {
+  if (isError(value)) {
     return describeError(value, seen);
   }
   if (typeof value === 'object' && value !== null) {
@@ -55,6 +55,12 @@ function render(value: unknown, seen: WeakSet<object>): unknown {
   return value;
 }
 
+/**
+ * The four an `Error` answers for itself, so that a property of the same name
+ * carried on the object cannot overwrite one of them.
+ */
+const OWN_TO_ERROR: ReadonlySet<string> = new Set(['name', 'message', 'stack', 'cause']);
+
 function describeError(error: Error, seen: WeakSet<object>): Readonly<Record<string, unknown>> {
   if (seen.has(error)) {
     return { repeated: REPEATED };
@@ -64,9 +70,52 @@ function describeError(error: Error, seen: WeakSet<object>): Readonly<Record<str
     name: error.name,
     message: error.message,
     stack: error.stack,
+    // What a person cannot see and a program acts on: `code`, `errno`, `syscall`
+    // and `path` on a file system failure, and whatever else the thrower
+    // attached. `message` and `stack` are non-enumerable on an `Error`, so this
+    // picks up the added fields and nothing that is already spelled out above.
+    //
+    // It is the reason `String(cause)` was wrong at the forty-nine call sites
+    // that LOG a cause -- of sixty-five in all; the other sixteen feed a
+    // `reason: string` somebody reads. The string renders the SENTENCE and
+    // throws away the code, and `code` is what every branch in this build that
+    // reacts to a failure reads, so a log written from the string cannot be
+    // compared with the decision the code took.
+    ...ownProperties(error, seen),
     // The chain, when there is one. `cause` is `unknown` by type and an error
     // by convention, so it goes back through the same door rather than being
     // trusted to be one.
     cause: error.cause === undefined ? undefined : render(error.cause, seen),
   };
+}
+
+/**
+ * Whether a value is an error, INCLUDING one made somewhere else.
+ *
+ * `instanceof` is not enough and this was measured rather than reasoned about
+ * (2026-08-24): under jest's `node` environment an `fs.watch` ENOENT fails
+ * `instanceof Error`, because the suite runs in a vm context whose `Error` is a
+ * different function from the one Node's internals built the error with. The
+ * same split exists wherever a value crosses a realm.
+ *
+ * What it costs is precisely the sentence. `name`, `message` and `stack` are
+ * non-enumerable on an error, so one that misses this branch is serialised down
+ * to whatever was added to it -- `code`, `errno` -- and the line explaining the
+ * failure disappears on the one path nobody is watching, which is the defect
+ * this whole file exists against.
+ *
+ * `Object.prototype.toString` reads the internal tag, which crosses a realm.
+ */
+function isError(value: unknown): value is Error {
+  return value instanceof Error || Object.prototype.toString.call(value) === '[object Error]';
+}
+
+function ownProperties(error: Error, seen: WeakSet<object>): Readonly<Record<string, unknown>> {
+  const extra: Record<string, unknown> = {};
+  for (const key of Object.keys(error)) {
+    if (!OWN_TO_ERROR.has(key)) {
+      extra[key] = render((error as unknown as Record<string, unknown>)[key], seen);
+    }
+  }
+  return extra;
 }

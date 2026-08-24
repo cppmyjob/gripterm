@@ -108,7 +108,7 @@ export function endOwnTerminals(params: WindowShutdownParams): WindowShutdownRep
       params.logger.info('a process this window was ending did not take the signal', {
         terminalId,
         pid,
-        cause: String(cause),
+        cause,
       });
     }
   }

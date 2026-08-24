@@ -120,7 +120,12 @@ export { type Clock } from './domain/ports/clock';
 export { type Scheduler } from './domain/ports/scheduler';
 export { type Disposable } from './domain/ports/disposable';
 export { type LaunchNote, type LaunchTrace } from './domain/ports/launch-trace';
-export { type Logger } from './domain/ports/logger';
+export {
+  type LogLevel,
+  type LogLine,
+  type LogSink,
+  type Logger,
+} from './domain/ports/logger';
 export { type HookEventSink } from './domain/ports/hook-event-sink';
 export {
   type AttentionAction,
@@ -538,6 +543,8 @@ export {
 } from './domain/services/shell-quoting';
 
 export { describeDetails } from './domain/services/log-details';
+export { HELD_LINES, LogRelay, type LogRelayOptions } from './domain/services/log-relay';
+export { FileLog, MAX_LOG_BYTES, type FileLogOptions } from './infrastructure/store/file-log';
 
 export { type AgentCommandFactory } from './domain/ports/agent-command-factory';
 

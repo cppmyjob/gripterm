@@ -190,7 +190,7 @@ export class StorageCleaner implements Disposable {
         failed.push({ name, reason: String(cause) });
         logger.warn('a terminal directory could not be moved to the trash', {
           name,
-          reason: String(cause),
+          cause,
         });
       }
     }
@@ -323,7 +323,7 @@ export class StorageCleaner implements Disposable {
       // slowly; a window that stopped sweeping because one pass met a locked
       // file is a machine where it never happens again.
       this._options.logger.warn('the trash could not be swept, so it may hold more than it should', {
-        reason: String(cause),
+        cause,
       });
     } finally {
       this._arm();
@@ -444,7 +444,7 @@ export class StorageCleaner implements Disposable {
     } catch (cause: unknown) {
       this._options.logger.warn(
         'the pass over the trash could not leave its mark, so the next one measures the clock from further back',
-        { file, reason: String(cause) }
+        { file, cause }
       );
     }
   }

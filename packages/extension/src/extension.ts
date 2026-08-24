@@ -10,12 +10,14 @@ import {
   ClaudeCodeCommandFactory,
   FileEventJournal,
   FileLaunchTrace,
+  FileLog,
   FileOwnerPresence,
   FileSessionSettingsStore,
   FileTerminalRepository,
   HOOK_EVENT_PATH_PREFIX,
   HookEventParser,
   HookEventServer,
+  LogRelay,
   ObservabilityWatch,
   DEFAULT_RECONCILE_INTERVAL_MS,
   OwnerHeartbeat,
@@ -64,6 +66,7 @@ import {
   TerminalId,
 } from '@gripterm/core';
 import type {
+  OwnerId,
   AgentCommandFactory,
   EditorIdentity,
   EventJournal,
@@ -185,6 +188,15 @@ export interface Readiness {
   readonly storage: StoragePreparation;
   /** Where the store is, after the setting and the fallback have been applied. */
   readonly storageDir: string;
+  /**
+   * The file in the store this window is also writing its log into, or `null`
+   * when it could not be opened.
+   *
+   * Reported for the same reason it is logged: the plan's own register carried
+   * "the log path is named by the product nowhere" as an open question, and a
+   * file a person cannot be told the name of is a file they cannot be asked for.
+   */
+  readonly logFile: string | null;
   /** What became of the terminals this window could have brought back (M2.11). */
   readonly restore: RestoreSummary;
   /**
@@ -458,7 +470,25 @@ let farewell: (() => WindowShutdownReport) | null = null;
 export async function activate(context: vscode.ExtensionContext): Promise<GriptermApi> {
   const output = vscode.window.createOutputChannel('Gripterm', { log: true });
   context.subscriptions.push(output);
-  const logger = new VsCodeLogger(output);
+  const clock = new SystemClock();
+  /*
+   * Two destinations behind one port, and the second one does not exist yet
+   * (Ш3).
+   *
+   * The editor's panel is where a person looks while the window is in front of
+   * them. It is no use at all for the case this build actually has to answer:
+   * somebody else's window went wrong, they closed it, and what reaches me is
+   * whatever they thought to photograph. So the same lines are written into the
+   * store as well -- `logs/<ownerId>.log` -- and the request becomes one
+   * sentence that never changes: send me the `.gripterm` folder.
+   *
+   * The relay is here rather than a second logger passed around, because WHERE
+   * the store is has not been decided on this line: the setting is read a
+   * hundred lines below, and everything said in between is about how that
+   * decision went. Those lines are held and replayed with the moment each one
+   * happened.
+   */
+  const logger = new LogRelay({ first: new VsCodeLogger(output), clock });
   // Everything this window tells a person goes through here, so that "it said so"
   // is a thing a run can check rather than a thing a screenshot shows (M3.13).
   const announcer = new Announcer(logger);
@@ -466,7 +496,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   // a dialog, and a dialog nobody can answer is a run that hangs (M3.14).
   const asker = new Asker();
 
-  const clock = new SystemClock();
   /*
    * When this window began waking up, so that it can say how long it took.
    *
@@ -621,6 +650,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   }
   const storage = new StorageLayout(storageChoice.path);
   const store = await prepareStorage(storage, logger);
+  // After the migrator, not before it: the log is a directory in the base, and
+  // making one there while the base is still being decided about would hand the
+  // migrator a store that is not empty when it asks.
+  const logFile = keepALogInTheStore(storage, identity.ownerId, logger);
   const shared = await shareTheBase({ context, storage, store, registry, identity, clock, logger });
   // Per activation, held in memory, never written down: it is only meaningful
   // together with the port below, and the two are born and die together (§4.7).
@@ -775,9 +808,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
    * restoring the grid, which is up to three seconds, and nothing below depends
    * on the answer. Whoever asks for a strip meanwhile cancels it from inside.
    */
-  void held.strip?.takeAwayEmptyGroups().catch((cause: unknown) => {
-    logger.warn('the empty groups could not be looked for', { cause: String(cause) });
-  });
+  if (held.strip === null) {
+    // The EIGHTH way this one act does nothing, and the only one outside the
+    // strip itself. Said for the reason all the others now are (Ш3): a window
+    // that swept nothing and a window that never swept must not read alike in a
+    // log, and this is the one that never swept.
+    logger.info('the empty groups were not looked for: this window keeps no group of its own', {
+      engine: gateway.engine,
+      location,
+    });
+  } else {
+    void held.strip.takeAwayEmptyGroups().catch((cause: unknown) => {
+      logger.warn('the empty groups could not be looked for', { cause });
+    });
+  }
 
   logger.info('the list of terminals is on screen', {
     // Everything before this: the store, the base read whole, the port, and
@@ -1079,7 +1123,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     } else {
       void cleaner.collect().catch((cause: unknown) => {
         logger.warn('the trash could not be swept at activation, so it may hold more than it should', {
-          reason: String(cause),
+          cause,
         });
       });
       cleaner.start();
@@ -1161,6 +1205,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
       refusal: readiness.kind === 'refused' ? readiness.reason : null,
       storage: store,
       storageDir: storage.baseDir,
+      logFile,
       sharing: shared !== null,
       restore,
     },
@@ -1220,7 +1265,7 @@ async function bringTerminalsBack(parts: {
       refused: report.skipped.length,
     };
   } catch (cause: unknown) {
-    logger.error('this window could not bring its terminals back', { reason: String(cause) });
+    logger.error('this window could not bring its terminals back', { cause });
     return { kind: 'failed', reason: String(cause) };
   }
 }
@@ -1338,7 +1383,7 @@ async function surveyTheMachine(parts: {
     return { kind: 'read', inputs: await parts.gather() };
   } catch (cause: unknown) {
     parts.logger.error('this window could not read the machine, so it changed nothing about it', {
-      reason: String(cause),
+      cause,
     });
     return { kind: 'unread', reason: String(cause) };
   }
@@ -1403,7 +1448,7 @@ async function forgetClosedTerminals(parts: {
     });
   } catch (cause: unknown) {
     logger.warn('the records of closed terminals could not be moved to the trash', {
-      reason: String(cause),
+      cause,
     });
   }
 }
@@ -1483,7 +1528,7 @@ async function shareTheBase(parts: {
   } catch (cause: unknown) {
     logger.error('this window could not announce itself, so it lists only its own terminals', {
       path: storage.ownersDir,
-      reason: String(cause),
+      cause,
     });
     return null;
   }
@@ -1528,6 +1573,48 @@ async function shareTheBase(parts: {
   // reacted to changes would show an empty list until somebody else moved.
   await projection.refresh();
   return { repository, presence: owner };
+}
+
+/**
+ * Points this window's log at a file in the store, and says where it went (Ш3).
+ *
+ * **The whole of what this buys.** Before it, the only evidence of somebody
+ * else's window misbehaving was a screenshot: a report command has to be run IN
+ * the broken window, and a person closes the window before they write to me. A
+ * file beside the records it is about works backwards -- on the sitting that has
+ * already gone wrong -- and the request for it is one sentence for ever.
+ *
+ * **A failure here does not stop activation, and does not stay quiet either.**
+ * The window still works with no log in the store; what it loses is the ability
+ * to explain itself later, which is worth a warning and not a refusal. The name
+ * of the file is said out loud on the way through, because the plan's register
+ * carried "the product names the log path nowhere" as an open question, and a
+ * file nobody can be told the name of is a file nobody can be asked for.
+ */
+function keepALogInTheStore(layout: StorageLayout, ownerId: OwnerId, relay: LogRelay): string | null {
+  let path: string;
+  try {
+    path = layout.logFile(ownerId);
+  } catch (cause: unknown) {
+    // `logFile` refuses an id that could not be a file name -- the same check
+    // the presence file gets, for the same reason.
+    relay.warn('this window`s id could not name a log file, so its log stays in this panel only', {
+      ownerId: ownerId.value,
+      cause,
+    });
+    return null;
+  }
+  try {
+    relay.alsoTo(new FileLog({ path }));
+  } catch (cause: unknown) {
+    relay.warn('the store would not take a log file, so this window`s log stays in this panel only', {
+      path,
+      cause,
+    });
+    return null;
+  }
+  relay.info('this window is also writing its log into the store', { path });
+  return path;
 }
 
 /**

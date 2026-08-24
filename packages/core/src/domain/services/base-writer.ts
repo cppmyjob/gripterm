@@ -275,7 +275,7 @@ export class BaseWriter implements Disposable {
     } catch (cause: unknown) {
       this._options.logger.error(
         'a terminal could not be written to the store, so it is known only to this window',
-        { terminalId: entry.terminalId.value, reason: String(cause) }
+        { terminalId: entry.terminalId.value, cause }
       );
     }
   }
@@ -293,7 +293,7 @@ export class BaseWriter implements Disposable {
     } catch (cause: unknown) {
       this._options.logger.error(
         'a terminal record could not be discarded and is still in the store',
-        { terminalId: terminalId.value, reason: String(cause) }
+        { terminalId: terminalId.value, cause }
       );
     }
   }

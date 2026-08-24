@@ -498,7 +498,7 @@ export class WorkbenchView implements vscode.WebviewViewProvider, vscode.Disposa
       const what = `the panel could not be built: ${String(cause)}`;
       this._refusals.push(what);
       this._options.logger.error('the panel could not be built, so it has nothing in it', {
-        reason: String(cause),
+        cause,
       });
       return sorryPage(what);
     }

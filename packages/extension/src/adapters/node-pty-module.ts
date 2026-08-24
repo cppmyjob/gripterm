@@ -49,7 +49,7 @@ export function loadNodePty(extensionPath: string, logger: Logger): NodePtyModul
   } catch (cause: unknown) {
     logger.warn(
       'the native terminal could not be loaded, so terminals will be opened by the editor instead',
-      { directory, cause: String(cause) }
+      { directory, cause }
     );
     return null;
   }

@@ -172,7 +172,7 @@ export class SessionNameMirror implements Disposable {
       this._options.logger.warn('the name Claude Code has for a conversation could not be read', {
         terminalId: entry.terminalId.value,
         pid,
-        reason: String(cause),
+        cause,
       });
       return;
     }
