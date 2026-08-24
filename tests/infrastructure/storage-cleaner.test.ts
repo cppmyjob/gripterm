@@ -512,8 +512,16 @@ describe('the pass as a repeating thing', () => {
     cleaner.start();
     expect(scheduler.live[0]?.ms).toBe(DEFAULT_TRASH_SWEEP_INTERVAL_MS);
     scheduler.elapse();
-    await until(async () => !(await exists(join(layout.trashDir, old))));
+    // Waited for by the re-arming and not by the batch's removal, and the
+    // difference is a whole pass wide: `_arm` runs in a `finally`, AFTER the
+    // batch is gone and after the mark is written. A test that waited on the
+    // batch read the timer through that gap and found nothing armed -- red
+    // about once in five runs on a loaded machine, and only there, which is
+    // why it read as weather rather than as a bug for a week.
+    await until(() => scheduler.live.length > 0);
 
+    expect(await exists(join(layout.trashDir, old))).toBe(false);
+    expect(scheduler.live).toHaveLength(1);
     expect(scheduler.live[0]?.ms).toBe(DEFAULT_TRASH_SWEEP_INTERVAL_MS);
     cleaner.dispose();
   });
@@ -591,7 +599,7 @@ afterAll(async () => {
  * is not a thing a test can count: it would pass or fail on how many awaits the
  * implementation happens to have.
  */
-async function until(reached: () => Promise<boolean>): Promise<void> {
+async function until(reached: () => boolean | Promise<boolean>): Promise<void> {
   for (let attempt = 0; attempt < 400; attempt += 1) {
     if (await reached()) {
       return;

@@ -18,9 +18,30 @@ import { FixedClock, RecordingLogger } from '../helpers/port-fakes';
 const TERMINAL = TerminalId.fromString(TERMINAL_UUID);
 const AT = new Date('2026-08-23T18:29:36.000Z');
 
-/** The trace is fire-and-forget: a test has to let its chain of appends land. */
-async function settled(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 25));
+/**
+ * Waits for what the trace has written, rather than for a number of milliseconds.
+ *
+ * The trace is fire-and-forget: `note` returns before its append lands, so a
+ * test has to wait for the landing. A sleep is not that wait -- it is a bet on
+ * how busy the machine is, and this file lost that bet about one parallel run in
+ * five, with an ENOENT on a file that was about to exist. Shortening the sleep
+ * to zero fails all three tests here, which is what showed the sleep was the
+ * whole of the synchronisation and not a margin on top of one.
+ *
+ * Waiting on the condition the assertion needs makes a slow disk slow instead of
+ * red, and makes a trace that never writes fail with a sentence rather than with
+ * a missing file.
+ */
+async function until(reached: () => boolean | Promise<boolean>): Promise<void> {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    if (await reached()) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 5);
+    });
+  }
+  throw new Error('the trace never landed');
 }
 
 describe('FileLaunchTrace', () => {
@@ -40,6 +61,22 @@ describe('FileLaunchTrace', () => {
       trace: new FileLaunchTrace({ layout, clock: new FixedClock(AT), logger }),
       logger,
     };
+  }
+
+  /**
+   * What has landed so far, where "nothing yet" is an answer and not a throw.
+   *
+   * A half-written line is an answer too: `JSON.parse` refuses it, this reports
+   * nothing, and the next attempt sees the whole line. Which is why the failure
+   * this swallows is worth swallowing -- it is never the last word, because
+   * `until` gives up out loud.
+   */
+  async function landed(): Promise<Record<string, unknown>[]> {
+    try {
+      return await lines();
+    } catch {
+      return [];
+    }
   }
 
   async function lines(): Promise<Record<string, unknown>[]> {
@@ -64,7 +101,7 @@ describe('FileLaunchTrace', () => {
       session: 'a1beff0c-b5a2-4b68-96da-257ad65e1857',
       cwd: 'D:/Projects/m314-check',
     });
-    await settled();
+    await until(async () => (await landed()).length >= 1);
 
     const [line] = await lines();
     expect(line).toMatchObject({
@@ -92,7 +129,7 @@ describe('FileLaunchTrace', () => {
     });
     writer.note(TERMINAL, { what: 'no-pid' });
     writer.note(TERMINAL, { what: 'failed', reason: 'the editor refused' });
-    await settled();
+    await until(async () => (await landed()).length >= 3);
 
     expect((await lines()).map((line) => line.what)).toEqual(['start', 'no-pid', 'failed']);
   });
@@ -107,7 +144,10 @@ describe('FileLaunchTrace', () => {
     expect(() => {
       writer.note(TERMINAL, { what: 'pid', pid: 4242 });
     }).not.toThrow();
-    await settled();
+    // Waited for by there being a warning at all, and asserted by what it says:
+    // waiting on the sentence itself would make the assertion below repeat the
+    // wait and hold nothing of its own.
+    await until(() => logger.warnings.length > 0);
 
     expect(
       logger.warnings.some((line) => line.message.includes('could not be written down'))
