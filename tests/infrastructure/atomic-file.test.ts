@@ -8,17 +8,60 @@ import { moveAtomic, writeAtomic } from '../../packages/core/src/index';
  * under a concurrent reader -- which is precisely what a fake would be free to
  * invent.
  *
- * Two tests below describe WINDOWS: `rename` over a target that another process
- * holds open for reading fails with `EPERM` there (§2.1a), and succeeds
- * silently on POSIX. They are skipped off Windows rather than written to pass
- * everywhere, because a test that passes on both platforms while only one of
- * them can fail is a test that proves nothing on either.
+ * Four tests below describe WINDOWS, where a `rename` is refused with `EPERM`
+ * by two things a reader can hold open (§2.1a) and succeeds silently on POSIX.
+ * Which two was measured here on 2026-08-24, one question at a time, because
+ * getting it wrong costs a test that proves nothing:
+ *
+ *   - the TARGET being replaced         -> EPERM
+ *   - a file INSIDE the directory moved -> EPERM
+ *   - the file being moved itself       -> succeeds
+ *
+ * They are skipped off Windows rather than written to pass everywhere, because
+ * a test that passes on both platforms while only one of them can fail is a
+ * test that proves nothing on either.
  */
 
 /* eslint-disable jest/no-standalone-expect -- `windowsOnly` is `it` or `it.skip`, chosen once at load time; the rule cannot see that both are real test blocks and reads every `expect` inside them as standalone. Re-enabled at the foot of the file. */
 
 const onWindows = process.platform === 'win32';
 const windowsOnly = onWindows ? it : it.skip;
+
+/**
+ * The ladder the two release tests hand the writer, and it is longer than the
+ * real one on purpose.
+ *
+ * Those tests let a reader go WHILE the writer is retrying, so the whole test
+ * lives inside the ladder: the release has to land before the last attempt or
+ * the writer reports the platform's refusal and the test is red about the
+ * machine rather than about the code. Closing a descriptor is file system work
+ * like any other, and this suite has been measured taking 1533 ms over a bare
+ * `writeFile` on a busy box (2026-08-24). The old ladder gave that release
+ * 130 ms; this one gives it 2.2 s, and costs the same 20 ms when nothing is
+ * busy, because what ends the wait is the release and not the pause.
+ */
+const RELEASE_LADDER: readonly number[] = [20, 200, 2000];
+
+/**
+ * Waits for what the writer has done, rather than for a number of milliseconds.
+ *
+ * Both release tests used to close their descriptor on a 25 ms timer, which is
+ * not a wait but a bet on how busy the machine is: pushing the same timer to
+ * 400 ms -- past the 130 ms ladder those tests then used -- fails the write side
+ * every time with the platform's own `EPERM`, which is how the bet was measured
+ * rather than argued.
+ */
+async function until(reached: () => boolean | Promise<boolean>): Promise<void> {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    if (await reached()) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 5);
+    });
+  }
+  throw new Error('the writer never reached its rename');
+}
 
 let base = '';
 
@@ -69,8 +112,15 @@ describe('replacing a file without a reader seeing the middle', () => {
     await writeFile(target, 'old', 'utf8');
     const handle = await open(target, 'r');
 
-    const pending = writeAtomic(target, 'new', { backoffMs: [10, 30, 90] });
-    setTimeout(() => { void handle.close(); }, 25);
+    const pending = writeAtomic(target, 'new', { backoffMs: RELEASE_LADDER });
+    // The scratch neighbour is the writer's own evidence that it is past the
+    // write and into the rename, and it is a STATE rather than a moment: it
+    // cannot go away while this descriptor is open, because the rename that
+    // would take it away is the one being refused. So there is nothing here to
+    // catch in time -- unlike a timer, which has to fire inside a window it
+    // knows nothing about.
+    await until(async () => (await readdir(base)).some((name) => name.endsWith('.tmp')));
+    await handle.close();
     await pending;
 
     expect(await readFile(target, 'utf8')).toBe('new');
@@ -134,11 +184,14 @@ describe('replacing a file without a reader seeing the middle', () => {
 
 describe('moving a file out of the way', () => {
   /*
-   * Same hazard, same ladder, one exported name: a `rename` whose source a
-   * concurrent reader holds open fails with `EPERM` on Windows, and every
-   * window in this design reads every other window's files. A discarded record
-   * is moved to `trash/` rather than deleted (M2.7), so this is the operation
-   * that carries it.
+   * Same ladder, one exported name -- but NOT the same hazard, and the
+   * difference is measured rather than assumed (2026-08-24, this platform).
+   * Moving a file a reader holds open succeeds; it is moving a DIRECTORY that
+   * holds a file a reader has open that fails with `EPERM`. Every window in this
+   * design reads every other window's files, and a discarded record is moved to
+   * `trash/` rather than deleted (M2.7), so this is the operation that carries
+   * it -- one record at a time here, one whole terminal directory in
+   * `StorageCleaner.sweep`, and only the second of those can meet the refusal.
    */
   it('takes the file with its content, and leaves nothing at the source', async () => {
     const from = join(base, 'record.json');
@@ -158,18 +211,62 @@ describe('moving a file out of the way', () => {
     ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  windowsOnly('retries while a reader holds the file open, and succeeds once it lets go', async () => {
-    const from = join(base, 'record.json');
-    const to = join(base, 'moved.json');
-    await writeFile(from, 'kept', 'utf8');
-    const handle = await open(from, 'r');
+  /*
+   * A DIRECTORY with a file open inside it, and the shape is the whole point.
+   *
+   * Measured on this platform 2026-08-24, three questions asked separately:
+   * renaming a file a reader holds open SUCCEEDS; renaming onto a target a
+   * reader holds open fails with `EPERM`; renaming a directory that holds a
+   * file a reader has open fails with `EPERM`. The test that used to stand here
+   * moved a plain file and called itself a retry test -- pushing its release
+   * from 25 ms to 400 ms, three times past its own ladder, still passed it in
+   * 5 ms, because the first rename had never failed and there had never been a
+   * retry to see.
+   *
+   * The directory is also the shape the ladder is FOR: `StorageCleaner.sweep`
+   * moves `terminals/<id>` into the trash while other windows read the records
+   * inside it, which is the one caller of `moveAtomic` that can meet this.
+   */
+  windowsOnly('gives up with the platform\'s error when the directory is never let go', async () => {
+    const from = join(base, 'terminal');
+    const to = join(base, 'trash', 'terminal');
+    await mkdir(join(base, 'trash'), { recursive: true });
+    await mkdir(from);
+    await writeFile(join(from, 'record.json'), 'kept', 'utf8');
+    const handle = await open(join(from, 'record.json'), 'r');
 
-    const pending = moveAtomic(from, to, { backoffMs: [10, 30, 90] });
-    setTimeout(() => { void handle.close(); }, 25);
+    try {
+      await expect(moveAtomic(from, to, { backoffMs: [1, 1, 1] })).rejects.toMatchObject({
+        code: 'EPERM',
+      });
+      // A failed move is not a lost directory: everything is still where its
+      // owner left it, which is what makes the refusal safe to report.
+      expect(await readFile(join(from, 'record.json'), 'utf8')).toBe('kept');
+      expect(await readdir(join(base, 'trash'))).toStrictEqual([]);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  windowsOnly('moves the directory once the reader inside it lets go', async () => {
+    const from = join(base, 'terminal');
+    const to = join(base, 'trash', 'terminal');
+    await mkdir(join(base, 'trash'), { recursive: true });
+    await mkdir(from);
+    await writeFile(join(from, 'record.json'), 'kept', 'utf8');
+    const handle = await open(join(from, 'record.json'), 'r');
+
+    const pending = moveAtomic(from, to, { backoffMs: RELEASE_LADDER });
+    // Awaited, because letting go is the event the assertion below needs and
+    // the descriptor is not released until this returns. There is no scratch
+    // file to watch on this side -- a move makes none -- and none is needed:
+    // that a held directory refuses the rename is the test above, pinned there
+    // without a clock, so what is left for this one is the recovery.
+    await handle.close();
     await pending;
 
-    expect(await readFile(to, 'utf8')).toBe('kept');
-    expect(await readdir(base)).toStrictEqual(['moved.json']);
+    expect(await readFile(join(to, 'record.json'), 'utf8')).toBe('kept');
+    expect(await readdir(base)).toStrictEqual(['trash']);
   });
 });
 

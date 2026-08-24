@@ -11,6 +11,23 @@ module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
   rootDir: '.',
+  // A hang detector, and deliberately not a promise about speed. Jest's own
+  // default is 5000 ms, and this run eats it: `boundaries.test.ts` holds a
+  // whole type-aware ESLint program in a child process for nine seconds and
+  // `packaging.test.ts` runs `npx vsce ls` for five, both starting in the first
+  // second, while the workers beside them do real file system work.
+  //
+  // Measured 2026-08-24 over forty full parallel runs on a six-core box: one
+  // run went red with three tests past the deadline whose own work is 25 ms,
+  // 38 ms and 2171 ms. None of them is slow; all three were starved. Under a
+  // load that made the run 5.7x slower the same failure comes on demand, and it
+  // picks a DIFFERENT three every time -- an ordinary 38 ms test took 8.4 s
+  // there, 220 times its own cost. So the number below is about the machine and
+  // not about the work: the slowest wait this suite makes on purpose is the
+  // forwarder's own two-second ceiling, and thirty seconds sits far enough past
+  // it that only something genuinely stuck can reach it. `tests/deadline.test.ts`
+  // holds this line to that reasoning.
+  testTimeout: 30_000,
   coverageDirectory: '.test-output/coverage',
   // The `.js` suffix on relative specifiers is gone (2026-08-10), and with it
   // the mapper that existed solely to undo it. Nothing here requires the

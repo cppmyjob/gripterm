@@ -134,9 +134,36 @@ function eventPath(terminalId = TERMINAL): string {
   return `/ev/${terminalId.value}`;
 }
 
-/** Lets the microtasks queued after the response run. */
+/**
+ * Lets the microtasks queued after the response run.
+ *
+ * A yield and not a wait, which is why a number of milliseconds is honest here
+ * and nowhere else in this file: the server and this test share one event loop,
+ * so the work behind an answer is already queued when the answer arrives, and
+ * only the turn is needed. Measured 2026-08-24 by setting it to zero -- all 35
+ * tests here still pass, so the duration carries nothing.
+ */
 async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 20));
+}
+
+/**
+ * Waits for what the server has done, rather than for a number of milliseconds.
+ *
+ * Used where the thing being waited for is the OPERATING SYSTEM's and not ours
+ * -- a socket the caller tore down -- so no number of turns can count it and a
+ * sleep is a bet on how fast the event arrives.
+ */
+async function until(reached: () => boolean | Promise<boolean>): Promise<void> {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    if (await reached()) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 5);
+    });
+  }
+  throw new Error('the server never noticed');
 }
 
 describe('HookEventServer: where it listens', () => {
@@ -359,9 +386,16 @@ describe('HookEventServer: when the caller vanishes mid-body', () => {
         // not reliably emit `error`, so without the `close` guard this promise
         // -- and its buffers -- would live until the window closed.
         call.destroy();
-        setTimeout(resolve, 80);
+        resolve();
       });
     });
+    // Waited for by there being an error at all, and asserted below by what it
+    // says. The server learns of the abort from the socket, which is an event
+    // of the platform's rather than of ours, so the 80 ms sleep that used to
+    // stand here was a bet on how fast that event arrives: shortening it to
+    // zero fails this test every time with an empty list, which is how the bet
+    // was measured rather than argued (2026-08-24).
+    await until(() => logger.errors.length > 0);
 
     expect(logger.errors.map((entry) => entry.message)).toContain(
       'a hook event request failed while being read'

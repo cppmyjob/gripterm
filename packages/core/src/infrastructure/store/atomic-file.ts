@@ -87,12 +87,18 @@ export async function writeAtomic(
 }
 
 /**
- * Moves a file, waiting out the same hazard `writeAtomic` waits out.
+ * Moves a file or a whole directory, waiting out the same `EPERM` the ladder in
+ * `writeAtomic` waits out -- reached, here, by a different route.
  *
- * Its own exported name rather than a second copy of the ladder, because the
- * hazard is the same one and was measured once: a `rename` whose source or
- * target a concurrent reader holds open fails with `EPERM` on Windows (§2.1a),
- * and every window in this design reads every other window's files.
+ * Which route was measured on 2026-08-24 rather than reasoned, one question at
+ * a time, because the answer is not the symmetrical one it reads like. A
+ * `rename` whose SOURCE FILE a concurrent reader holds open SUCCEEDS on
+ * Windows. What is refused with `EPERM` (§2.1a) is a rename onto a target held
+ * open -- `writeAtomic`'s case -- and a rename of a DIRECTORY holding a file
+ * somebody has open. Only the second of those can reach this function, and only
+ * through one caller: `StorageCleaner.sweep`, moving `terminals/<id>` into the
+ * trash while another window reads the records inside it. The callers that move
+ * one file cannot meet it at all, and for them the ladder is insurance.
  *
  * There is no scratch file here and there does not need to be one. Nothing is
  * being replaced -- the destination is a directory a caller has just created --
