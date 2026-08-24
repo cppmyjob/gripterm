@@ -9,8 +9,8 @@ import type { GriptermApi } from '../../packages/extension/src/extension';
  * conversation with a new id; the row in the list is the SAME row, the task and
  * the notes are still on it, and the conversation it was is in its history.
  *
- * The CLI half of this was measured in M0 (A10: `SessionEnd(reason: clear)` and
- * then `SessionStart(source: clear)` with a new id, on the same endpoint). What
+ * The CLI half of this was measured in M0 (A10: `ConversationEnded(reason: clear)` and
+ * then `ConversationStarted(source: clear)` with a new id, on the same endpoint). What
  * is checked here is our half, on a real session -- and it is the drift of a
  * conversation under a record, which is the one thing M2.8 exists for.
  *

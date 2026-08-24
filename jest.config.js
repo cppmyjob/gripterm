@@ -29,6 +29,15 @@ module.exports = {
   // holds this line to that reasoning.
   testTimeout: 30_000,
   coverageDirectory: '.test-output/coverage',
+  // The VS Code that `pnpm test:integration` downloads is a whole editor under
+  // `.vscode-test/`, and Jest's Haste map scans it: five copies of an extension
+  // whose package.json claims the name `typescript` make a bare `import
+  // 'typescript'` ambiguous and fail the suite that needs it -- with a message
+  // about duplicate modules that says nothing about the real cause. Excluded by
+  // PATH rather than by name, because nothing in that directory is ours: it is
+  // somebody else's build, recreated by the integration runner, and already
+  // outside the linter for the same reason.
+  modulePathIgnorePatterns: ['<rootDir>/\\.vscode-test/'],
   // The `.js` suffix on relative specifiers is gone (2026-08-10), and with it
   // the mapper that existed solely to undo it. Nothing here requires the
   // suffix: `module: Node16` decides a file's format from the nearest

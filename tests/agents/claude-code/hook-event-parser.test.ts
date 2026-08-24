@@ -1,7 +1,7 @@
 import {
   HookEventParser,
   SessionId,
-  type HookEvent,
+  type AgentEvent,
   type HookEventParseResult,
 } from '../../../packages/core/src/index';
 import { SESSION_UUID } from '../../helpers/domain-fixtures';
@@ -13,7 +13,7 @@ function payload(extra: Record<string, unknown> = {}): Record<string, unknown> {
   return { session_id: SESSION_UUID, hook_event_name: 'Stop', ...extra };
 }
 
-function parseOrFail(body: unknown): HookEvent {
+function parseOrFail(body: unknown): AgentEvent {
   const result: HookEventParseResult = parser.parse(body);
   if (result.status !== 'parsed') {
     throw new Error(`expected a parsed event, got ${result.status}`);
@@ -22,22 +22,29 @@ function parseOrFail(body: unknown): HookEvent {
 }
 
 /**
- * Exactly the events subscribed in the `--settings` block of
- * 04-architecture.md. The table is the test: a member of the union with no case
- * in the parser shows up as a failing row rather than as silence.
+ * The translation, written out cell by cell: Claude Code's word on the left,
+ * ours on the right.
+ *
+ * These are exactly the events subscribed in the `--settings` block of
+ * 04-architecture.md, and the table is the test twice over. A hook with no case
+ * in the parser shows up as a failing row rather than as silence -- and a
+ * domain event renamed without its translation being reconsidered shows up
+ * here too, because this column is written by hand rather than imported from
+ * `DOMAIN_EVENT_OF_HOOK`. A table checked against a copy of itself proves
+ * nothing.
  */
-const SUBSCRIBED: readonly (readonly [string, HookEvent['kind']])[] = [
-  ['SessionStart', 'SessionStart'],
-  ['SessionEnd', 'SessionEnd'],
-  ['UserPromptSubmit', 'UserPromptSubmit'],
-  ['PreToolUse', 'PreToolUse'],
-  ['PostToolUse', 'PostToolUse'],
-  ['PostToolUseFailure', 'PostToolUseFailure'],
-  ['PermissionRequest', 'PermissionRequest'],
-  ['Notification', 'Notification'],
-  ['Stop', 'Stop'],
-  ['StopFailure', 'StopFailure'],
-  ['CwdChanged', 'CwdChanged'],
+const SUBSCRIBED: readonly (readonly [string, AgentEvent['kind']])[] = [
+  ['SessionStart', 'ConversationStarted'],
+  ['SessionEnd', 'ConversationEnded'],
+  ['UserPromptSubmit', 'PromptSubmitted'],
+  ['PreToolUse', 'ToolStarted'],
+  ['PostToolUse', 'ToolFinished'],
+  ['PostToolUseFailure', 'ToolFailed'],
+  ['PermissionRequest', 'PermissionRequested'],
+  ['Notification', 'AgentNotified'],
+  ['Stop', 'TurnFinished'],
+  ['StopFailure', 'TurnFailed'],
+  ['CwdChanged', 'WorkingDirectoryChanged'],
 ];
 
 describe('every subscribed hook event', () => {
@@ -74,15 +81,15 @@ describe('SessionStart', () => {
   it.each(['startup', 'resume', 'clear', 'compact', 'fork'])('reads source %s', (source) => {
     const event = parseOrFail(payload({ hook_event_name: 'SessionStart', source }));
 
-    expect(event.kind === 'SessionStart' ? event.source : null).toBe(source);
+    expect(event.kind === 'ConversationStarted' ? event.source : null).toBe(source);
   });
 
   it('collapses an unknown or missing source into "other" instead of failing', () => {
     const unknown = parseOrFail(payload({ hook_event_name: 'SessionStart', source: 'teleport' }));
     const missing = parseOrFail(payload({ hook_event_name: 'SessionStart' }));
 
-    expect(unknown.kind === 'SessionStart' ? unknown.source : null).toBe('other');
-    expect(missing.kind === 'SessionStart' ? missing.source : null).toBe('other');
+    expect(unknown.kind === 'ConversationStarted' ? unknown.source : null).toBe('other');
+    expect(missing.kind === 'ConversationStarted' ? missing.source : null).toBe('other');
   });
 });
 
@@ -90,7 +97,7 @@ describe('SessionEnd', () => {
   it('reads the reason from `reason`, which is the field that exists', () => {
     const event = parseOrFail(payload({ hook_event_name: 'SessionEnd', reason: 'logout' }));
 
-    expect(event.kind === 'SessionEnd' ? event.reason : null).toBe('logout');
+    expect(event.kind === 'ConversationEnded' ? event.reason : null).toBe('logout');
   });
 
   it('does not read it from `source`, which is the mistake this replaced', () => {
@@ -101,7 +108,7 @@ describe('SessionEnd', () => {
       payload({ hook_event_name: 'SessionEnd', source: 'logout', reason: undefined })
     );
 
-    expect(event.kind === 'SessionEnd' ? event.reason : null).toBe('other');
+    expect(event.kind === 'ConversationEnded' ? event.reason : null).toBe('other');
   });
 });
 
@@ -111,15 +118,15 @@ describe('the tool events', () => {
       payload({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: 'toolu_1' })
     );
 
-    expect(event.kind === 'PreToolUse' ? event.toolName : null).toBe('Bash');
-    expect(event.kind === 'PreToolUse' ? event.toolUseId : null).toBe('toolu_1');
+    expect(event.kind === 'ToolStarted' ? event.toolName : null).toBe('Bash');
+    expect(event.kind === 'ToolStarted' ? event.toolUseId : null).toBe('toolu_1');
   });
 
   it('still parses without a tool name: the transition matters more than the label', () => {
     const event = parseOrFail(payload({ hook_event_name: 'PreToolUse' }));
 
-    expect(event.kind).toBe('PreToolUse');
-    expect(event.kind === 'PreToolUse' ? event.toolName : 'unset').toBeNull();
+    expect(event.kind).toBe('ToolStarted');
+    expect(event.kind === 'ToolStarted' ? event.toolName : 'unset').toBeNull();
   });
 
   it('reads a whitespace-only identifier as absent, not as a name made of spaces', () => {
@@ -127,8 +134,8 @@ describe('the tool events', () => {
       payload({ hook_event_name: 'PreToolUse', tool_name: '   ', tool_use_id: '\t\n' })
     );
 
-    expect(event.kind === 'PreToolUse' ? event.toolName : 'unset').toBeNull();
-    expect(event.kind === 'PreToolUse' ? event.toolUseId : 'unset').toBeNull();
+    expect(event.kind === 'ToolStarted' ? event.toolName : 'unset').toBeNull();
+    expect(event.kind === 'ToolStarted' ? event.toolUseId : 'unset').toBeNull();
   });
 
   it('reads the failure message of PostToolUseFailure', () => {
@@ -136,7 +143,7 @@ describe('the tool events', () => {
       payload({ hook_event_name: 'PostToolUseFailure', error_message: 'exit 1' })
     );
 
-    expect(event.kind === 'PostToolUseFailure' ? event.errorMessage : null).toBe('exit 1');
+    expect(event.kind === 'ToolFailed' ? event.errorMessage : null).toBe('exit 1');
   });
 });
 
@@ -150,8 +157,8 @@ describe('PermissionRequest', () => {
       })
     );
 
-    expect(event.kind === 'PermissionRequest' ? event.toolName : null).toBe('Write');
-    expect(event.kind === 'PermissionRequest' ? event.permissionLevel : null).toBe('ask');
+    expect(event.kind === 'PermissionRequested' ? event.toolName : null).toBe('Write');
+    expect(event.kind === 'PermissionRequested' ? event.permissionLevel : null).toBe('ask');
   });
 });
 
@@ -172,7 +179,7 @@ describe('Notification', () => {
       payload({ hook_event_name: 'Notification', notification_type: notificationType })
     );
 
-    expect(event.kind === 'Notification' ? event.notificationType : null).toBe(notificationType);
+    expect(event.kind === 'AgentNotified' ? event.notificationType : null).toBe(notificationType);
   });
 
   it('treats a bare permission_prompt as unknown, because the CLI never sends it', () => {
@@ -182,7 +189,7 @@ describe('Notification', () => {
       payload({ hook_event_name: 'Notification', notification_type: 'permission_prompt' })
     );
 
-    expect(event.kind === 'Notification' ? event.notificationType : null).toBe('other');
+    expect(event.kind === 'AgentNotified' ? event.notificationType : null).toBe('other');
   });
 
   it('keeps the message', () => {
@@ -190,7 +197,7 @@ describe('Notification', () => {
       payload({ hook_event_name: 'Notification', message: 'Claude needs your input' })
     );
 
-    expect(event.kind === 'Notification' ? event.message : null).toBe('Claude needs your input');
+    expect(event.kind === 'AgentNotified' ? event.message : null).toBe('Claude needs your input');
   });
 });
 
@@ -202,7 +209,7 @@ describe('Stop and StopFailure', () => {
 
     // Verbatim: this is content, and trimming it would make the store disagree
     // with what was actually said.
-    expect(event.kind === 'Stop' ? event.lastAssistantMessage : null).toBe('  done.  ');
+    expect(event.kind === 'TurnFinished' ? event.lastAssistantMessage : null).toBe('  done.  ');
   });
 
   it('separates the failure type from its message', () => {
@@ -214,8 +221,8 @@ describe('Stop and StopFailure', () => {
       })
     );
 
-    expect(event.kind === 'StopFailure' ? event.errorType : null).toBe('rate_limit');
-    expect(event.kind === 'StopFailure' ? event.errorMessage : null).toBe('slow down');
+    expect(event.kind === 'TurnFailed' ? event.errorType : null).toBe('rate_limit');
+    expect(event.kind === 'TurnFailed' ? event.errorMessage : null).toBe('slow down');
   });
 });
 
@@ -225,8 +232,8 @@ describe('CwdChanged', () => {
       payload({ hook_event_name: 'CwdChanged', old_cwd: 'D:/a', new_cwd: 'D:/b' })
     );
 
-    expect(event.kind === 'CwdChanged' ? event.oldCwd : null).toBe('D:/a');
-    expect(event.kind === 'CwdChanged' ? event.newCwd : null).toBe('D:/b');
+    expect(event.kind === 'WorkingDirectoryChanged' ? event.oldCwd : null).toBe('D:/a');
+    expect(event.kind === 'WorkingDirectoryChanged' ? event.newCwd : null).toBe('D:/b');
   });
 
   it('ignores previous_cwd, of which there are zero occurrences in the binary', () => {
@@ -234,7 +241,7 @@ describe('CwdChanged', () => {
       payload({ hook_event_name: 'CwdChanged', previous_cwd: 'D:/a', new_cwd: 'D:/b' })
     );
 
-    expect(event.kind === 'CwdChanged' ? event.oldCwd : 'unset').toBeNull();
+    expect(event.kind === 'WorkingDirectoryChanged' ? event.oldCwd : 'unset').toBeNull();
   });
 });
 
@@ -244,7 +251,7 @@ describe('UserPromptSubmit', () => {
       payload({ hook_event_name: 'UserPromptSubmit', user_input: '  indented on purpose' })
     );
 
-    expect(event.kind === 'UserPromptSubmit' ? event.userInput : null).toBe(
+    expect(event.kind === 'PromptSubmitted' ? event.userInput : null).toBe(
       '  indented on purpose'
     );
   });
@@ -257,16 +264,19 @@ describe('UserPromptSubmit', () => {
  * is a set of names and never a count.
  */
 describe('SubagentStart and SubagentStop', () => {
-  it.each(['SubagentStart', 'SubagentStop'] as const)('carries the agent of %s', (hookEventName) => {
+  it.each([
+    ['SubagentStart', 'SubagentStarted'],
+    ['SubagentStop', 'SubagentFinished'],
+  ] as const)('carries the agent of %s', (hookEventName, kind) => {
     const event = parseOrFail(
       payload({ hook_event_name: hookEventName, agent_id: 'a0f2051a530b4c7a2', agent_type: 'general-purpose' })
     );
 
-    expect(event.kind).toBe(hookEventName);
-    expect(event.kind === 'SubagentStart' || event.kind === 'SubagentStop' ? event.agentId : null).toBe(
+    expect(event.kind).toBe(kind);
+    expect(event.kind === 'SubagentStarted' || event.kind === 'SubagentFinished' ? event.agentId : null).toBe(
       'a0f2051a530b4c7a2'
     );
-    expect(event.kind === 'SubagentStart' || event.kind === 'SubagentStop' ? event.agentType : null).toBe(
+    expect(event.kind === 'SubagentStarted' || event.kind === 'SubagentFinished' ? event.agentType : null).toBe(
       'general-purpose'
     );
   });
@@ -274,7 +284,7 @@ describe('SubagentStart and SubagentStop', () => {
   it('reads an unnamed agent as no agent rather than refusing the event', () => {
     const event = parseOrFail(payload({ hook_event_name: 'SubagentStop' }));
 
-    expect(event.kind === 'SubagentStop' ? event.agentId : 'unset').toBeNull();
+    expect(event.kind === 'SubagentFinished' ? event.agentId : 'unset').toBeNull();
   });
 });
 
@@ -367,7 +377,7 @@ describe('the parsed event', () => {
 
     expect(Object.isFrozen(event)).toBe(true);
     expect(() => {
-      (event as unknown as { kind: string }).kind = 'SessionEnd';
+      (event as unknown as { kind: string }).kind = 'ConversationEnded';
     }).toThrow(TypeError);
   });
 

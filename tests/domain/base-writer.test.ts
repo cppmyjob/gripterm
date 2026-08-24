@@ -8,9 +8,9 @@ import {
   TerminalId,
   TerminalStateMachine,
   describeDetails,
-  type HookEventContext,
-  type PreToolUseEvent,
-  type StopEvent,
+  type AgentEventContext,
+  type ToolStartedEvent,
+  type TurnFinishedEvent,
   type TerminalEntry,
   type TerminalRepository,
 } from '../../packages/core/src/index';
@@ -36,18 +36,18 @@ const OTHER_UUID = '11111111-2222-4333-8444-555555555555';
 const OTHER = TerminalId.fromString(OTHER_UUID);
 const SESSION = SessionId.fromString(SESSION_UUID);
 
-const CONTEXT: Omit<HookEventContext, 'sessionId'> = {
+const CONTEXT: Omit<AgentEventContext, 'sessionId'> = {
   promptId: null,
   cwd: null,
   transcriptPath: null,
 };
 
-function preToolUse(toolName: string): PreToolUseEvent {
-  return { kind: 'PreToolUse', sessionId: SESSION, toolName, toolUseId: 'tu-1', ...CONTEXT };
+function preToolUse(toolName: string): ToolStartedEvent {
+  return { kind: 'ToolStarted', sessionId: SESSION, toolName, toolUseId: 'tu-1', ...CONTEXT };
 }
 
-function turnEnded(lastAssistantMessage: string | null): StopEvent {
-  return { kind: 'Stop', sessionId: SESSION, lastAssistantMessage, ...CONTEXT };
+function turnEnded(lastAssistantMessage: string | null): TurnFinishedEvent {
+  return { kind: 'TurnFinished', sessionId: SESSION, lastAssistantMessage, ...CONTEXT };
 }
 
 /**
@@ -360,7 +360,7 @@ describe('an event refused as belonging to a conversation the record never had',
     store.forget();
 
     registry.ingest(TERMINAL, {
-      kind: 'Stop',
+      kind: 'TurnFinished',
       sessionId: SessionId.fromString('7f4d2a1c-5b6e-4c8a-9d0f-1a2b3c4d5e6f'),
       lastAssistantMessage: null,
       ...CONTEXT,

@@ -311,31 +311,31 @@ function wordsFor(event: TerminalEvent | null): string {
     return 'an entry this build cannot read';
   }
   switch (event.kind) {
-    case 'SessionStart':
+    case 'ConversationStarted':
       return `conversation started (${event.source})`;
-    case 'SessionEnd':
+    case 'ConversationEnded':
       return `conversation ended (${event.reason})`;
-    case 'UserPromptSubmit':
+    case 'PromptSubmitted':
       return 'you sent a prompt';
-    case 'PreToolUse':
+    case 'ToolStarted':
       return event.toolName === null ? 'a tool started' : `${event.toolName} started`;
-    case 'PostToolUse':
+    case 'ToolFinished':
       return event.toolName === null ? 'a tool finished' : `${event.toolName} finished`;
-    case 'PostToolUseFailure':
+    case 'ToolFailed':
       return event.toolName === null ? 'a tool failed' : `${event.toolName} failed`;
-    case 'PermissionRequest':
+    case 'PermissionRequested':
       return event.toolName === null ? 'asked for permission' : `asked to run ${event.toolName}`;
-    case 'Notification':
+    case 'AgentNotified':
       return `notification: ${event.notificationType}`;
-    case 'Stop':
+    case 'TurnFinished':
       return 'turn finished';
-    case 'StopFailure':
+    case 'TurnFailed':
       return event.errorType === null ? 'turn failed' : `turn failed (${event.errorType})`;
-    case 'SubagentStart':
+    case 'SubagentStarted':
       return event.agentType === null ? 'a subagent started' : `a ${event.agentType} subagent started`;
-    case 'SubagentStop':
+    case 'SubagentFinished':
       return event.agentType === null ? 'a subagent finished' : `a ${event.agentType} subagent finished`;
-    case 'CwdChanged':
+    case 'WorkingDirectoryChanged':
       return 'working directory changed';
     case 'ResumeTimedOut':
       return 'restoring took too long';

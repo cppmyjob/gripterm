@@ -112,7 +112,7 @@ suite('renaming the tab of a terminal', () => {
        * takes on somebody else's machine. What it does NOT cover is the product
        * hazard the same measurement found -- a rename issued before the process
        * is up is silently dropped. In this build nothing issues one there (a
-       * name from `SessionStart` cannot arrive before the process that sends
+       * name from `ConversationStarted` cannot arrive before the process that sends
        * it), which is why it is written down rather than defended against.
        */
       await terminal.processId;

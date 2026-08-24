@@ -1,5 +1,5 @@
 import { ObservedState } from '../entities/observed-state';
-import { isHookEvent } from '../events/terminal-event';
+import { isAgentEvent } from '../events/terminal-event';
 import type { SessionId } from '../entities/session-id';
 import type { StateTransition, TerminalStateMachine } from './terminal-state-machine';
 import type { TerminalEvent } from '../events/terminal-event';
@@ -16,19 +16,19 @@ import type { TerminalEvent } from '../events/terminal-event';
  *   * `keep`  -- the event says nothing about tools either way.
  */
 const TOOL_RULES: Readonly<Record<TerminalEvent['kind'], 'clear' | 'keep' | 'name'>> = {
-  SessionStart: 'clear',
-  SessionEnd: 'clear',
-  SubagentStart: 'keep',
-  SubagentStop: 'keep',
-  UserPromptSubmit: 'clear',
-  PreToolUse: 'name',
-  PostToolUse: 'clear',
-  PostToolUseFailure: 'clear',
-  PermissionRequest: 'name',
-  Notification: 'keep',
-  Stop: 'clear',
-  StopFailure: 'clear',
-  CwdChanged: 'keep',
+  ConversationStarted: 'clear',
+  ConversationEnded: 'clear',
+  SubagentStarted: 'keep',
+  SubagentFinished: 'keep',
+  PromptSubmitted: 'clear',
+  ToolStarted: 'name',
+  ToolFinished: 'clear',
+  ToolFailed: 'clear',
+  PermissionRequested: 'name',
+  AgentNotified: 'keep',
+  TurnFinished: 'clear',
+  TurnFailed: 'clear',
+  WorkingDirectoryChanged: 'keep',
   ResumeTimedOut: 'keep',
   // `keep`, and the choice is the honest one: this event says only that nothing
   // has arrived. Clearing would assert that the tool finished -- which is the
@@ -52,17 +52,18 @@ const TOOL_RULES: Readonly<Record<TerminalEvent['kind'], 'clear' | 'keep' | 'nam
 export const MAIN_AGENT = 'main';
 
 /**
- * Who is running after this event -- the answer `Stop` alone cannot give.
+ * Who is running after this event -- the answer `TurnFinished` alone cannot give.
  *
  * **Measured 2026-08-21, against a real CLI with all thirty-one hooks
  * registered.** The main agent's turn ends when it has LAUNCHED its background
- * subagents, not when they finish: `Stop` at 25.7 s, `Notification idle_prompt`
- * at 85.7 s, and the two `SubagentStop`s at 107 and 109 s. For eighty seconds
+ * subagents, not when they finish: `TurnFinished` at 25.7 s, an
+ * `AgentNotified idle_prompt` at 85.7 s, and the two `SubagentFinished`s at 107
+ * and 109 s. For eighty seconds
  * this build showed a green tick on a terminal that was working, which is the
  * fifth thing the customer reported.
  *
  * Ids and not a count, and that is measured too: the same run produced five
- * `SubagentStop`s naming ids nothing had ever started. A counter would have
+ * `SubagentFinished`s naming ids nothing had ever started. A counter would have
  * reached zero halfway through the work; a set simply ignores a name it does
  * not hold.
  *
@@ -78,39 +79,39 @@ export function runningAfter(
 ): readonly string[] {
   switch (event.kind) {
     // A beginning and four ends. Whatever was running, it is not running now.
-    case 'SessionStart':
-    case 'SessionEnd':
+    case 'ConversationStarted':
+    case 'ConversationEnded':
     case 'ProcessGone':
     case 'TerminalClosed':
     case 'LaunchExitedNonZero':
     case 'ResumeExitedNonZero':
       return [];
 
-    case 'UserPromptSubmit':
+    case 'PromptSubmitted':
       return withName(previous, MAIN_AGENT);
 
-    case 'Stop':
-    case 'StopFailure':
+    case 'TurnFinished':
+    case 'TurnFailed':
       return withoutName(previous, MAIN_AGENT);
 
-    case 'Notification':
+    case 'AgentNotified':
       // The two that say the main agent is back at its prompt. Everything else
       // a notification can be says nothing about who is working.
       return event.notificationType === 'idle_prompt' || event.notificationType === 'agent_completed'
         ? withoutName(previous, MAIN_AGENT)
         : previous;
 
-    case 'SubagentStart':
+    case 'SubagentStarted':
       return event.agentId === null ? previous : withName(previous, event.agentId);
 
-    case 'SubagentStop':
+    case 'SubagentFinished':
       return event.agentId === null ? previous : withoutName(previous, event.agentId);
 
-    case 'PreToolUse':
-    case 'PostToolUse':
-    case 'PostToolUseFailure':
-    case 'PermissionRequest':
-    case 'CwdChanged':
+    case 'ToolStarted':
+    case 'ToolFinished':
+    case 'ToolFailed':
+    case 'PermissionRequested':
+    case 'WorkingDirectoryChanged':
     case 'ResumeTimedOut':
     case 'WentQuiet':
       return previous;
@@ -138,7 +139,7 @@ export interface ObservedAfterParams {
  *
  * Extracted from `SessionRegistry` rather than copied into the projector,
  * because a second copy of these rules is a second answer to "what does
- * `PreToolUse` mean", and the two would disagree exactly where nobody looks: a
+ * `ToolStarted` mean", and the two would disagree exactly where nobody looks: a
  * terminal restored from its journal would show a different tool, or a different
  * last message, from the one the live window showed a minute earlier.
  *
@@ -239,8 +240,9 @@ export interface Projection {
  *     where the last HOOK left the terminal, which is the honest answer for a
  *     record whose process is gone anyway: what the conversation was doing, not
  *     whether it is still running. Since A45 that includes a history whose last
- *     hook is a `SessionEnd` the machine refused because the record was still
- *     `launching`: the replay ends in `launching`, exactly where the live record
+ *     report is a `ConversationEnded` the machine refused because the record
+ *     was still `launching`: the replay ends in `launching`, exactly where the
+ *     live record
  *     stood at that instant, and the exit code that settled it live was never in
  *     the journal to begin with.
  *   * It does not rename the record. The conversation it follows is tracked so
@@ -257,8 +259,8 @@ export function projectObserved(params: ProjectionParams): Projection {
 
   for (const entry of params.events) {
     const { event } = entry;
-    if (isHookEvent(event)) {
-      if (event.kind === 'SessionStart') {
+    if (isAgentEvent(event)) {
+      if (event.kind === 'ConversationStarted') {
         // The one hook that announces a beginning, so it is the one that decides
         // which conversation the events after it belong to -- `/clear`,
         // `--fork-session` and a resume onto another conversation all arrive
@@ -298,12 +300,12 @@ function toolAfter(event: TerminalEvent, previous: string | null): string | null
 }
 
 function messageAfter(event: TerminalEvent, previous: string | null): string | null {
-  if (event.kind === 'Stop') {
+  if (event.kind === 'TurnFinished') {
     // A missing detail never costs what we already know, which is the parser's
     // rule carried through to the store.
     return event.lastAssistantMessage ?? previous;
   }
-  if (event.kind === 'SessionStart') {
+  if (event.kind === 'ConversationStarted') {
     // A new conversation does not inherit the previous one's last words.
     return null;
   }

@@ -10,21 +10,21 @@ import {
   processGone,
   terminalClosed,
   type EntryChange,
-  type HookEventContext,
-  type NotificationEvent,
-  type NotificationType,
-  type PermissionRequestEvent,
+  type AgentEventContext,
+  type AgentNotifiedEvent,
+  type AgentNoticeType,
+  type PermissionRequestedEvent,
   type PersistedTerminalState,
-  type PostToolUseEvent,
-  type PreToolUseEvent,
+  type ToolFinishedEvent,
+  type ToolStartedEvent,
   type RegistryChange,
-  type SessionEndEvent,
-  type SessionStartEvent,
-  type SessionStartSource,
-  type StopEvent,
+  type ConversationEndedEvent,
+  type ConversationStartedEvent,
+  type ConversationStartSource,
+  type TurnFinishedEvent,
   type TerminalEntry,
   type UnknownConversationChange,
-  type UserPromptSubmitEvent,
+  type PromptSubmittedEvent,
 } from '../../packages/core/src/index';
 import {
   CREATED_AT,
@@ -63,7 +63,7 @@ const THIRD_SESSION = SessionId.fromString('7c9e6679-7425-40de-944b-e07fc1f90ae7
 
 const NOW = new Date('2026-08-11T12:00:00.000Z');
 
-const CONTEXT: Omit<HookEventContext, 'sessionId'> = {
+const CONTEXT: Omit<AgentEventContext, 'sessionId'> = {
   promptId: null,
   cwd: null,
   transcriptPath: null,
@@ -71,37 +71,37 @@ const CONTEXT: Omit<HookEventContext, 'sessionId'> = {
 
 function sessionStart(
   sessionId: SessionId,
-  source: SessionStartSource = 'startup'
-): SessionStartEvent {
-  return { kind: 'SessionStart', sessionId, source, ...CONTEXT };
+  source: ConversationStartSource = 'startup'
+): ConversationStartedEvent {
+  return { kind: 'ConversationStarted', sessionId, source, ...CONTEXT };
 }
 
-function sessionEnd(sessionId: SessionId): SessionEndEvent {
-  return { kind: 'SessionEnd', sessionId, reason: 'clear', ...CONTEXT };
+function sessionEnd(sessionId: SessionId): ConversationEndedEvent {
+  return { kind: 'ConversationEnded', sessionId, reason: 'clear', ...CONTEXT };
 }
 
-function userPromptSubmit(sessionId: SessionId): UserPromptSubmitEvent {
-  return { kind: 'UserPromptSubmit', sessionId, userInput: 'go on', ...CONTEXT };
+function userPromptSubmit(sessionId: SessionId): PromptSubmittedEvent {
+  return { kind: 'PromptSubmitted', sessionId, userInput: 'go on', ...CONTEXT };
 }
 
-function preToolUse(sessionId: SessionId, toolName: string | null): PreToolUseEvent {
-  return { kind: 'PreToolUse', sessionId, toolName, toolUseId: 'tu-1', ...CONTEXT };
+function preToolUse(sessionId: SessionId, toolName: string | null): ToolStartedEvent {
+  return { kind: 'ToolStarted', sessionId, toolName, toolUseId: 'tu-1', ...CONTEXT };
 }
 
-function postToolUse(sessionId: SessionId, toolName: string | null): PostToolUseEvent {
-  return { kind: 'PostToolUse', sessionId, toolName, toolUseId: 'tu-1', ...CONTEXT };
+function postToolUse(sessionId: SessionId, toolName: string | null): ToolFinishedEvent {
+  return { kind: 'ToolFinished', sessionId, toolName, toolUseId: 'tu-1', ...CONTEXT };
 }
 
-function permissionRequest(sessionId: SessionId, toolName: string | null): PermissionRequestEvent {
-  return { kind: 'PermissionRequest', sessionId, toolName, permissionLevel: 'ask', ...CONTEXT };
+function permissionRequest(sessionId: SessionId, toolName: string | null): PermissionRequestedEvent {
+  return { kind: 'PermissionRequested', sessionId, toolName, permissionLevel: 'ask', ...CONTEXT };
 }
 
-function stop(sessionId: SessionId, lastAssistantMessage: string | null = null): StopEvent {
-  return { kind: 'Stop', sessionId, lastAssistantMessage, ...CONTEXT };
+function stop(sessionId: SessionId, lastAssistantMessage: string | null = null): TurnFinishedEvent {
+  return { kind: 'TurnFinished', sessionId, lastAssistantMessage, ...CONTEXT };
 }
 
-function notification(sessionId: SessionId, notificationType: NotificationType): NotificationEvent {
-  return { kind: 'Notification', sessionId, notificationType, message: null, ...CONTEXT };
+function notification(sessionId: SessionId, notificationType: AgentNoticeType): AgentNotifiedEvent {
+  return { kind: 'AgentNotified', sessionId, notificationType, message: null, ...CONTEXT };
 }
 
 function observedIn(state: PersistedTerminalState): ObservedState {
@@ -345,7 +345,7 @@ describe('SessionRegistry §4.6 case 2: the session id moved', () => {
   });
 
   it('routes the whole /clear sequence, in the order the CLI emits it', () => {
-    // SessionEnd carries the OLD id and arrives first; SessionStart carries the
+    // ConversationEnded carries the OLD id and arrives first; ConversationStarted carries the
     // new one. Getting this pair wrong is not a visible failure -- it is a
     // terminal that stays `ended` while the person is talking to it.
     const { registry } = stand();
@@ -361,7 +361,7 @@ describe('SessionRegistry §4.6 case 2: the session id moved', () => {
     expect(entry.sessionId.value).toBe(NEXT_SESSION_UUID);
   });
 
-  it('follows a SessionStart whatever source it names', () => {
+  it('follows a ConversationStarted whatever source it names', () => {
     // Wider than §4.6's `source: "clear"`, deliberately. `/resume` onto another
     // conversation, `--fork-session` and `/compact` all begin a session with a
     // new id under a different source, and `source` is a field we narrow to
@@ -374,15 +374,15 @@ describe('SessionRegistry §4.6 case 2: the session id moved', () => {
     }
   });
 
-  it('does not rename on any event other than SessionStart', () => {
+  it('does not rename on any event other than ConversationStarted', () => {
     const { registry } = stand();
     registry.ingest(TERMINAL, userPromptSubmit(NEXT_SESSION));
     expect(current(registry).sessionId.value).toBe(SESSION_UUID);
   });
 
-  it('follows a SessionStart that names a session the terminal already used', () => {
+  it('follows a ConversationStarted that names a session the terminal already used', () => {
     // A19, measured 2026-08-12: `/resume <id>` inside the terminal is announced
-    // exactly like `/clear` -- `SessionEnd` and then `SessionStart` -- except
+    // exactly like `/clear` -- `ConversationEnded` and then `ConversationStarted` -- except
     // that the id it carries is one this terminal has already had. This record
     // used to stay on the conversation the person had just left, and a restore
     // would then have offered that one.
@@ -412,7 +412,7 @@ describe('SessionRegistry §4.6 case 2: the session id moved', () => {
   it('treats what it left as stale, whichever direction it moved', () => {
     // The other half of the swap. An event still in flight from the conversation
     // the terminal has just left belongs to this record -- and must not set its
-    // state, or a `SessionEnd` from the abandoned session would end the one that
+    // state, or a `ConversationEnded` from the abandoned session would end the one that
     // replaced it.
     const { registry } = stand();
     registry.ingest(TERMINAL, sessionStart(NEXT_SESSION, 'clear'));
@@ -440,7 +440,7 @@ describe('SessionRegistry §4.6 case 3: an event from a session the terminal has
 
   it('cannot make a dead conversation say what the live one is doing', () => {
     // The reason the previous case is not simply "apply it to the same record".
-    // A `SessionEnd` still in flight from the session `/clear` replaced would
+    // A `ConversationEnded` still in flight from the session `/clear` replaced would
     // otherwise kill the session that replaced it.
     const { registry } = stand();
     registry.ingest(TERMINAL, sessionStart(NEXT_SESSION, 'clear'));
@@ -624,7 +624,7 @@ describe('SessionRegistry keeps the observed detail a person reads', () => {
   });
 
   it('says a tool is running without a name rather than naming the previous one', () => {
-    // `PreToolUse` without `tool_name` still means a tool started. Keeping the
+    // `ToolStarted` without `tool_name` still means a tool started. Keeping the
     // last one would put a finished tool on screen as the running one.
     const { registry } = stand();
     registry.ingest(TERMINAL, preToolUse(SESSION, 'Bash'));
@@ -632,13 +632,13 @@ describe('SessionRegistry keeps the observed detail a person reads', () => {
     expect(current(registry).observed.currentTool).toBeNull();
   });
 
-  it('keeps the last assistant message from Stop', () => {
+  it('keeps the last assistant message from TurnFinished', () => {
     const { registry } = stand();
     registry.ingest(TERMINAL, stop(SESSION, 'done, three files changed'));
     expect(current(registry).observed.lastAssistantMessage).toBe('done, three files changed');
   });
 
-  it('does not erase the last message when a Stop arrives without one', () => {
+  it('does not erase the last message when a TurnFinished arrives without one', () => {
     const { registry } = stand();
     registry.ingest(TERMINAL, stop(SESSION, 'done, three files changed'));
     registry.ingest(TERMINAL, stop(SESSION, null));

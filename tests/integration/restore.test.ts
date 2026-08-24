@@ -209,7 +209,7 @@ suite('bringing conversations back', () => {
        * proved not to be that step's doing by stashing every change of M3.5 and
        * watching a clean tree fail identically. Why `ended` and not
        * `resume_failed` was measured too, by instrumenting the lifecycle: a
-       * `SessionEnd` hook arrives BEFORE the editor reports the close, so by the
+       * `ConversationEnded` hook arrives BEFORE the editor reports the close, so by the
        * time `deathEvent` asked, the record was already at a witnessed end and
        * the exit code that would have made it `resume_failed` was never read.
        * The cost was stated here rather than left green: `resume_failed` is the
@@ -217,11 +217,11 @@ suite('bringing conversations back', () => {
        * path did not reach it.
        *
        * `resume_failed` (2026-08-20, A45 closed): the order was measured on CLI
-       * 2.1.233 with every hook name pointed at one sink -- `SessionEnd` at
+       * 2.1.233 with every hook name pointed at one sink -- `ConversationEnded` at
        * about 1.6 s carrying `reason: "other"`, which is also the value an
        * unrecognised one collapses into, and the exit at about 3.15 s with code
        * 1. Since the payload cannot tell this end from an ordinary one, the
-       * ORDER is all there is, and the state machine now refuses `SessionEnd`
+       * ORDER is all there is, and the state machine now refuses `ConversationEnded`
        * while a record is still `launching`: there and only there, "the CLI shut
        * down" and "the start got going" are different questions. So the exit
        * code arrives at a record that is still asking, and the offer to start
@@ -238,7 +238,7 @@ suite('bringing conversations back', () => {
       // the same assertion `resume-failed.test.ts` makes on its own path.
       //
       // Until 2026-08-20 this line said the OPPOSITE and was honest then: the
-      // record settled on the `SessionEnd` hook some 1.5 s before the process
+      // record settled on the `ConversationEnded` hook some 1.5 s before the process
       // exited, so the check ran while the pane was still up.
       assert.equal(
         gripterm.gateway.listKnown().some((one) => one.terminalId.value === RESTORED_TERMINAL),

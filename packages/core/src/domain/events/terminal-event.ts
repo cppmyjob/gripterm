@@ -6,28 +6,41 @@ import type { SessionId } from '../entities/session-id';
  *
  * The union has two halves, and the second one is not optional. Four of the
  * eleven states -- `ended`, `orphaned`, `degraded`, `resume_failed` -- are not
- * reached by any Claude Code hook: they follow from what the runner itself
+ * reached by anything an agent reports: they follow from what the runner itself
  * observes, and leaving them out would give the state machine an exhaustive
  * `switch` over an incomplete alphabet. That is worse than no `switch` at all,
  * because it reads as proof of completeness.
+ *
+ * **Every name here is a sentence about AN agent, not about one CLI.** The
+ * words a particular agent uses for these facts -- Claude Code's
+ * `hook_event_name`, whatever the next one turns out to send -- live under
+ * `domain/agents/<name>/`, together with the table that translates them
+ * (`hook-vocabulary.ts`). This file is what the state machine, the projection
+ * and the panel are allowed to know, and none of them can tell whose CLI is on
+ * the other end.
  */
-export type TerminalEvent = HookEvent | SyntheticEvent;
+export type TerminalEvent = AgentEvent | SyntheticEvent;
 
-/** Produced by Claude Code and delivered to the HTTP endpoint. */
-export type HookEvent =
-  | SessionStartEvent
-  | SessionEndEvent
-  | UserPromptSubmitEvent
-  | PreToolUseEvent
-  | PostToolUseEvent
-  | PostToolUseFailureEvent
-  | PermissionRequestEvent
-  | NotificationEvent
-  | StopEvent
-  | StopFailureEvent
-  | SubagentStartEvent
-  | SubagentStopEvent
-  | CwdChangedEvent;
+/**
+ * Reported by the agent itself and delivered to the HTTP endpoint.
+ *
+ * First-hand evidence, which is what makes these rank above anything the runner
+ * merely infers (see `TerminalStateMachine`).
+ */
+export type AgentEvent =
+  | ConversationStartedEvent
+  | ConversationEndedEvent
+  | PromptSubmittedEvent
+  | ToolStartedEvent
+  | ToolFinishedEvent
+  | ToolFailedEvent
+  | PermissionRequestedEvent
+  | AgentNotifiedEvent
+  | TurnFinishedEvent
+  | TurnFailedEvent
+  | SubagentStartedEvent
+  | SubagentFinishedEvent
+  | WorkingDirectoryChangedEvent;
 
 /** Produced by the runner from its own observation. */
 export type SyntheticEvent =
@@ -43,11 +56,23 @@ export type SyntheticEvent =
  * rather than failing the parse. A future build adding a seventh source must
  * not stop a terminal from being observed, and every source leads to the same
  * transition anyway. The raw payload is the ingest log's business.
+ *
+ * NOT YET NEUTRAL, and said here rather than left to be found: these six words
+ * are Claude Code's `source` values carried through unchanged. Nothing in this
+ * build branches on more than their presence, so they cost nothing today; the
+ * day a second agent arrives with its own list, the translator is where they
+ * become ours -- the same seam the event names have already crossed.
  */
-export type SessionStartSource = 'startup' | 'resume' | 'clear' | 'compact' | 'fork' | 'other';
+export type ConversationStartSource = 'startup' | 'resume' | 'clear' | 'compact' | 'fork' | 'other';
 
-/** From the payload field `reason` -- NOT `source`, which reads back undefined. */
-export type SessionEndReason =
+/**
+ * Why a conversation ended.
+ *
+ * NOT YET NEUTRAL, for the same reason and with the same remedy as
+ * `ConversationStartSource`. From the payload field `reason` -- NOT `source`,
+ * which reads back undefined.
+ */
+export type ConversationEndReason =
   | 'clear'
   | 'resume'
   | 'logout'
@@ -61,9 +86,13 @@ export type SessionEndReason =
  * A bare `permission_prompt` is NOT among them. The string exists in the
  * binary's pool, but never as a notification type -- the prefixed forms belong
  * to other subsystems. An earlier design waited for permission on this event;
- * that edge was dead, and `PermissionRequest` is the only reliable producer.
+ * that edge was dead, and `PermissionRequested` is the only reliable producer.
+ *
+ * NOT YET NEUTRAL, as above: three of these eleven decide a phase
+ * (`NOTIFICATION_PHASE` in the state machine) and the rest only prove the
+ * process is alive.
  */
-export type NotificationType =
+export type AgentNoticeType =
   | 'agent_completed'
   | 'agent_needs_input'
   | 'auth_success'
@@ -77,14 +106,14 @@ export type NotificationType =
   | 'other';
 
 /**
- * Fields every hook payload carries.
+ * Fields every agent report carries.
  *
  * `sessionId` is the only one that is required. It is what the registry
  * compares against the entry's own id to notice that `/clear` started a new
  * conversation -- the comparison is with `entry.sessionId`, never with the
  * terminal id in the URL, which would differ always rather than on drift.
  */
-export interface HookEventContext {
+export interface AgentEventContext {
   readonly sessionId: SessionId;
   readonly promptId: string | null;
   readonly cwd: string | null;
@@ -92,61 +121,61 @@ export interface HookEventContext {
   readonly transcriptPath: string | null;
 }
 
-export interface SessionStartEvent extends HookEventContext {
-  readonly kind: 'SessionStart';
-  readonly source: SessionStartSource;
+export interface ConversationStartedEvent extends AgentEventContext {
+  readonly kind: 'ConversationStarted';
+  readonly source: ConversationStartSource;
 }
 
-export interface SessionEndEvent extends HookEventContext {
-  readonly kind: 'SessionEnd';
-  readonly reason: SessionEndReason;
+export interface ConversationEndedEvent extends AgentEventContext {
+  readonly kind: 'ConversationEnded';
+  readonly reason: ConversationEndReason;
 }
 
-export interface UserPromptSubmitEvent extends HookEventContext {
-  readonly kind: 'UserPromptSubmit';
+export interface PromptSubmittedEvent extends AgentEventContext {
+  readonly kind: 'PromptSubmitted';
   readonly userInput: string | null;
 }
 
-export interface PreToolUseEvent extends HookEventContext {
-  readonly kind: 'PreToolUse';
+export interface ToolStartedEvent extends AgentEventContext {
+  readonly kind: 'ToolStarted';
   readonly toolName: string | null;
   readonly toolUseId: string | null;
 }
 
-export interface PostToolUseEvent extends HookEventContext {
-  readonly kind: 'PostToolUse';
+export interface ToolFinishedEvent extends AgentEventContext {
+  readonly kind: 'ToolFinished';
   readonly toolName: string | null;
   readonly toolUseId: string | null;
 }
 
-export interface PostToolUseFailureEvent extends HookEventContext {
-  readonly kind: 'PostToolUseFailure';
+export interface ToolFailedEvent extends AgentEventContext {
+  readonly kind: 'ToolFailed';
   readonly toolName: string | null;
   readonly toolUseId: string | null;
   readonly errorMessage: string | null;
 }
 
 /** The only reliable producer of `waiting_permission`. */
-export interface PermissionRequestEvent extends HookEventContext {
-  readonly kind: 'PermissionRequest';
+export interface PermissionRequestedEvent extends AgentEventContext {
+  readonly kind: 'PermissionRequested';
   readonly toolName: string | null;
   readonly permissionLevel: string | null;
 }
 
-export interface NotificationEvent extends HookEventContext {
-  readonly kind: 'Notification';
-  readonly notificationType: NotificationType;
+export interface AgentNotifiedEvent extends AgentEventContext {
+  readonly kind: 'AgentNotified';
+  readonly notificationType: AgentNoticeType;
   readonly message: string | null;
 }
 
-export interface StopEvent extends HookEventContext {
-  readonly kind: 'Stop';
+export interface TurnFinishedEvent extends AgentEventContext {
+  readonly kind: 'TurnFinished';
   /** From `last_assistant_message`, which the CLI provides precisely so that nobody parses a transcript. */
   readonly lastAssistantMessage: string | null;
 }
 
-export interface StopFailureEvent extends HookEventContext {
-  readonly kind: 'StopFailure';
+export interface TurnFailedEvent extends AgentEventContext {
+  readonly kind: 'TurnFailed';
   readonly errorType: string | null;
   readonly errorMessage: string | null;
 }
@@ -154,29 +183,30 @@ export interface StopFailureEvent extends HookEventContext {
 /**
  * A subagent the main agent started has begun.
  *
- * Registered because of what `Stop` turned out NOT to mean (customer, measured
- * 2026-08-21): the CLI runs Task subagents in the background, so the main
- * agent's turn ENDS the moment it has launched them -- `Stop` at 25.7 s while
- * two subagents ran until 109 s -- and a terminal that showed `idle` for those
- * eighty seconds was answering the wrong question. `agentId` is what makes the
- * pairing possible: the same run produced five `SubagentStop`s for ids nothing
- * ever started, so a counter would have gone to zero with the work still going.
+ * Registered because of what `TurnFinished` turned out NOT to mean (customer,
+ * measured 2026-08-21): the CLI runs Task subagents in the background, so the
+ * main agent's turn ENDS the moment it has launched them -- the turn reported
+ * finished at 25.7 s while two subagents ran until 109 s -- and a terminal that
+ * showed `idle` for those eighty seconds was answering the wrong question.
+ * `agentId` is what makes the pairing possible: the same run reported five
+ * subagents finishing for ids nothing ever started, so a counter would have
+ * gone to zero with the work still going.
  */
-export interface SubagentStartEvent extends HookEventContext {
-  readonly kind: 'SubagentStart';
+export interface SubagentStartedEvent extends AgentEventContext {
+  readonly kind: 'SubagentStarted';
   readonly agentId: string | null;
   readonly agentType: string | null;
 }
 
 /** One of those subagents has finished. Ignored unless it names one we saw start. */
-export interface SubagentStopEvent extends HookEventContext {
-  readonly kind: 'SubagentStop';
+export interface SubagentFinishedEvent extends AgentEventContext {
+  readonly kind: 'SubagentFinished';
   readonly agentId: string | null;
   readonly agentType: string | null;
 }
 
-export interface CwdChangedEvent extends HookEventContext {
-  readonly kind: 'CwdChanged';
+export interface WorkingDirectoryChangedEvent extends AgentEventContext {
+  readonly kind: 'WorkingDirectoryChanged';
   /** Field names measured on 2.1.225: `old_cwd` / `new_cwd`. `previous_cwd` occurs zero times in the binary. */
   readonly oldCwd: string | null;
   readonly newCwd: string | null;
@@ -213,25 +243,25 @@ export interface ResumeExitedNonZeroEvent {
   readonly exitCode: number;
 }
 
-const HOOK_EVENT_KINDS: ReadonlySet<string> = new Set<HookEvent['kind']>([
-  'SessionStart',
-  'SessionEnd',
-  'UserPromptSubmit',
-  'PreToolUse',
-  'PostToolUse',
-  'PostToolUseFailure',
-  'PermissionRequest',
-  'Notification',
-  'Stop',
-  'StopFailure',
-  'SubagentStart',
-  'SubagentStop',
-  'CwdChanged',
+const AGENT_EVENT_KINDS: ReadonlySet<string> = new Set<AgentEvent['kind']>([
+  'ConversationStarted',
+  'ConversationEnded',
+  'PromptSubmitted',
+  'ToolStarted',
+  'ToolFinished',
+  'ToolFailed',
+  'PermissionRequested',
+  'AgentNotified',
+  'TurnFinished',
+  'TurnFailed',
+  'SubagentStarted',
+  'SubagentFinished',
+  'WorkingDirectoryChanged',
 ]);
 
 /** True for events that carry a session id -- the ones the registry checks for drift. */
-export function isHookEvent(event: TerminalEvent): event is HookEvent {
-  return HOOK_EVENT_KINDS.has(event.kind);
+export function isAgentEvent(event: TerminalEvent): event is AgentEvent {
+  return AGENT_EVENT_KINDS.has(event.kind);
 }
 
 export function resumeTimedOut(): ResumeTimedOutEvent {
@@ -254,7 +284,7 @@ export function terminalClosed(): TerminalClosedEvent {
 }
 
 /**
- * A new terminal's `claude` exited with a non-zero code.
+ * A new terminal's agent process exited with a non-zero code.
  *
  * There are two events for a non-zero exit rather than one, and it is forced: a
  * fresh launch and a restore both sit in `launching`, yet they end in different

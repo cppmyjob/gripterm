@@ -8,7 +8,7 @@ import {
   projectObserved,
 } from '../../packages/core/src/index';
 import type {
-  HookEventContext,
+  AgentEventContext,
   ProjectedEvent,
   TerminalEvent,
 } from '../../packages/core/src/index';
@@ -33,7 +33,7 @@ const OTHER_SESSION = SessionId.fromString(NEXT_SESSION_UUID);
 const START = new Date('2026-08-11T12:00:00.000Z');
 const MINUTE_MS = 60_000;
 
-const CONTEXT: Omit<HookEventContext, 'sessionId'> = {
+const CONTEXT: Omit<AgentEventContext, 'sessionId'> = {
   promptId: null,
   cwd: null,
   transcriptPath: null,
@@ -69,10 +69,10 @@ function project(...events: readonly ProjectedEvent[]): ReturnType<typeof projec
  * The customer's fifth complaint, replayed from the measurement that explains
  * it (2026-08-21, a real CLI with all thirty-one hooks registered):
  *
- *   17.77  SubagentStart a0f2   19.22  SubagentStart a1e4
- *   25.69  Stop                 <- the main agent, done launching them
- *   85.71  Notification idle_prompt
- *  107.42  SubagentStop  a1e4  109.18  SubagentStop a0f2
+ *   17.77  SubagentStarted a0f2   19.22  SubagentStarted a1e4
+ *   25.69  TurnFinished                 <- the main agent, done launching them
+ *   85.71  AgentNotified idle_prompt
+ *  107.42  SubagentFinished  a1e4  109.18  SubagentFinished a0f2
  *
  * Read as this build read it before that day, the terminal was idle from 25.69
  * -- a green tick over eighty seconds of work.
@@ -81,23 +81,23 @@ describe('a turn whose subagents outlive it', () => {
   const ONE = 'a0f2051a530b4c7a2';
   const TWO = 'a1e499b3f0c990cc8';
 
-  function subagent(kind: 'SubagentStart' | 'SubagentStop', agentId: string, minute: number): ProjectedEvent {
+  function subagent(kind: 'SubagentStarted' | 'SubagentFinished', agentId: string, minute: number): ProjectedEvent {
     return moment({ kind, sessionId: SESSION, agentId, agentType: 'general-purpose', ...CONTEXT }, minute);
   }
 
   it('is working while its subagents are, and idle only when the last of them is done', () => {
-    const prompt = moment({ kind: 'UserPromptSubmit', sessionId: SESSION, userInput: 'go', ...CONTEXT }, 1);
-    const started = [subagent('SubagentStart', ONE, 2), subagent('SubagentStart', TWO, 3)];
-    const stopped = moment({ kind: 'Stop', sessionId: SESSION, lastAssistantMessage: 'they are running', ...CONTEXT }, 4);
+    const prompt = moment({ kind: 'PromptSubmitted', sessionId: SESSION, userInput: 'go', ...CONTEXT }, 1);
+    const started = [subagent('SubagentStarted', ONE, 2), subagent('SubagentStarted', TWO, 3)];
+    const stopped = moment({ kind: 'TurnFinished', sessionId: SESSION, lastAssistantMessage: 'they are running', ...CONTEXT }, 4);
     const idlePrompt = moment(
-      { kind: 'Notification', sessionId: SESSION, notificationType: 'idle_prompt', message: 'waiting', ...CONTEXT },
+      { kind: 'AgentNotified', sessionId: SESSION, notificationType: 'idle_prompt', message: 'waiting', ...CONTEXT },
       5
     );
 
     expect(project(prompt, ...started, stopped).observed.state).toBe('working');
     expect(project(prompt, ...started, stopped, idlePrompt).observed.state).toBe('working');
     expect(
-      project(prompt, ...started, stopped, idlePrompt, subagent('SubagentStop', TWO, 6)).observed.state
+      project(prompt, ...started, stopped, idlePrompt, subagent('SubagentFinished', TWO, 6)).observed.state
     ).toBe('working');
     expect(
       project(
@@ -105,30 +105,30 @@ describe('a turn whose subagents outlive it', () => {
         ...started,
         stopped,
         idlePrompt,
-        subagent('SubagentStop', TWO, 6),
-        subagent('SubagentStop', ONE, 7)
+        subagent('SubagentFinished', TWO, 6),
+        subagent('SubagentFinished', ONE, 7)
       ).observed.state
     ).toBe('idle');
   });
 
   it('keeps the names of what is running, and drops them as they finish', () => {
     const running = project(
-      moment({ kind: 'UserPromptSubmit', sessionId: SESSION, userInput: 'go', ...CONTEXT }, 1),
-      subagent('SubagentStart', ONE, 2),
-      subagent('SubagentStart', TWO, 3)
+      moment({ kind: 'PromptSubmitted', sessionId: SESSION, userInput: 'go', ...CONTEXT }, 1),
+      subagent('SubagentStarted', ONE, 2),
+      subagent('SubagentStarted', TWO, 3)
     ).observed.running;
 
     expect([...running]).toStrictEqual(['main', ONE, TWO]);
   });
 
   it('ignores a subagent finishing that nobody saw start', () => {
-    // Measured in the same run: five `SubagentStop`s named ids that had never
+    // Measured in the same run: five `SubagentFinished`s named ids that had never
     // been started. A count would have reached zero with the work still going.
     const projection = project(
-      moment({ kind: 'UserPromptSubmit', sessionId: SESSION, userInput: 'go', ...CONTEXT }, 1),
-      subagent('SubagentStart', ONE, 2),
-      subagent('SubagentStop', 'a463b3e885b0d0335', 3),
-      moment({ kind: 'Stop', sessionId: SESSION, lastAssistantMessage: null, ...CONTEXT }, 4)
+      moment({ kind: 'PromptSubmitted', sessionId: SESSION, userInput: 'go', ...CONTEXT }, 1),
+      subagent('SubagentStarted', ONE, 2),
+      subagent('SubagentFinished', 'a463b3e885b0d0335', 3),
+      moment({ kind: 'TurnFinished', sessionId: SESSION, lastAssistantMessage: null, ...CONTEXT }, 4)
     );
 
     expect([...projection.observed.running]).toStrictEqual([ONE]);
@@ -137,9 +137,9 @@ describe('a turn whose subagents outlive it', () => {
 
   it('forgets everything that was running when the conversation starts again', () => {
     const projection = project(
-      moment({ kind: 'UserPromptSubmit', sessionId: SESSION, userInput: 'go', ...CONTEXT }, 1),
-      subagent('SubagentStart', ONE, 2),
-      moment({ kind: 'SessionStart', sessionId: SESSION, source: 'clear', ...CONTEXT }, 3)
+      moment({ kind: 'PromptSubmitted', sessionId: SESSION, userInput: 'go', ...CONTEXT }, 1),
+      subagent('SubagentStarted', ONE, 2),
+      moment({ kind: 'ConversationStarted', sessionId: SESSION, source: 'clear', ...CONTEXT }, 3)
     );
 
     expect([...projection.observed.running]).toStrictEqual([]);
@@ -173,10 +173,10 @@ describe('folding a history back into a state', () => {
 
   it('ends where the last event left the terminal', async () => {
     const projection = project(
-      moment({ kind: 'SessionStart', sessionId: SESSION, source: 'startup', ...CONTEXT }, 0),
-      moment({ kind: 'UserPromptSubmit', sessionId: SESSION, userInput: 'go on', ...CONTEXT }, 1),
+      moment({ kind: 'ConversationStarted', sessionId: SESSION, source: 'startup', ...CONTEXT }, 0),
+      moment({ kind: 'PromptSubmitted', sessionId: SESSION, userInput: 'go on', ...CONTEXT }, 1),
       moment(
-        { kind: 'PreToolUse', sessionId: SESSION, toolName: 'Bash', toolUseId: 't1', ...CONTEXT },
+        { kind: 'ToolStarted', sessionId: SESSION, toolName: 'Bash', toolUseId: 't1', ...CONTEXT },
         2
       )
     );
@@ -191,7 +191,7 @@ describe('folding a history back into a state', () => {
     // rebuild that stamped `now` would report a terminal as having spoken a
     // moment ago, and every reconciler downstream reads that field as evidence.
     const projection = project(
-      moment({ kind: 'Stop', sessionId: SESSION, lastAssistantMessage: 'done', ...CONTEXT }, 7)
+      moment({ kind: 'TurnFinished', sessionId: SESSION, lastAssistantMessage: 'done', ...CONTEXT }, 7)
     );
 
     expect(projection.observed.lastEventAt).toStrictEqual(at(7));
@@ -199,9 +199,9 @@ describe('folding a history back into a state', () => {
 
   it('keeps the last thing the assistant said, and forgets it on a new conversation', async () => {
     const projection = project(
-      moment({ kind: 'Stop', sessionId: SESSION, lastAssistantMessage: 'done', ...CONTEXT }, 1),
+      moment({ kind: 'TurnFinished', sessionId: SESSION, lastAssistantMessage: 'done', ...CONTEXT }, 1),
       moment(
-        { kind: 'SessionStart', sessionId: OTHER_SESSION, source: 'clear', ...CONTEXT },
+        { kind: 'ConversationStarted', sessionId: OTHER_SESSION, source: 'clear', ...CONTEXT },
         2
       )
     );
@@ -227,7 +227,7 @@ describe('folding a history back into a state', () => {
       from,
       sessionId: SESSION,
       events: [
-        moment({ kind: 'UserPromptSubmit', sessionId: SESSION, userInput: 'x', ...CONTEXT }, 1),
+        moment({ kind: 'PromptSubmitted', sessionId: SESSION, userInput: 'x', ...CONTEXT }, 1),
       ],
       machine,
     });
@@ -240,22 +240,22 @@ describe('folding a history back into a state', () => {
 
 describe('a history with more than one conversation in it', () => {
   it('does not apply an event from a conversation the terminal was not having', async () => {
-    // §4.6, case 2, met on the replay path: a `SessionEnd` still in flight from
+    // §4.6, case 2, met on the replay path: a `ConversationEnded` still in flight from
     // the session `/clear` replaced would otherwise kill the session that
     // replaced it -- an hour later, out of a file.
     const projection = project(
-      moment({ kind: 'UserPromptSubmit', sessionId: SESSION, userInput: 'go', ...CONTEXT }, 1),
-      moment({ kind: 'SessionEnd', sessionId: OTHER_SESSION, reason: 'clear', ...CONTEXT }, 2)
+      moment({ kind: 'PromptSubmitted', sessionId: SESSION, userInput: 'go', ...CONTEXT }, 1),
+      moment({ kind: 'ConversationEnded', sessionId: OTHER_SESSION, reason: 'clear', ...CONTEXT }, 2)
     );
 
     expect(projection.observed.state).toBe('working');
     expect(projection).toMatchObject({ applied: 1, foreign: 1 });
   });
 
-  it('follows the conversation a SessionStart announces, and applies what comes after it', async () => {
+  it('follows the conversation a ConversationStarted announces, and applies what comes after it', async () => {
     const projection = project(
-      moment({ kind: 'SessionStart', sessionId: OTHER_SESSION, source: 'clear', ...CONTEXT }, 1),
-      moment({ kind: 'UserPromptSubmit', sessionId: OTHER_SESSION, userInput: 'go', ...CONTEXT }, 2)
+      moment({ kind: 'ConversationStarted', sessionId: OTHER_SESSION, source: 'clear', ...CONTEXT }, 1),
+      moment({ kind: 'PromptSubmitted', sessionId: OTHER_SESSION, userInput: 'go', ...CONTEXT }, 2)
     );
 
     expect(projection.observed.state).toBe('working');
@@ -321,14 +321,14 @@ describe('a history the state machine refuses', () => {
     // A hook that arrives after a witnessed end is dropped, and dropping it must
     // leave `lastEventAt` alone: a record whose clock moved for events it
     // refused makes "nothing has happened here for ten minutes" unreadable.
-    // The history begins with the beginning on purpose. Since A45 a `SessionEnd`
+    // The history begins with the beginning on purpose. Since A45 a `ConversationEnded`
     // is refused while the record is still `launching` -- the CLI shutting down
     // says nothing about whether the start got going -- so a witnessed end is
     // now reached the way a real conversation reaches it: it started first.
     const projection = project(
-      moment({ kind: 'SessionStart', sessionId: SESSION, source: 'startup', ...CONTEXT }, 0),
-      moment({ kind: 'SessionEnd', sessionId: SESSION, reason: 'logout', ...CONTEXT }, 1),
-      moment({ kind: 'PostToolUse', sessionId: SESSION, toolName: 'Bash', toolUseId: 't', ...CONTEXT }, 5)
+      moment({ kind: 'ConversationStarted', sessionId: SESSION, source: 'startup', ...CONTEXT }, 0),
+      moment({ kind: 'ConversationEnded', sessionId: SESSION, reason: 'logout', ...CONTEXT }, 1),
+      moment({ kind: 'ToolFinished', sessionId: SESSION, toolName: 'Bash', toolUseId: 't', ...CONTEXT }, 5)
     );
 
     expect(projection.observed.state).toBe('ended');

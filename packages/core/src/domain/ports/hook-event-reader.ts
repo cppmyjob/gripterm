@@ -1,4 +1,4 @@
-import type { HookEvent } from '../events/terminal-event';
+import type { AgentEvent } from '../events/terminal-event';
 
 /**
  * The outcome of reading one HTTP body.
@@ -16,7 +16,7 @@ import type { HookEvent } from '../events/terminal-event';
  * so it cannot name the parser's module even for a type.
  */
 export type HookEventParseResult =
-  | { readonly status: 'parsed', readonly event: HookEvent }
+  | { readonly status: 'parsed', readonly event: AgentEvent }
   | { readonly status: 'ignored', readonly hookEventName: string }
   | { readonly status: 'malformed', readonly reason: string };
 

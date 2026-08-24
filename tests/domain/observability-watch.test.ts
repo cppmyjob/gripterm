@@ -269,8 +269,8 @@ describe('a terminal whose record the person deleted', () => {
  * timer settles on a terminal's first event and never arms again, so a terminal
  * that goes wrong an hour later was watched by nobody.
  *
- * That hour-later failure is exactly M2.8's: `/clear` sends `SessionEnd` over
- * HTTP and `SessionStart` through the command forwarder (H1), so a forwarder
+ * That hour-later failure is exactly M2.8's: `/clear` sends `ConversationEnded` over
+ * HTTP and `ConversationStarted` through the command forwarder (H1), so a forwarder
  * that did not run leaves the record at a witnessed end while the person carries
  * on typing -- and every event of the new conversation is refused as belonging
  * to a session this terminal never had. The row says "ended" while the terminal

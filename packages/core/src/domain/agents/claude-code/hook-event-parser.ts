@@ -1,15 +1,16 @@
+import { DOMAIN_EVENT_OF_HOOK } from './hook-vocabulary';
 import { SessionId } from '../../entities/session-id';
 import { isGriptermError } from '../../errors/gripterm-error';
 import type {
-  HookEvent,
-  HookEventContext,
-  NotificationType,
-  SessionEndReason,
-  SessionStartSource,
+  AgentEvent,
+  AgentEventContext,
+  AgentNoticeType,
+  ConversationEndReason,
+  ConversationStartSource,
 } from '../../events/terminal-event';
 import type { HookEventParseResult, HookEventReader } from '../../ports/hook-event-reader';
 
-const SESSION_START_SOURCES: ReadonlySet<string> = new Set<SessionStartSource>([
+const SESSION_START_SOURCES: ReadonlySet<string> = new Set<ConversationStartSource>([
   'startup',
   'resume',
   'clear',
@@ -18,7 +19,7 @@ const SESSION_START_SOURCES: ReadonlySet<string> = new Set<SessionStartSource>([
   'other',
 ]);
 
-const SESSION_END_REASONS: ReadonlySet<string> = new Set<SessionEndReason>([
+const SESSION_END_REASONS: ReadonlySet<string> = new Set<ConversationEndReason>([
   'clear',
   'resume',
   'logout',
@@ -27,7 +28,7 @@ const SESSION_END_REASONS: ReadonlySet<string> = new Set<SessionEndReason>([
   'other',
 ]);
 
-const NOTIFICATION_TYPES: ReadonlySet<string> = new Set<NotificationType>([
+const NOTIFICATION_TYPES: ReadonlySet<string> = new Set<AgentNoticeType>([
   'agent_completed',
   'agent_needs_input',
   'auth_success',
@@ -42,7 +43,14 @@ const NOTIFICATION_TYPES: ReadonlySet<string> = new Set<NotificationType>([
 ]);
 
 /**
- * Turns a hook payload into a `HookEvent`.
+ * The translator: one Claude Code hook payload becomes one `AgentEvent`.
+ *
+ * This class IS the seam between the two vocabularies. It switches on the words
+ * Claude Code sends (`hook_event_name`, an external format) and hands back the
+ * words the domain speaks, taken from `DOMAIN_EVENT_OF_HOOK` so that the two
+ * columns cannot drift apart in two files. Nothing downstream of here -- not
+ * the state machine, not the projection, not the panel -- can tell whose CLI
+ * this was.
  *
  * Two rules run through the whole class, and both exist because this parser
  * sits on an HTTP endpoint that anything on the loopback interface can reach,
@@ -100,7 +108,7 @@ export class HookEventParser implements HookEventReader {
       case 'SessionStart':
         return parsed({
           ...context,
-          kind: 'SessionStart',
+          kind: DOMAIN_EVENT_OF_HOOK.SessionStart,
           source: narrow(readToken(payload, 'source'), SESSION_START_SOURCES, 'other'),
         });
 
@@ -109,21 +117,21 @@ export class HookEventParser implements HookEventReader {
         // silence, which is how the mistake survived a whole design round.
         return parsed({
           ...context,
-          kind: 'SessionEnd',
+          kind: DOMAIN_EVENT_OF_HOOK.SessionEnd,
           reason: narrow(readToken(payload, 'reason'), SESSION_END_REASONS, 'other'),
         });
 
       case 'UserPromptSubmit':
         return parsed({
           ...context,
-          kind: 'UserPromptSubmit',
+          kind: DOMAIN_EVENT_OF_HOOK.UserPromptSubmit,
           userInput: readString(payload, 'user_input'),
         });
 
       case 'PreToolUse':
         return parsed({
           ...context,
-          kind: 'PreToolUse',
+          kind: DOMAIN_EVENT_OF_HOOK.PreToolUse,
           toolName: readToken(payload, 'tool_name'),
           toolUseId: readToken(payload, 'tool_use_id'),
         });
@@ -131,7 +139,7 @@ export class HookEventParser implements HookEventReader {
       case 'PostToolUse':
         return parsed({
           ...context,
-          kind: 'PostToolUse',
+          kind: DOMAIN_EVENT_OF_HOOK.PostToolUse,
           toolName: readToken(payload, 'tool_name'),
           toolUseId: readToken(payload, 'tool_use_id'),
         });
@@ -139,7 +147,7 @@ export class HookEventParser implements HookEventReader {
       case 'PostToolUseFailure':
         return parsed({
           ...context,
-          kind: 'PostToolUseFailure',
+          kind: DOMAIN_EVENT_OF_HOOK.PostToolUseFailure,
           toolName: readToken(payload, 'tool_name'),
           toolUseId: readToken(payload, 'tool_use_id'),
           errorMessage: readString(payload, 'error_message'),
@@ -148,7 +156,7 @@ export class HookEventParser implements HookEventReader {
       case 'PermissionRequest':
         return parsed({
           ...context,
-          kind: 'PermissionRequest',
+          kind: DOMAIN_EVENT_OF_HOOK.PermissionRequest,
           toolName: readToken(payload, 'tool_name'),
           permissionLevel: readToken(payload, 'permission_level'),
         });
@@ -156,7 +164,7 @@ export class HookEventParser implements HookEventReader {
       case 'Notification':
         return parsed({
           ...context,
-          kind: 'Notification',
+          kind: DOMAIN_EVENT_OF_HOOK.Notification,
           notificationType: narrow(
             readToken(payload, 'notification_type'),
             NOTIFICATION_TYPES,
@@ -168,14 +176,14 @@ export class HookEventParser implements HookEventReader {
       case 'Stop':
         return parsed({
           ...context,
-          kind: 'Stop',
+          kind: DOMAIN_EVENT_OF_HOOK.Stop,
           lastAssistantMessage: readString(payload, 'last_assistant_message'),
         });
 
       case 'SubagentStart':
         return parsed({
           ...context,
-          kind: 'SubagentStart',
+          kind: DOMAIN_EVENT_OF_HOOK.SubagentStart,
           agentId: readToken(payload, 'agent_id'),
           agentType: readToken(payload, 'agent_type'),
         });
@@ -183,7 +191,7 @@ export class HookEventParser implements HookEventReader {
       case 'SubagentStop':
         return parsed({
           ...context,
-          kind: 'SubagentStop',
+          kind: DOMAIN_EVENT_OF_HOOK.SubagentStop,
           agentId: readToken(payload, 'agent_id'),
           agentType: readToken(payload, 'agent_type'),
         });
@@ -191,7 +199,7 @@ export class HookEventParser implements HookEventReader {
       case 'StopFailure':
         return parsed({
           ...context,
-          kind: 'StopFailure',
+          kind: DOMAIN_EVENT_OF_HOOK.StopFailure,
           errorType: readToken(payload, 'error_type'),
           errorMessage: readString(payload, 'error_message'),
         });
@@ -199,7 +207,7 @@ export class HookEventParser implements HookEventReader {
       case 'CwdChanged':
         return parsed({
           ...context,
-          kind: 'CwdChanged',
+          kind: DOMAIN_EVENT_OF_HOOK.CwdChanged,
           oldCwd: readString(payload, 'old_cwd'),
           newCwd: readString(payload, 'new_cwd'),
         });
@@ -209,7 +217,7 @@ export class HookEventParser implements HookEventReader {
     }
   }
 
-  private _readContext(payload: Record<string, unknown>): HookEventContext | null {
+  private _readContext(payload: Record<string, unknown>): AgentEventContext | null {
     const rawSessionId = readToken(payload, 'session_id');
     if (rawSessionId === null) {
       return null;
@@ -233,7 +241,7 @@ export class HookEventParser implements HookEventReader {
   }
 }
 
-function parsed(event: HookEvent): HookEventParseResult {
+function parsed(event: AgentEvent): HookEventParseResult {
   return { status: 'parsed', event: Object.freeze(event) };
 }
 

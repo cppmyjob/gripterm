@@ -302,7 +302,7 @@ suite('the launch pipeline', () => {
 
   test('ships the hook forwarder inside the installation', async () => {
     // The one failure this catches is ours: a packaging change that drops
-    // `assets/`. It would cost every terminal its `SessionStart` -- silently,
+    // `assets/`. It would cost every terminal its `ConversationStarted` -- silently,
     // because a failed hook is non-blocking.
     const { readiness } = await api();
 

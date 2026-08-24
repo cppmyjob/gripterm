@@ -21,11 +21,11 @@ import type { RegistryChange } from '../../packages/core/src/index';
  * Measured on 2.1.228: exit code 1 after 1178 ms under the editor's own pty.
  *
  * A26 NO LONGER HOLDS on 2.1.233 (measured 2026-08-20, A45, real pty): the
- * absent conversation prints "No conversation found", sends `SessionEnd` at
+ * absent conversation prints "No conversation found", sends `ConversationEnded` at
  * about 1.6 s and exits with code 1 at about 3.15 s. The scenario here is kept
  * as it is anyway -- it is a DIFFERENT refusal, made before a session exists at
  * all, and this suite is the only place it is exercised. What the newer
- * measurement changes is the state machine, not this file: a `SessionEnd`
+ * measurement changes is the state machine, not this file: a `ConversationEnded`
  * arriving while the record is still `launching` no longer settles it, or the
  * exit code would find a record that is already dead.
  *

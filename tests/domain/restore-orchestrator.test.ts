@@ -230,7 +230,7 @@ function planFor(...entries: readonly TerminalEntry[]): RestorePlan {
 /** A hook arriving from the resumed conversation. */
 function announce(stand_: Stand, entry: TerminalEntry, source: 'resume' | 'startup' = 'resume'): void {
   stand_.registry.ingest(entry.terminalId, {
-    kind: 'SessionStart',
+    kind: 'ConversationStarted',
     sessionId: entry.sessionId,
     source,
     promptId: null,
@@ -246,7 +246,7 @@ function announce(stand_: Stand, entry: TerminalEntry, source: 'resume' | 'start
  */
 function announceAnother(stand_: Stand, entry: TerminalEntry, sessionId: SessionId): void {
   stand_.registry.ingest(entry.terminalId, {
-    kind: 'SessionStart',
+    kind: 'ConversationStarted',
     sessionId,
     source: 'startup',
     promptId: null,
@@ -567,8 +567,8 @@ describe('a restored terminal that answers', () => {
     expect(here.scheduler.live).toStrictEqual([]);
   });
 
-  it('is shown on ANY event, not on SessionStart alone', async () => {
-    // On a machine with no `node` the `SessionStart` forwarder does not exist
+  it('is shown on ANY event, not on ConversationStarted alone', async () => {
+    // On a machine with no `node` the `ConversationStarted` forwarder does not exist
     // (H1), so insisting on that one event would leave a perfectly good
     // conversation hidden for ever. A notification that names no phase is still
     // proof that the channel is there.
@@ -577,7 +577,7 @@ describe('a restored terminal that answers', () => {
     await here.orchestrator.run(planFor(entry));
 
     here.registry.ingest(entry.terminalId, {
-      kind: 'Notification',
+      kind: 'AgentNotified',
       notificationType: 'auth_success',
       message: null,
       sessionId: entry.sessionId,
@@ -596,7 +596,7 @@ describe('a restored terminal that answers', () => {
 
     announce(here, entry);
     here.registry.ingest(entry.terminalId, {
-      kind: 'Stop',
+      kind: 'TurnFinished',
       lastAssistantMessage: 'done',
       sessionId: entry.sessionId,
       promptId: null,
@@ -927,7 +927,7 @@ describe('an event about a terminal no restore is waiting for', () => {
       recipe: makeEntry().launch,
     });
     here.registry.ingest(other.terminalId, {
-      kind: 'Stop',
+      kind: 'TurnFinished',
       lastAssistantMessage: null,
       sessionId: other.sessionId,
       promptId: null,

@@ -1,5 +1,11 @@
-/** Where a name comes from when the person has not given one yet. */
-const FALLBACK = 'claude';
+/**
+ * Where a name comes from when the person has not given one yet.
+ *
+ * A word about the ROLE and not about one product: this row could be running
+ * Claude Code or the next agent along, and the list would read the same either
+ * way. Only a terminal whose cwd names no folder ever gets it.
+ */
+const FALLBACK = 'agent';
 
 /** Both separators, always. A Windows path reaches us through settings and through the editor, and only one of the two forms is native. */
 const SEPARATORS = /[/\\]+/u;

@@ -547,7 +547,7 @@ describe('the pid of the process the editor started', () => {
 
     const entry = await lifecycle.launch(request());
     registry.ingest(entry.terminalId, {
-      kind: 'SessionStart',
+      kind: 'ConversationStarted',
       sessionId: entry.sessionId,
       source: 'startup',
       promptId: null,
@@ -838,7 +838,7 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
     // A45, measured 2026-08-20 against CLI 2.1.233 under a real pty:
     // `claude --resume <a conversation that is not there>` prints "No
     // conversation found with session ID: ...", sends exactly ONE hook --
-    // `SessionEnd` with `reason: "other"` -- at about 1.6 s, and exits with
+    // `ConversationEnded` with `reason: "other"` -- at about 1.6 s, and exits with
     // code 1 at about 3.15 s. So the CLI's announcement of its own shutdown
     // arrives FIRST and the only evidence about the restore arrives second.
     //
@@ -1111,7 +1111,7 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
     const { lifecycle, registry, gateway, logger } = stand();
     const entry = await lifecycle.launch(request());
     registry.ingest(entry.terminalId, {
-      kind: 'Stop',
+      kind: 'TurnFinished',
       sessionId: entry.sessionId,
       lastAssistantMessage: null,
       promptId: null,

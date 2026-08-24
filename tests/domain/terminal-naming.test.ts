@@ -26,14 +26,15 @@ describe('defaultTerminalName names a terminal after its folder', () => {
 
   it('falls back rather than naming a terminal after a drive', () => {
     // `D:` in the list reads as a mistake, because it is one: there is no folder
-    // there to be named after.
-    expect(defaultTerminalName('D:\\', [])).toBe('claude');
-    expect(defaultTerminalName('C:', [])).toBe('claude');
+    // there to be named after. The fallback names the ROLE and not a product:
+    // this row could be running any agent (M4.1a).
+    expect(defaultTerminalName('D:\\', [])).toBe('agent');
+    expect(defaultTerminalName('C:', [])).toBe('agent');
   });
 
   it('falls back when there is no path at all', () => {
-    expect(defaultTerminalName('', [])).toBe('claude');
-    expect(defaultTerminalName('/', [])).toBe('claude');
+    expect(defaultTerminalName('', [])).toBe('agent');
+    expect(defaultTerminalName('/', [])).toBe('agent');
   });
 });
 

@@ -1,4 +1,4 @@
-import { LaunchError, exitVerdict, terminalEnvironment } from '@gripterm/core';
+import { LaunchError, exitVerdict, ideChannelEnv, terminalEnvironment } from '@gripterm/core';
 import type { IPty } from 'node-pty';
 import type {
   Disposable,
@@ -155,7 +155,11 @@ export class PtyTerminalGateway implements TerminalGateway, Disposable {
       host: process.env,
       delta: spec.env,
       editor: this._editor,
-      ideChannel: this._ideChannel,
+      // The one Claude-Code-specific name in the block, and it is composed
+      // HERE rather than inside the rule: `terminalEnvironment` takes an
+      // opaque `agentEnv` so that it stays a rule about environments
+      // rather than a rule about one CLI (M4.1a).
+      agentEnv: ideChannelEnv(this._ideChannel),
       // Windows does not tell `Path` from `PATH`; Unix does. An argument rather
       // than a check inside the rule, because the rule lives in the core and the
       // platform does not.

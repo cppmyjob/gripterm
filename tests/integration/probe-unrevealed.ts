@@ -8,7 +8,7 @@ import * as vscode from 'vscode';
  *
  * **The owner's store, 2026-08-23, after they closed Cursor and opened it
  * again.** Three records were restored. One of them -- the one whose tab was in
- * front -- has a pid and sent `SessionStart`. The other two have `pid: null`,
+ * front -- has a pid and sent `ConversationStarted`. The other two have `pid: null`,
  * no events at all, and their conversations' transcripts were never touched.
  * On screen they were empty terminals, and twenty seconds later the list said
  * "state unknown" about them.

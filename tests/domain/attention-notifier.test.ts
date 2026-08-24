@@ -17,7 +17,7 @@ import {
   terminalClosed,
   type AttentionPresenter,
   type AttentionRequest,
-  type HookEventContext,
+  type AgentEventContext,
   type PersistedTerminalState,
 } from '../../packages/core/src/index';
 import { OBSERVED_AT, SESSION_UUID, TERMINAL_UUID, makeEntry } from '../helpers/domain-fixtures';
@@ -27,7 +27,7 @@ import { FixedClock, RecordingLogger } from '../helpers/port-fakes';
  * Every case here is driven through the REGISTRY and the real state machine,
  * never by handing the notifier a transition. That is the point the plan makes
  * about the `waiting_permission → working → waiting_permission` pair: without
- * the absolute `PostToolUse → working` edge (§4.3), a hand-fed test is green on
+ * the absolute `ToolFinished → working` edge (§4.3), a hand-fed test is green on
  * a mock and false on the system.
  *
  * A toast is the one thing this extension does that a person cannot ignore, so
@@ -38,7 +38,7 @@ const TERMINAL = TerminalId.fromString(TERMINAL_UUID);
 const OTHER_TERMINAL = TerminalId.fromString('11111111-2222-4333-8444-555555555555');
 const SESSION = SessionId.fromString(SESSION_UUID);
 
-const CONTEXT: Omit<HookEventContext, 'sessionId'> = {
+const CONTEXT: Omit<AgentEventContext, 'sessionId'> = {
   promptId: null,
   cwd: null,
   transcriptPath: null,
@@ -88,15 +88,15 @@ function stand(state: PersistedTerminalState = 'idle', signals?: readonly string
 }
 
 function permissionRequest(): Parameters<SessionRegistry['ingest']>[1] {
-  return { kind: 'PermissionRequest', sessionId: SESSION, toolName: 'Bash', permissionLevel: 'ask', ...CONTEXT };
+  return { kind: 'PermissionRequested', sessionId: SESSION, toolName: 'Bash', permissionLevel: 'ask', ...CONTEXT };
 }
 
 function postToolUse(): Parameters<SessionRegistry['ingest']>[1] {
-  return { kind: 'PostToolUse', sessionId: SESSION, toolName: 'Bash', toolUseId: 'tu-1', ...CONTEXT };
+  return { kind: 'ToolFinished', sessionId: SESSION, toolName: 'Bash', toolUseId: 'tu-1', ...CONTEXT };
 }
 
 function stop(): Parameters<SessionRegistry['ingest']>[1] {
-  return { kind: 'Stop', sessionId: SESSION, lastAssistantMessage: null, ...CONTEXT };
+  return { kind: 'TurnFinished', sessionId: SESSION, lastAssistantMessage: null, ...CONTEXT };
 }
 
 describe('AttentionNotifier interrupts on entering a state, and not otherwise', () => {
@@ -109,7 +109,7 @@ describe('AttentionNotifier interrupts on entering a state, and not otherwise', 
   });
 
   it('shows one toast per ENTRY into a blocking state', () => {
-    // The pair comes from the machine: `PostToolUse` is an absolute edge to
+    // The pair comes from the machine: `ToolFinished` is an absolute edge to
     // `working`, which is the only way back out of `waiting_permission`.
     const { registry, presenter } = stand('idle');
 

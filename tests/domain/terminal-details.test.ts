@@ -288,29 +288,42 @@ describe('the history is shown as what it is, holes included', () => {
   it('turns every event this build has into words of its own', () => {
     const context = hookContext();
     const events: readonly TerminalEvent[] = [
-      { ...context, kind: 'SessionStart', source: 'resume' },
-      { ...context, kind: 'SessionEnd', reason: 'clear' },
-      { ...context, kind: 'UserPromptSubmit', userInput: null },
-      { ...context, kind: 'PreToolUse', toolName: 'Bash', toolUseId: null },
-      { ...context, kind: 'PostToolUse', toolName: 'Bash', toolUseId: null },
+      { ...context, kind: 'ConversationStarted', source: 'resume' },
+      { ...context, kind: 'ConversationEnded', reason: 'clear' },
+      { ...context, kind: 'PromptSubmitted', userInput: null },
+      { ...context, kind: 'ToolStarted', toolName: 'Bash', toolUseId: null },
+      { ...context, kind: 'ToolFinished', toolName: 'Bash', toolUseId: null },
       {
         ...context,
-        kind: 'PostToolUseFailure',
+        kind: 'ToolFailed',
         toolName: 'Bash',
         toolUseId: null,
         errorMessage: null,
       },
-      { ...context, kind: 'PermissionRequest', toolName: 'Bash', permissionLevel: null },
-      { ...context, kind: 'Notification', notificationType: 'idle_prompt', message: null },
-      { ...context, kind: 'Stop', lastAssistantMessage: null },
-      { ...context, kind: 'StopFailure', errorType: 'overloaded', errorMessage: null },
-      { ...context, kind: 'CwdChanged', oldCwd: null, newCwd: 'D:/Projects/bar' },
+      { ...context, kind: 'PermissionRequested', toolName: 'Bash', permissionLevel: null },
+      { ...context, kind: 'AgentNotified', notificationType: 'idle_prompt', message: null },
+      { ...context, kind: 'TurnFinished', lastAssistantMessage: null },
+      { ...context, kind: 'TurnFailed', errorType: 'overloaded', errorMessage: null },
+      { ...context, kind: 'SubagentStarted', agentId: 'a0f2051a530b4c7a2', agentType: 'general-purpose' },
+      { ...context, kind: 'SubagentFinished', agentId: 'a0f2051a530b4c7a2', agentType: 'general-purpose' },
+      { ...context, kind: 'WorkingDirectoryChanged', oldCwd: null, newCwd: 'D:/Projects/bar' },
       { kind: 'ResumeTimedOut' },
+      { kind: 'WentQuiet' },
       { kind: 'ProcessGone', pid: 4242 },
       { kind: 'TerminalClosed' },
       { kind: 'LaunchExitedNonZero', exitCode: 1 },
       { kind: 'ResumeExitedNonZero', exitCode: 2 },
     ];
+
+    // The list claims to be every kind, so the compiler is asked to agree. It
+    // was NOT before: three kinds -- both subagent events and `WentQuiet` --
+    // were missing from a table whose own name promised completeness, and the
+    // rows for them in `wordsFor` had never once been executed (found by the
+    // coverage run of M4.1a, and older than it).
+    const covered: Record<TerminalEvent['kind'], true> = Object.fromEntries(
+      events.map((event) => [event.kind, true])
+    ) as Record<TerminalEvent['kind'], true>;
+    expect(Object.keys(covered)).toHaveLength(events.length);
 
     const view = describeTerminal(shownAlone(makeEntry(), events.map((event) => at(event))));
 
@@ -325,8 +338,11 @@ describe('the history is shown as what it is, holes included', () => {
       'notification: idle_prompt',
       'turn finished',
       'turn failed (overloaded)',
+      'a general-purpose subagent started',
+      'a general-purpose subagent finished',
       'working directory changed',
       'restoring took too long',
+      'nothing was heard for long enough to stop calling this working',
       'the process is gone',
       'the terminal was closed',
       'the start exited with 1',
@@ -339,17 +355,19 @@ describe('the history is shown as what it is, holes included', () => {
 
     const view = describeTerminal(
       shownAlone(makeEntry(), [
-        at({ ...context, kind: 'PreToolUse', toolName: null, toolUseId: null }),
-        at({ ...context, kind: 'PostToolUse', toolName: null, toolUseId: null }),
+        at({ ...context, kind: 'ToolStarted', toolName: null, toolUseId: null }),
+        at({ ...context, kind: 'ToolFinished', toolName: null, toolUseId: null }),
         at({
           ...context,
-          kind: 'PostToolUseFailure',
+          kind: 'ToolFailed',
           toolName: null,
           toolUseId: null,
           errorMessage: null,
         }),
-        at({ ...context, kind: 'PermissionRequest', toolName: null, permissionLevel: null }),
-        at({ ...context, kind: 'StopFailure', errorType: null, errorMessage: null }),
+        at({ ...context, kind: 'PermissionRequested', toolName: null, permissionLevel: null }),
+        at({ ...context, kind: 'TurnFailed', errorType: null, errorMessage: null }),
+        at({ ...context, kind: 'SubagentStarted', agentId: null, agentType: null }),
+        at({ ...context, kind: 'SubagentFinished', agentId: null, agentType: null }),
       ])
     );
 
@@ -359,6 +377,8 @@ describe('the history is shown as what it is, holes included', () => {
       'a tool failed',
       'asked for permission',
       'turn failed',
+      'a subagent started',
+      'a subagent finished',
     ]);
   });
 
@@ -372,7 +392,7 @@ describe('the history is shown as what it is, holes included', () => {
   it('keeps the newest events when the history is longer than the half shows', () => {
     const context = hookContext();
     const many = Array.from({ length: DETAILS_EVENT_LIMIT + 5 }, (_, index) =>
-      at({ ...context, kind: 'PreToolUse', toolName: `tool-${String(index)}`, toolUseId: null }, index)
+      at({ ...context, kind: 'ToolStarted', toolName: `tool-${String(index)}`, toolUseId: null }, index)
     );
 
     const view = describeTerminal(shownAlone(makeEntry(), many));
@@ -407,7 +427,7 @@ describe('the history is shown as what it is, holes included', () => {
 
     const view = describeTerminal(
       shownAlone(makeEntry(), [
-        at({ ...context, kind: 'UserPromptSubmit', userInput: null }, 1, ['prompt']),
+        at({ ...context, kind: 'PromptSubmitted', userInput: null }, 1, ['prompt']),
       ])
     );
 

@@ -22,7 +22,7 @@ export type ErrorCode =
   | 'MIGRATION_ERROR'
   | 'LAUNCH_ERROR'
   | 'RESUME_FAILED'
-  | 'CLAUDE_CLI_ERROR'
+  | 'AGENT_CLI_ERROR'
   | 'LISTEN_ERROR';
 
 /** Structured context. Never a formatted sentence -- that is what `message` is. */
@@ -124,10 +124,10 @@ export class ResumeFailedError extends GriptermError {
   }
 }
 
-/** The Claude Code CLI itself refused, or answered in a way we cannot read. */
-export class ClaudeCliError extends GriptermError {
+/** The agent's CLI itself refused, or answered in a way we cannot read. */
+export class AgentCliError extends GriptermError {
   constructor(message: string, options?: GriptermErrorOptions) {
-    super('ClaudeCliError', 'CLAUDE_CLI_ERROR', message, options);
+    super('AgentCliError', 'AGENT_CLI_ERROR', message, options);
   }
 }
 

@@ -2,7 +2,7 @@ import { requireAbsolutePath } from '../../entities/absolute-path';
 import { hookEventUrl } from '../../services/hook-endpoint';
 import type { ListeningAddress } from '../../entities/listening-address';
 import type { TerminalId } from '../../entities/terminal-id';
-import type { HookEvent } from '../../events/terminal-event';
+import type { ClaudeCodeHookName } from './hook-vocabulary';
 
 /**
  * The name -- never the value -- of the per-activation token. It reaches the
@@ -65,11 +65,17 @@ export interface HookRegistration {
 }
 
 /**
- * Exactly the events the parser can read (M1.3), as a `Record` rather than a
- * partial map: a member added to the union and forgotten here is a compile
+ * Exactly the hooks the parser can read (M1.3), as a `Record` rather than a
+ * partial map: a name added to the dictionary and forgotten here is a compile
  * error, not a hook that quietly never fires.
+ *
+ * It comes from `hook-vocabulary` and NOT from the domain's event union, which
+ * is the correction of M4.1a: what goes into this file are Claude Code's own
+ * words, and the day the domain renames one of its events -- as it just did --
+ * the settings file must go on saying `PreToolUse`. Typing it off the domain
+ * made two unrelated things move together, and the compiler could not tell.
  */
-export type HookEventName = HookEvent['kind'];
+export type HookEventName = ClaudeCodeHookName;
 
 /**
  * What is written to `--settings`.

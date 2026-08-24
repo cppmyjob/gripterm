@@ -1,9 +1,9 @@
-import { isHookEvent } from '../events/terminal-event';
+import { isAgentEvent } from '../events/terminal-event';
 import { observedAfter, runningAfter } from './observed-projection';
 import type { Clock } from '../ports/clock';
 import type { Disposable } from '../ports/disposable';
 import type { HookDelivery } from '../entities/hook-delivery';
-import type { HookEvent, TerminalEvent } from '../events/terminal-event';
+import type { AgentEvent, TerminalEvent } from '../events/terminal-event';
 import type { HookEventReader } from '../ports/hook-event-reader';
 import type { HookEventSink } from '../ports/hook-event-sink';
 import type { ObservedState } from '../entities/observed-state';
@@ -85,8 +85,9 @@ export interface RemovalChange {
  * case 3).
  *
  * It is a REFUSAL, and it is published because of what it usually means. The
- * only hook that announces a beginning is `SessionStart`, and it is the only one
- * that cannot travel over HTTP (H1) -- it goes through the command forwarder,
+ * only report that announces a beginning is `ConversationStarted`, and it is
+ * the only one that cannot travel over HTTP (H1) -- it goes through the command
+ * forwarder,
  * which is a node process that has to start. Lose that one event and every
  * event after it looks like this: a conversation nobody saw begin, talking to a
  * record that is still following the conversation it replaced.
@@ -386,13 +387,13 @@ export class SessionRegistry implements HookEventSink {
       return { kind: 'unknown-terminal' };
     }
 
-    const routing = isHookEvent(event) ? this._route(entry, event) : CURRENT;
+    const routing = isAgentEvent(event) ? this._route(entry, event) : CURRENT;
     if (routing.kind === 'stale') {
       return { kind: 'stale-session' };
     }
     if (routing.kind === 'foreign') {
-      // Told, as well as logged. What this usually is -- a `SessionStart` that
-      // never arrived, leaving the record on a conversation that has been
+      // Told, as well as logged. What this usually is -- a beginning that never
+      // arrived, leaving the record on a conversation that has been
       // replaced -- is invisible from here: it takes the record's own state to
       // tell "we missed a beginning" from "something we have not measured also
       // posts to this address". So the fact goes out and the judgement is made
@@ -412,9 +413,9 @@ export class SessionRegistry implements HookEventSink {
       // `lastEventAt`: a record whose clock moved for events it refused makes
       // "nothing has happened here for ten minutes" unreadable.
       //
-      // A rename cannot be lost here. `SessionStart` is the only event that
-      // renames, and it is the machine's resurrection edge -- the one hook it
-      // never ignores.
+      // A rename cannot be lost here. `ConversationStarted` is the only event
+      // that renames, and it is the machine's resurrection edge -- the one
+      // report it never ignores.
       this._options.logger.info('an event was not applied', {
         terminalId: terminalId.value,
         event: event.kind,
@@ -437,24 +438,24 @@ export class SessionRegistry implements HookEventSink {
    * different identifier by construction and would therefore differ ALWAYS
    * rather than on drift (§4.6).
    */
-  private _route(entry: TerminalEntry, event: HookEvent): SessionRouting {
+  private _route(entry: TerminalEntry, event: AgentEvent): SessionRouting {
     if (event.sessionId.equals(entry.sessionId)) {
       return CURRENT;
     }
 
-    if (event.kind === 'SessionStart') {
+    if (event.kind === 'ConversationStarted') {
       // §4.6, case 1. Wider than the plan's `source: "clear"` on purpose:
       // `/resume` onto another conversation, `--fork-session` and `/compact`
       // also begin a session with a new id, and `source` is a field we collapse
       // to `other` whenever we do not recognise it -- so keying the rule on its
       // value would strand a terminal on a label we failed to guess. What makes
-      // this safe is the event, not the label: `SessionStart` is the one hook
-      // that announces a beginning.
+      // this safe is the event, not the label: `ConversationStarted` is the one
+      // report that announces a beginning.
       //
       // A conversation this terminal has ALREADY had is followed too, and it is
       // the same rule rather than an exception to it. That case was refused
       // until A19 measured it (2026-08-12): `/resume <id>` typed into the
-      // terminal sends `SessionEnd(reason: resume)` and then this event with an
+      // terminal reports an end (reason: resume) and then this event with an
       // id out of our own history. Left alone, the record went on naming the
       // conversation the person had just walked away from -- and that is the
       // one a restore would have offered them.
@@ -472,8 +473,8 @@ export class SessionRegistry implements HookEventSink {
       // §4.6, case 2: routed to this record rather than to a phantom terminal,
       // and NOT applied. The plan says "applied to the same record"; the record
       // it belongs to is this one, but the state it would set belongs to a
-      // conversation that has ended. A `SessionEnd` still in flight from the
-      // session `/clear` replaced would otherwise kill the session that
+      // conversation that has ended. A `ConversationEnded` still in flight from
+      // the session `/clear` replaced would otherwise kill the session that
       // replaced it.
       this._options.logger.warn('an event arrived from a session this terminal has left', {
         terminalId: entry.terminalId.value,
@@ -496,7 +497,7 @@ export class SessionRegistry implements HookEventSink {
   /**
    * Observed state after the event, by the same rule the replay of a journal
    * uses (`observedAfter`). One rule and not two: a second copy would be a
-   * second answer to "what does `PreToolUse` mean", and the two would disagree
+   * second answer to "what does `ToolStarted` mean", and the two would disagree
    * exactly where nobody looks -- a terminal restored from its journal showing a
    * different tool from the one the live window showed a minute earlier.
    *

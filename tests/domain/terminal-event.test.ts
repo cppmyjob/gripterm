@@ -1,7 +1,7 @@
 import {
   HookEventParser,
   ValidationError,
-  isHookEvent,
+  isAgentEvent,
   launchExitedNonZero,
   processGone,
   resumeExitedNonZero,
@@ -60,7 +60,7 @@ describe('the synthetic half of the union', () => {
   });
 });
 
-describe('isHookEvent', () => {
+describe('isAgentEvent', () => {
   it('separates the events that carry a session id from the ones that do not', () => {
     const result = new HookEventParser().parse({
       hook_event_name: 'Stop',
@@ -69,8 +69,8 @@ describe('isHookEvent', () => {
     const hookEvent = result.status === 'parsed' ? result.event : null;
 
     expect(hookEvent).not.toBeNull();
-    expect(hookEvent !== null && isHookEvent(hookEvent)).toBe(true);
-    expect(isHookEvent(terminalClosed())).toBe(false);
-    expect(isHookEvent(processGone(null))).toBe(false);
+    expect(hookEvent !== null && isAgentEvent(hookEvent)).toBe(true);
+    expect(isAgentEvent(terminalClosed())).toBe(false);
+    expect(isAgentEvent(processGone(null))).toBe(false);
   });
 });

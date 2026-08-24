@@ -132,7 +132,7 @@ suite('П2, the first sitting', () => {
     assert.ok(entry, 'no record appeared in the registry');
     const id = entry.terminalId.value;
 
-    // `SessionStart`, arriving over a real hook from a real CLI -- unless the
+    // `ConversationStarted`, arriving over a real hook from a real CLI -- unless the
     // CLI is asking its own question first. A folder Claude Code has not seen
     // before gets a trust prompt, and until it is answered no session starts and
     // no hook fires (measured 2026-08-13; the same wall A13 met in a temporary

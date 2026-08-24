@@ -1,6 +1,6 @@
 import { ValidationError } from '../errors/gripterm-error';
 import type { PersistedTerminalState } from '../entities/terminal-state';
-import type { NotificationType, TerminalEvent } from '../events/terminal-event';
+import type { AgentNoticeType, TerminalEvent } from '../events/terminal-event';
 
 /**
  * What the attention notifier reacts to on entry into a state.
@@ -45,10 +45,10 @@ export interface IgnoredTransition {
 export type StateTransition = MovedTransition | StayedTransition | IgnoredTransition;
 
 /**
- * States reached by witnessing, not by inference: `SessionEnd` arrived, or the
- * editor destroyed the terminal object. `orphaned` and `degraded` are NOT here
- * -- both are the runner's own guesses (a PID lookup, a timeout), and a hook
- * event is first-hand evidence that overrules a guess.
+ * States reached by witnessing, not by inference: `ConversationEnded` arrived,
+ * or the editor destroyed the terminal object. `orphaned` and `degraded` are
+ * NOT here -- both are the runner's own guesses (a PID lookup, a timeout), and
+ * an event the agent reported is first-hand evidence that overrules a guess.
  */
 const WITNESSED_DEAD: ReadonlySet<PersistedTerminalState> = new Set<PersistedTerminalState>([
   'ended',
@@ -76,9 +76,9 @@ export function isWitnessedEnd(state: PersistedTerminalState): boolean {
  *
  * `permission_prompt` is deliberately absent: it is not a value the CLI emits.
  * The edge that once waited for permission on it was dead, and `waiting_permission`
- * has exactly one reliable producer, `PermissionRequest`.
+ * has exactly one reliable producer, `PermissionRequested`.
  */
-const NOTIFICATION_PHASE: Partial<Record<NotificationType, PersistedTerminalState>> = {
+const NOTIFICATION_PHASE: Partial<Record<AgentNoticeType, PersistedTerminalState>> = {
   agent_needs_input: 'waiting_input',
   idle_prompt: 'idle',
   agent_completed: 'idle',
@@ -104,11 +104,11 @@ const SHUTDOWN_BEFORE_START = 'the CLI shutting down says nothing about whether 
  *      there) are the weakest. They apply only where nothing better is known.
  *
  * On top of that, one rule that is worth stating alone because it covers two
- * whole rows of the table: **in `ended` and `resume_failed`, `SessionStart` is
- * the only event that changes anything.** `SessionStart` is the one hook that
- * announces a beginning -- which is how `/clear` gets back out of `ended` --
- * and every other hook describes the middle of a turn, so arriving after an end
- * it is by construction late.
+ * whole rows of the table: **in `ended` and `resume_failed`,
+ * `ConversationStarted` is the only event that changes anything.** It is the
+ * one report that announces a beginning -- which is how `/clear` gets back out
+ * of `ended` -- and every other report describes the middle of a turn, so
+ * arriving after an end it is by construction late.
  *
  * The rules are here; the table is in the test, written out cell by cell and
  * independently. That separation is the point: a machine implemented as a table
@@ -122,20 +122,20 @@ export class TerminalStateMachine {
   ): StateTransition {
     switch (event.kind) {
       // Note the missing `phase()` guard: this is the resurrection edge. After
-      // `/clear` the CLI sends `SessionEnd(reason: clear)` and then a
-      // `SessionStart(source: clear)` carrying a NEW session id, so an entry
-      // that refused to leave `ended` would be stranded by the user's own
-      // `/clear`. The registry's business is the id; the state is this edge.
-      case 'SessionStart':
+      // `/clear` the agent reports an end (reason: clear) and then a beginning
+      // (source: clear) carrying a NEW session id, so an entry that refused to
+      // leave `ended` would be stranded by the user's own `/clear`. The
+      // registry's business is the id; the state is this edge.
+      case 'ConversationStarted':
         return settle(current, 'idle');
 
       // The one pair where a first-hand hook is refused, and the refusal is
       // this narrow on purpose.
       //
       // A45, measured 2026-08-20 against CLI 2.1.233 under a real pty: a resume
-      // of a conversation that is not there sends exactly ONE hook --
-      // `SessionEnd`, at about 1.6 s -- and then exits with code 1 at about
-      // 3.15 s. Its `reason` is `other`, which is also the value an unrecognised
+      // of a conversation that is not there sends exactly ONE report --
+      // `ConversationEnded`, at about 1.6 s -- and then exits with code 1 at
+      // about 3.15 s. Its `reason` is `other`, which is also the value an unrecognised
       // one collapses into, so the payload cannot be made to tell this case from
       // an ordinary end. Settled on that hook, the record is `ended` when the
       // exit code arrives, `death` refuses it as late, and `resume_failed` --
@@ -151,10 +151,10 @@ export class TerminalStateMachine {
       // the restore timeout at 20 s (`ResumeTimedOut` -> `degraded`) and the
       // reconciliation sweep at 30 s (`ProcessGone` -> `orphaned`) -- so the
       // longest a row can hold a start that is over is one sweep.
-      // REMOVED WHEN: a build ships a `SessionEnd` payload that distinguishes
-      // "this session never started" (a `reason` of its own), at which point the
-      // hook can settle the record and carry the distinction with it.
-      case 'SessionEnd':
+      // REMOVED WHEN: an agent ships an end payload that distinguishes "this
+      // session never started" (a `reason` of its own), at which point the
+      // report can settle the record and carry the distinction with it.
+      case 'ConversationEnded':
         return current === 'launching'
           ? ignored(current, SHUTDOWN_BEFORE_START)
           : phase(current, 'ended');
@@ -162,20 +162,21 @@ export class TerminalStateMachine {
       // Absolute, not "stays `working`". These three arrive only while a turn is
       // running, so they are evidence of `working` whatever we believed before
       // -- and that is the only way out of `waiting_permission`, which
-      // `PermissionRequest` can enter but nothing else can leave until `Stop`.
-      // A relative target left an approved tool running under the label "waiting
+      // `PermissionRequested` can enter but nothing else can leave until the
+      // turn finishes. A relative target left an approved tool running under
+      // the label "waiting
       // for permission" for the rest of the turn, and suppressed the second
       // permission toast with it.
-      case 'UserPromptSubmit':
-      case 'PreToolUse':
-      case 'PostToolUse':
-      case 'PostToolUseFailure':
+      case 'PromptSubmitted':
+      case 'ToolStarted':
+      case 'ToolFinished':
+      case 'ToolFailed':
         return phase(current, 'working');
 
-      case 'PermissionRequest':
+      case 'PermissionRequested':
         return phase(current, 'waiting_permission');
 
-      case 'Notification': {
+      case 'AgentNotified': {
         const named = NOTIFICATION_PHASE[event.notificationType];
         if (named === undefined) {
           return proofOfLife(current);
@@ -183,30 +184,31 @@ export class TerminalStateMachine {
         // `idle_prompt` and `agent_completed` are the main agent back at its
         // prompt, and measured to arrive while its subagents are still going
         // (85.7 s against subagents that finished at 107 s). Same rule as
-        // `Stop`: they are the truth about the agent, not about the terminal.
+        // `TurnFinished`: they are the truth about the agent, not about the
+        // terminal.
         return phase(current, named === 'idle' && running.length > 0 ? 'working' : named);
       }
 
       // Settling events, and what they settle INTO is the whole of the
-      // customer's fifth complaint (2026-08-21). `Stop` is the main agent
+      // customer's fifth complaint (2026-08-21). `TurnFinished` is the main agent
       // saying it has finished speaking, and measured against a real CLI that
       // happens the moment it has LAUNCHED its background subagents -- the two
       // in that run went on working for eighty seconds afterwards. So idle is
       // "nobody is running", not "the main agent stopped", and who is running
       // is counted outside this machine and handed in.
-      case 'Stop':
-      case 'SubagentStop':
+      case 'TurnFinished':
+      case 'SubagentFinished':
         return phase(current, running.length === 0 ? 'idle' : 'working');
 
       // A subagent beginning is first-hand evidence of work, exactly as a tool
       // starting is.
-      case 'SubagentStart':
+      case 'SubagentStarted':
         return phase(current, 'working');
 
-      case 'StopFailure':
+      case 'TurnFailed':
         return phase(current, 'turn_failed');
 
-      case 'CwdChanged':
+      case 'WorkingDirectoryChanged':
         return proofOfLife(current);
 
       // Rank 3. The timeout only ever asked one question -- "did the restore
@@ -246,8 +248,9 @@ export class TerminalStateMachine {
         return death(current, 'ended', current === 'launching' ? 'launch_failed' : 'ended');
 
       // The one place where the target depends on the from-state: a restore that
-      // never reached `SessionStart` leaves a record worth offering to start
-      // over (`resume_failed`); one that got going and died later is just over.
+      // never reached `ConversationStarted` leaves a record worth offering to
+      // start over (`resume_failed`); one that got going and died later is just
+      // over.
       case 'ResumeExitedNonZero':
         return current === 'launching'
           ? death(current, 'resume_failed', 'resume_failed')

@@ -47,7 +47,7 @@ function environment(overrides: Partial<TerminalEnvironmentParams> = {}): Record
     delta: {},
     editor: EDITOR,
     caseInsensitiveNames: false,
-    ideChannel: true,
+    agentEnv: {},
     ...overrides,
   });
 }
@@ -195,9 +195,9 @@ describe('the environment folds case where the platform does', () => {
       host: { Path: 'C:/Windows' },
       delta: { PATH: 'C:/tools' },
       editor: EDITOR,
-      // The channel is not this test's subject, and `true` is the value that
-      // puts nothing of its own into the table.
-      ideChannel: true,
+      // The agent's own layer is not this test's subject, and an empty record
+      // is the value that puts nothing of its own into the table.
+      agentEnv: {},
       caseInsensitiveNames: true,
     });
 
@@ -210,9 +210,9 @@ describe('the environment folds case where the platform does', () => {
       host: { Path: 'C:/Windows' },
       delta: { PATH: null },
       editor: EDITOR,
-      // The channel is not this test's subject, and `true` is the value that
-      // puts nothing of its own into the table.
-      ideChannel: true,
+      // The agent's own layer is not this test's subject, and an empty record
+      // is the value that puts nothing of its own into the table.
+      agentEnv: {},
       caseInsensitiveNames: true,
     });
 
@@ -225,9 +225,9 @@ describe('the environment folds case where the platform does', () => {
       host: { vscode_pid: '4242' },
       delta: {},
       editor: EDITOR,
-      // The channel is not this test's subject, and `true` is the value that
-      // puts nothing of its own into the table.
-      ideChannel: true,
+      // The agent's own layer is not this test's subject, and an empty record
+      // is the value that puts nothing of its own into the table.
+      agentEnv: {},
       caseInsensitiveNames: true,
     });
 
@@ -240,7 +240,7 @@ describe('the environment folds case where the platform does', () => {
       delta: { PATH: '/b' },
       editor: EDITOR,
       caseInsensitiveNames: false,
-      ideChannel: true,
+      agentEnv: {},
     });
 
     expect(result.Path).toBe('/a');
@@ -253,42 +253,42 @@ describe('the environment folds case where the platform does', () => {
       delta: {},
       editor: EDITOR,
       caseInsensitiveNames: false,
-      ideChannel: true,
+      agentEnv: {},
     });
 
     expect(result.vscode_pid).toBe('4242');
   });
 });
 
-describe('the channel to the Claude Code extension, which this engine turns off by default', () => {
+describe('the environment carries what the agent layer asked for', () => {
   /*
-   * Measured 2026-08-20, by hand, in a real editor. Under `own` the CLI reaches
-   * the Claude Code extension WITHOUT the port we cannot give it: it finds the
-   * extension by the lock files in `~/.claude/ide/`, because `TERM_PROGRAM` --
-   * which this rule sets on purpose -- tells it that it is inside an editor.
-   * The channel works: the agent was asked which file was open and what was
-   * selected in it, and answered both.
-   *
-   * The price is the editor's own terminal taking the focus every time a prompt
-   * is sent, which the owner refused to live with, so the variable the CLI reads
-   * goes in and the person turns it back on if they want the other trade.
+   * The rule composes an environment; it does not know which agent is being
+   * started, and since M4.1a it cannot: the block arrives as an opaque
+   * `agentEnv` and the one name Claude Code reads is composed by
+   * `ideChannelEnv` under `domain/agents/claude-code/`, which has a test of its
+   * own. What is asked here is the two things this rule really decides -- that
+   * the block arrives at all, and where it sits in the order.
    */
-  it('goes out as the variable the CLI reads, so nothing has to be guessed about it', () => {
-    expect(environment({ ideChannel: false }).CLAUDE_CODE_AUTO_CONNECT_IDE).toBe('false');
+  it('puts the names it was given into the block', () => {
+    expect(environment({ agentEnv: { AGENT_OWN_NAME: 'yes' } }).AGENT_OWN_NAME).toBe('yes');
   });
 
-  it('says nothing at all when the person asked for the channel', () => {
-    // Not "true": the CLI has four other reasons to connect, and a build that
-    // wrote `true` here would be claiming to be the one that decided.
-    expect(environment({ ideChannel: true })).not.toHaveProperty('CLAUDE_CODE_AUTO_CONNECT_IDE');
+  it('adds nothing of its own when the agent layer asked for nothing', () => {
+    expect(Object.keys(environment({ agentEnv: {} }))).toStrictEqual([
+      'PATH',
+      'HOME',
+      'COLORTERM',
+      'TERM_PROGRAM',
+      'TERM_PROGRAM_VERSION',
+    ]);
   });
 
-  it('gives way to a delta that names it, because the delta is the part somebody chose', () => {
+  it('gives way to a delta that names the same variable, because the delta is the part somebody chose', () => {
     const result = environment({
-      ideChannel: false,
-      delta: { CLAUDE_CODE_AUTO_CONNECT_IDE: 'true' },
+      agentEnv: { AGENT_OWN_NAME: 'from the agent layer' },
+      delta: { AGENT_OWN_NAME: 'from the person' },
     });
 
-    expect(result.CLAUDE_CODE_AUTO_CONNECT_IDE).toBe('true');
+    expect(result.AGENT_OWN_NAME).toBe('from the person');
   });
 });

@@ -89,7 +89,7 @@ const CONVERSATION: readonly string[] = [
   }),
 ];
 
-/** A `Stop` from the conversation `/clear` replaced, arriving after it was replaced. */
+/** A `TurnFinished` from the conversation `/clear` replaced, arriving after it was replaced. */
 const LATE = JSON.stringify({
   hook_event_name: 'Stop',
   session_id: SESSION_UUID,
@@ -301,7 +301,7 @@ describe('a terminal whose conversation was replaced by /clear', () => {
   });
 
   it('comes back out of the end its own /clear announced', async () => {
-    // `SessionEnd(reason: clear)` arrives first and is a witnessed end. A record
+    // `ConversationEnded(reason: clear)` arrives first and is a witnessed end. A record
     // left in it would be a row saying "ended" about a terminal somebody is
     // typing into -- П1, brought back by the feature meant to prevent it.
     await deliverAll(CONVERSATION);

@@ -1,5 +1,5 @@
 import {
-  ClaudeCliError,
+  AgentCliError,
   ConflictError,
   GriptermError,
   LaunchError,
@@ -24,7 +24,7 @@ const HIERARCHY: readonly (readonly [string, ErrorCode, ErrorFactory])[] = [
   ['MigrationError', 'MIGRATION_ERROR', (m): GriptermError => new MigrationError(m)],
   ['LaunchError', 'LAUNCH_ERROR', (m): GriptermError => new LaunchError(m)],
   ['ResumeFailedError', 'RESUME_FAILED', (m): GriptermError => new ResumeFailedError(m)],
-  ['ClaudeCliError', 'CLAUDE_CLI_ERROR', (m): GriptermError => new ClaudeCliError(m)],
+  ['AgentCliError', 'AGENT_CLI_ERROR', (m): GriptermError => new AgentCliError(m)],
   ['ListenError', 'LISTEN_ERROR', (m): GriptermError => new ListenError(m)],
 ];
 
@@ -44,7 +44,7 @@ const EVERY_CODE: Readonly<Record<ErrorCode, true>> = {
   MIGRATION_ERROR: true,
   LAUNCH_ERROR: true,
   RESUME_FAILED: true,
-  CLAUDE_CLI_ERROR: true,
+  AGENT_CLI_ERROR: true,
   LISTEN_ERROR: true,
 };
 
