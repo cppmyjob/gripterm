@@ -192,7 +192,9 @@ export {
 } from './domain/services/base-writer';
 export {
   DEFAULT_STORAGE_DIRECTORY,
+  STORAGE_PATH_SETTING,
   chooseStorageDir,
+  refuseSplitStore,
   type StorageDirChoice,
 } from './domain/services/storage-directory';
 export {

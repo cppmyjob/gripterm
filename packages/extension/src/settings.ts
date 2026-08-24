@@ -9,6 +9,7 @@ import {
   isAttentionSignal,
   isLaunchLocation,
   isTerminalEngine,
+  refuseSplitStore,
 } from '@gripterm/core';
 import type {
   AttentionSignal,
@@ -220,6 +221,24 @@ export interface StorageDirDecision {
  * never says why. A reload re-creates all of it, in order, and the manifest says
  * so on the setting.
  *
+ * A PRODUCTION window can still be wrong about the store in one way, and it is
+ * the way that costs the most: `homedir()` is the home of whichever extension
+ * host we landed in, and a window connected to a remote landed somewhere else
+ * than the local window open on the same folder. Two stores, neither able to
+ * read the other's `owners/`, and every conversation unowned on both sides --
+ * `refuseSplitStore` says why that is refused rather than survived. The refusal
+ * is THROWN for the same reason the test host's is: a store this window has
+ * already opened is a store other windows have already been told about, so the
+ * only refusal that arrives in time is the one that stops activation. Asked only
+ * where the store came from `homedir()`; a development host is given a store of
+ * its own further down and told so, and a split somebody was told about is a
+ * different question from one nobody was.
+ *
+ * `extensionKind` in the manifest belongs to the same decision and settles none
+ * of it: it says which host we run in (`workspace` -- see
+ * `tests/extension/extension-kind.test.ts`), not which home that host has, and a
+ * project opened locally and in WSL still has two.
+ *
  * Outside a production window the default is not used, and the two hosts are
  * answered differently because the two hosts differ in one decisive way: whether
  * anybody is there to read.
@@ -255,7 +274,17 @@ export function readStorageDir(
       reason: choice.refused,
     });
   }
-  if (choice.configured || context.extensionMode === vscode.ExtensionMode.Production) {
+  if (choice.configured) {
+    return { path: choice.path, announce: null };
+  }
+  if (context.extensionMode === vscode.ExtensionMode.Production) {
+    // The one reading of the editor API this rule needs. `env.remoteName` is
+    // undefined in a local extension host and named in a remote one, which is
+    // exactly the difference between one home and two.
+    const split = refuseSplitStore({ remoteName: vscode.env.remoteName, choice });
+    if (split !== null) {
+      throw new Error(split);
+    }
     return { path: choice.path, announce: null };
   }
 
