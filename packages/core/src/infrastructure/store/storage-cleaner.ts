@@ -33,19 +33,27 @@ const MS_PER_DAY = 86_400_000;
  * On the IRREVERSIBLE half only. An empty batch holds nothing, so taking one
  * away destroys nothing and is not counted here.
  *
- * Sixteen, because a batch is made per act of sweeping -- one record thrown
- * away, one presence file collected, one run of the cleanup command -- so
- * ordinary use makes a few a day and a pass in a healthy store never comes near
- * it. What it is for is the drift the refusal below cannot see: a clock that
- * moved LESS than the retention makes nearly every batch look expired at once,
- * and no jump was made that anything could notice. A pass with a ceiling takes
- * sixteen of them, leaves the rest where they are and says so.
+ * Thirty-two, and the number is measured rather than chosen. A batch is made
+ * per act of sweeping -- one record thrown away, one presence file collected,
+ * one run of the cleanup command -- and the owner's own store on 2026-08-24
+ * held 223 of them made over seven days: 5, 15, 22, 33, 56 and 84 a day, where
+ * the last two are the days a suite was still pointed at that live store. So an
+ * ordinary day there is at most about twenty, and a daily pass in a store whose
+ * clock is right never comes near this.
  *
- * A person whose store really does make more than sixteen batches a day meets
- * that same warning, and it is true of their store: the trash holds more than
- * the retention promised it would.
+ * What it is for is the drift the refusal below cannot see: a clock that moved
+ * LESS than the retention makes nearly every batch look expired at once, and no
+ * jump was made that anything could notice. A capped pass takes thirty-two of
+ * them, leaves the rest where they are and says so -- on that store, 14 per
+ * cent of the trash instead of all of it.
+ *
+ * Erring low is deliberate (III.8): keeping more than was promised costs disk
+ * and a warning, both of which can be taken back, and removing a batch cannot.
+ * A person whose store really does make more than thirty-two batches a day
+ * meets that same warning, and it is true of their store -- the trash holds
+ * more than the retention promised it would.
  */
-export const MAX_EXPIRED_PER_PASS = 16;
+export const MAX_EXPIRED_PER_PASS = 32;
 
 export interface StorageCleanerOptions {
   readonly layout: StorageLayout;
