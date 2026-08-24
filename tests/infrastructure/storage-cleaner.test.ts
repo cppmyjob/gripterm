@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   DEFAULT_TRASH_SWEEP_INTERVAL_MS,
+  MAX_EXPIRED_PER_PASS,
   SETTLED_MS,
   StorageCleaner,
   StorageLayout,
@@ -23,6 +24,7 @@ import { FakeScheduler, FixedClock, RecordingLogger } from '../helpers/port-fake
 const RETENTION_DAYS = 14;
 const MS_PER_DAY = 86_400_000;
 const MINUTE_MS = 60_000;
+const HOUR_MS = 3_600_000;
 
 const TERMINAL_A = '11111111-1111-4111-8111-111111111111';
 const TERMINAL_B = '22222222-2222-4222-8222-222222222222';
@@ -78,6 +80,14 @@ async function leftover(layout: StorageLayout, name: string, files: readonly str
 async function settle(path: string): Promise<void> {
   const old = new Date(Date.now() - 10 * MINUTE_MS);
   await utimes(path, old, old);
+}
+
+/** A batch in the trash stamped at a given moment, with a record in it. */
+async function batch(layout: StorageLayout, at: Date): Promise<string> {
+  const name = trashStamp(at);
+  await mkdir(join(layout.trashDir, name, TERMINAL_A), { recursive: true });
+  await writeFile(join(layout.trashDir, name, TERMINAL_A, 'record.json'), '{}', 'utf8');
+  return name;
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -334,14 +344,14 @@ describe('the pass over the trash', () => {
 
     const outcome = await cleaner.collect();
 
-    expect(outcome).toStrictEqual({ expired: [], empty: [] });
+    expect(outcome).toStrictEqual({ expired: [], empty: [], heldBack: [], refused: null });
     expect(await readFile(join(mine, 'record.json'), 'utf8')).toBe('the copy I made');
   });
 
   it('calls a store nobody has thrown anything away in empty, and says nothing about it', async () => {
     const { cleaner, logger } = await build();
 
-    expect(await cleaner.collect()).toStrictEqual({ expired: [], empty: [] });
+    expect(await cleaner.collect()).toStrictEqual({ expired: [], empty: [], heldBack: [], refused: null });
     expect(logger.warnings).toStrictEqual([]);
   });
 
@@ -353,6 +363,142 @@ describe('the pass over the trash', () => {
     await writeFile(layout.trashDir, 'not a directory', 'utf8');
 
     await expect(cleaner.collect()).rejects.toThrow();
+  });
+});
+
+describe('the clock the pass reads, which is the wall clock and does not only move forwards', () => {
+  it('removes no more batches in one pass than the ceiling names', async () => {
+    // S44, the ceiling. A clock that drifted by LESS than the retention makes
+    // nearly every batch look expired at once, and nothing in the store can see
+    // the drift: thirteen days against a fortnight is not a jump anything could
+    // refuse. The ceiling is what is left, and it is why the acceptance of this
+    // step was rewritten -- the old one ("a year forward is refused") stays
+    // green on a build with no ceiling at all.
+    const { cleaner, layout, clock, logger } = await build();
+    const over = 5;
+    const names: string[] = [];
+    for (let index = 0; index < MAX_EXPIRED_PER_PASS + over; index += 1) {
+      // Two days back and an hour apart: distinct stamps, all of them well
+      // inside the retention until the drift.
+      names.push(await batch(layout, new Date(clock.now().getTime() - 2 * MS_PER_DAY - index * HOUR_MS)));
+    }
+    // A pass at the right clock. It removes nothing, and leaves the mark the
+    // next one measures the drift against.
+    expect((await cleaner.collect()).expired).toStrictEqual([]);
+
+    clock.advance((RETENTION_DAYS - 1) * MS_PER_DAY);
+    const outcome = await cleaner.collect();
+
+    expect(outcome.refused).toBeNull();
+    expect(outcome.expired).toHaveLength(MAX_EXPIRED_PER_PASS);
+    expect(outcome.heldBack).toHaveLength(over);
+    // The oldest went and the newest stayed: what a capped pass keeps is what a
+    // person is likeliest to still want.
+    expect([...outcome.expired]).toStrictEqual([...names].sort().slice(0, MAX_EXPIRED_PER_PASS));
+    expect(await namesIn(layout.trashDir)).toStrictEqual([...outcome.heldBack]);
+    expect(logger.warnings.some((line) => line.message.includes('only so many batches'))).toBe(true);
+  });
+
+  it('makes no pass at all when the clock stands further ahead than the retention', async () => {
+    // S44, the refusal. A jump longer than the retention is an incident -- NTP
+    // on a flat battery, a snapshot resumed, a date corrected by hand -- and an
+    // incident is not a reason to empty the one directory every undo needs.
+    const { cleaner, layout, clock } = await build();
+    expect((await cleaner.collect()).refused).toBeNull();
+    const old = await batch(layout, new Date(clock.now().getTime() - (RETENTION_DAYS + 1) * MS_PER_DAY));
+
+    clock.advance((RETENTION_DAYS + 1) * MS_PER_DAY);
+    const outcome = await cleaner.collect();
+
+    expect(outcome.refused).toContain('the clock stands');
+    expect(outcome.expired).toStrictEqual([]);
+    expect(await exists(join(layout.trashDir, old))).toBe(true);
+  });
+
+  it('says the refusal to the person, and not only in what it returns', async () => {
+    // The load-bearing half of the acceptance. The one production caller does
+    // `void cleaner.collect().catch(...)`, so a refusal that lives only in the
+    // returned value is a refusal nobody is ever told about -- and a test over
+    // that value stays green above the silence.
+    const { cleaner, clock, logger } = await build();
+    await cleaner.collect();
+    clock.advance((RETENTION_DAYS + 1) * MS_PER_DAY);
+
+    await cleaner.collect();
+
+    const said = logger.warnings.filter((line) => line.message.includes('the clock stands further past'));
+    expect(said).toHaveLength(1);
+    // And it names the one act that accepts the new clock, because a refusal
+    // with no way out of it is a store nothing ever sweeps again.
+    expect(JSON.stringify(said[0]?.details ?? {})).toContain('trash-sweep.json');
+  });
+
+  it('leaves the mark where it was, so a clock put back needs nothing from anybody', async () => {
+    // Why a refusal does not move the mark on. Were it written at a refusal,
+    // the next pass would measure from the jumped clock, see nothing wrong and
+    // remove everything -- a refusal worth exactly one pass.
+    const { cleaner, layout, clock } = await build();
+    await cleaner.collect();
+    const old = await batch(layout, new Date(clock.now().getTime() - (RETENTION_DAYS + 1) * MS_PER_DAY));
+    clock.advance(365 * MS_PER_DAY);
+    expect((await cleaner.collect()).refused).not.toBeNull();
+
+    clock.advance(-365 * MS_PER_DAY);
+    const outcome = await cleaner.collect();
+
+    expect(outcome.refused).toBeNull();
+    expect(outcome.expired).toStrictEqual([old]);
+  });
+
+  it('makes the pass when nothing says when the last one was', async () => {
+    // A fresh profile, or the first window of this build over a store swept for
+    // months. There is nothing to measure a clock against, and refusing on
+    // absence would be a build that collects nothing until a person deletes a
+    // file. That case belongs to the ceiling, which needs no history.
+    const { cleaner, layout, clock } = await build();
+    const old = await batch(layout, new Date(clock.now().getTime() - (RETENTION_DAYS + 1) * MS_PER_DAY));
+
+    const outcome = await cleaner.collect();
+
+    expect(outcome.expired).toStrictEqual([old]);
+    expect(await exists(layout.trashSweepFile)).toBe(true);
+  });
+
+  it('leaves its mark even when it removed nothing at all', async () => {
+    // Otherwise the clock is measurable only in a store somebody is deleting
+    // things from, and the quiet store is the one that sits through the jump.
+    const { cleaner, layout, clock } = await build();
+
+    await cleaner.collect();
+
+    const mark: unknown = JSON.parse(await readFile(layout.trashSweepFile, 'utf8'));
+    expect(mark).toStrictEqual({ at: clock.now().toISOString() });
+  });
+
+  it('says so and sweeps on when the mark is not readable', async () => {
+    const { cleaner, layout, clock, logger } = await build();
+    const old = await batch(layout, new Date(clock.now().getTime() - (RETENTION_DAYS + 1) * MS_PER_DAY));
+    await writeFile(layout.trashSweepFile, 'not json at all', 'utf8');
+
+    const outcome = await cleaner.collect();
+
+    expect(outcome.expired).toStrictEqual([old]);
+    expect(logger.warnings.some((line) => line.message.includes('mark left by the last pass'))).toBe(true);
+  });
+
+  it('says so and sweeps on when the mark holds no moment', async () => {
+    // A different failure from the one above, and told apart in the reason:
+    // this file parsed, so what is wrong with it is ours to explain.
+    const { cleaner, layout, clock, logger } = await build();
+    const old = await batch(layout, new Date(clock.now().getTime() - (RETENTION_DAYS + 1) * MS_PER_DAY));
+    await writeFile(layout.trashSweepFile, '{"when":"yesterday"}', 'utf8');
+
+    const outcome = await cleaner.collect();
+
+    expect(outcome.expired).toStrictEqual([old]);
+    expect(
+      logger.warnings.some((line) => JSON.stringify(line.details ?? {}).includes('no moment'))
+    ).toBe(true);
   });
 });
 

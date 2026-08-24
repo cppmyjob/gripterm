@@ -51,6 +51,20 @@ const LEGACY_JOURNAL_FILE = 'events.ndjson';
 const TRASH_DIRECTORY = 'trash';
 
 /**
+ * What the last pass over the trash leaves behind: the moment it ran (M2.15).
+ *
+ * In the base rather than in `trash/`, because the pass has to be able to
+ * measure the clock in a store where nothing has ever been thrown away -- and
+ * creating `trash/` in order to record that it is not there would put a folder
+ * called trash into the store of a person who has never deleted anything.
+ *
+ * The schema version does not move for it. An older build has no name for this
+ * file and ignores it, and the worst that follows is a pass made by the old
+ * rule -- which is what that build would have done anyway.
+ */
+const TRASH_SWEEP_FILE = 'trash-sweep.json';
+
+/**
  * What an owner id may look like once it is a file name.
  *
  * Lowercase only, and that is the point rather than an oversight: Windows and
@@ -137,6 +151,11 @@ export class StorageLayout {
 
   public get trashDir(): string {
     return join(this._baseDir, TRASH_DIRECTORY);
+  }
+
+  /** Holds when the trash was last swept, and nothing else. See `TRASH_SWEEP_FILE`. */
+  public get trashSweepFile(): string {
+    return join(this._baseDir, TRASH_SWEEP_FILE);
   }
 
   /** Throws `ValidationError` on an id that would not be safe as a file name. */

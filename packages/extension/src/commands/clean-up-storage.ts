@@ -205,8 +205,14 @@ function detailFor(
   );
 }
 
-/** What the pass over the trash did, said only when it did something. */
+/** What the pass over the trash did, said only when it did something -- or would not. */
 function tail(collected: CollectOutcome): string {
+  if (collected.refused !== null) {
+    // Said here rather than left in the log, because the person is standing in
+    // front of the dialog they asked for: a pass that did not happen is part of
+    // the answer to what they just clicked.
+    return `, and the trash itself was left as it is — ${collected.refused}`;
+  }
   if (collected.expired.length === 0) {
     return '';
   }

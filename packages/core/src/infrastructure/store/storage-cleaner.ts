@@ -2,6 +2,8 @@ import { mkdir, readdir, rm, rmdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { STORAGE_DIRECTORY_MODE, isTrashBatchName, journalDay, trashStamp } from './storage-layout';
 import { moveAtomic } from './atomic-file';
+import { readJsonFile, writeJsonFile } from './json-file';
+import { asRecord, asString } from '../../domain/json/json-readers';
 import type { Clock } from '../../domain/ports/clock';
 import type { Disposable } from '../../domain/ports/disposable';
 import type { Logger } from '../../domain/ports/logger';
@@ -24,6 +26,26 @@ export const SETTLED_MS = 60_000;
 export const DEFAULT_TRASH_SWEEP_INTERVAL_MS = 86_400_000;
 
 const MS_PER_DAY = 86_400_000;
+
+/**
+ * How many batches one pass may remove for good.
+ *
+ * On the IRREVERSIBLE half only. An empty batch holds nothing, so taking one
+ * away destroys nothing and is not counted here.
+ *
+ * Sixteen, because a batch is made per act of sweeping -- one record thrown
+ * away, one presence file collected, one run of the cleanup command -- so
+ * ordinary use makes a few a day and a pass in a healthy store never comes near
+ * it. What it is for is the drift the refusal below cannot see: a clock that
+ * moved LESS than the retention makes nearly every batch look expired at once,
+ * and no jump was made that anything could notice. A pass with a ceiling takes
+ * sixteen of them, leaves the rest where they are and says so.
+ *
+ * A person whose store really does make more than sixteen batches a day meets
+ * that same warning, and it is true of their store: the trash holds more than
+ * the retention promised it would.
+ */
+export const MAX_EXPIRED_PER_PASS = 16;
 
 export interface StorageCleanerOptions {
   readonly layout: StorageLayout;
@@ -59,6 +81,15 @@ export interface CollectOutcome {
   readonly expired: readonly string[];
   /** Directories removed because they held nothing at all, relative to `trash/`. */
   readonly empty: readonly string[];
+  /**
+   * Batches old enough to go that the ceiling kept, oldest first.
+   *
+   * Empty when the pass was refused: it was the refusal that kept them then,
+   * and nothing looked at the trash at all.
+   */
+  readonly heldBack: readonly string[];
+  /** Why no pass was made, or `null` when one was. */
+  readonly refused: string | null;
 }
 
 /**
@@ -173,12 +204,33 @@ export class StorageCleaner implements Disposable {
    * -- at any age, since a batch that holds nothing has nothing to keep for the
    * retention.
    *
+   * Two guards stand in front of the removal, and they are the same hazard met
+   * from two sides. A batch's age is read off the WALL CLOCK, which does not
+   * only move forwards at one second per second: NTP on a machine with a flat
+   * battery, a virtual machine resumed from a snapshot, a second system with
+   * another RTC, a person correcting the date. A jump forwards makes every
+   * batch look expired at once -- and `trash/` is the only way back from
+   * `remove`, from the presence sweep and from `forgetClosedTerminals`. So a
+   * jump LONGER than the retention refuses the pass outright, because a jump
+   * like that is an incident and not a reason to remove anything; and a drift
+   * shorter than the retention, which nothing can tell from time passing, meets
+   * the ceiling instead (`MAX_EXPIRED_PER_PASS`).
+   *
    * Throws if the trash cannot be read, and treats "no trash at all" as the
    * empty answer it is.
    */
   public async collect(): Promise<CollectOutcome> {
     const { layout, logger, retentionDays } = this._options;
     const at = this._options.clock.now();
+    const refused = await this._reasonToRefuse(at);
+    if (refused !== null) {
+      // The mark is deliberately NOT moved on. Were it written here, the next
+      // pass would measure from the jumped clock, find no jump and remove
+      // everything -- which would make this refusal a delay of one pass. Left
+      // where it is, it also means a clock PUT BACK needs nothing from anybody:
+      // the gap to the last real pass is a normal one again.
+      return { expired: [], empty: [], heldBack: [], refused };
+    }
     // Millisecond arithmetic against a local day, the same tolerance the
     // journal's retention takes: around a daylight-saving change this can be a
     // day out, and a date library would cost more than it saves.
@@ -186,10 +238,18 @@ export class StorageCleaner implements Disposable {
     const settled = trashStamp(new Date(at.getTime() - SETTLED_MS));
 
     const expired: string[] = [];
+    const heldBack: string[] = [];
     const empty: string[] = [];
     for (const name of await this._batchNames()) {
       const path = join(layout.trashDir, name);
       if (name.slice(0, cutoff.length) < cutoff) {
+        // Oldest first, because `_batchNames` sorts and the order is the
+        // stamps' own: what a capped pass keeps is what a person is likeliest
+        // to still want.
+        if (expired.length >= MAX_EXPIRED_PER_PASS) {
+          heldBack.push(name);
+          continue;
+        }
         await rm(path, { recursive: true, force: true });
         expired.push(name);
         logger.info('a batch in the trash was removed', {
@@ -205,7 +265,20 @@ export class StorageCleaner implements Disposable {
     if (empty.length > 0) {
       logger.info('empty directories were taken out of the trash', { directories: empty });
     }
-    return { expired, empty };
+    if (heldBack.length > 0) {
+      // A warning rather than a note. In a store whose clock is right this
+      // never happens, so the line means one of two things and both are worth
+      // a person's eye: the clock has drifted, or the trash is growing faster
+      // than the retention takes it away.
+      logger.warn('one pass may remove only so many batches, so the trash still holds some that are older than the retention', {
+        removed: expired.length,
+        left: heldBack.length,
+        ceiling: MAX_EXPIRED_PER_PASS,
+        trash: layout.trashDir,
+      });
+    }
+    await this._rememberPass(at);
+    return { expired, empty, heldBack, refused: null };
   }
 
   /** Begins the daily pass. A second call does nothing. */
@@ -275,6 +348,97 @@ export class StorageCleaner implements Disposable {
     }
     removed.push(relative);
     return true;
+  }
+
+  /**
+   * Why this pass must not run, or `null` when it may.
+   *
+   * The measurement is the gap between now and the mark the last pass left. A
+   * gap longer than the retention means every batch in the trash would go in a
+   * single pass -- and the two things that make such a gap, a clock that jumped
+   * and a machine that was off for a month, cannot be told apart from inside
+   * the store. So both are refused, because the two mistakes do not cost the
+   * same: keeping more than was promised costs disk, and removing the batches
+   * is every undo a person has (I.3).
+   *
+   * The way out is one act by the person on one file, and the warning names it.
+   */
+  private async _reasonToRefuse(at: Date): Promise<string | null> {
+    const { layout, logger, retentionDays } = this._options;
+    const since = await this._lastPassAt();
+    if (since === null) {
+      return null;
+    }
+    const moved = at.getTime() - since.getTime();
+    if (moved <= retentionDays * MS_PER_DAY) {
+      return null;
+    }
+    const days = Math.round(moved / MS_PER_DAY);
+    logger.warn(
+      'the trash was left as it is, because the clock stands further past the last pass than the retention itself',
+      {
+        lastPass: since.toISOString(),
+        now: at.toISOString(),
+        movedDays: days,
+        retentionDays,
+        accept: `delete ${layout.trashSweepFile} to accept this clock -- the next pass then begins as a first one`,
+      }
+    );
+    return (
+      `the clock stands ${days} days past the last pass over the trash, which is longer than ` +
+      `the ${retentionDays} days a batch is kept, so every batch in there would go at once`
+    );
+  }
+
+  /**
+   * When the last pass ran, or `null` when nothing readable says.
+   *
+   * `null` lets the pass go ahead. A store that never had one -- a fresh
+   * profile, or the first window of this build over an old store -- has nothing
+   * to measure a clock against, and refusing on absence would be a build that
+   * collects nothing at all until a person deletes a file. That case is what
+   * the ceiling is for: it needs no history.
+   */
+  private async _lastPassAt(): Promise<Date | null> {
+    const file = this._options.layout.trashSweepFile;
+    const read = await readJsonFile(file);
+    if (read.kind === 'absent') {
+      return null;
+    }
+    const written = read.kind === 'value' ? asString(asRecord(read.value)?.at) : null;
+    const at = written === null ? null : new Date(written);
+    if (at !== null && !Number.isNaN(at.getTime())) {
+      return at;
+    }
+    this._options.logger.warn(
+      'the mark left by the last pass over the trash could not be read, so this pass has nothing to measure the clock against',
+      {
+        file,
+        reason: read.kind === 'unreadable' ? read.reason : 'it holds no moment under `at`',
+      }
+    );
+    return null;
+  }
+
+  /**
+   * Leaves the mark that this pass ran, which is the whole of what the next one
+   * has to measure a clock against.
+   *
+   * After the removal and not before it, so a pass that threw does not claim to
+   * have happened. A failure to write is a warning rather than a failure of the
+   * pass, and the direction of that error is the reason: the next pass then
+   * measures from an OLDER mark, so the only thing it makes easier is refusing.
+   */
+  private async _rememberPass(at: Date): Promise<void> {
+    const file = this._options.layout.trashSweepFile;
+    try {
+      await writeJsonFile(file, { at: at.toISOString() });
+    } catch (cause: unknown) {
+      this._options.logger.warn(
+        'the pass over the trash could not leave its mark, so the next one measures the clock from further back',
+        { file, reason: String(cause) }
+      );
+    }
   }
 
   private async _batchNames(): Promise<readonly string[]> {

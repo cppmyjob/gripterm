@@ -297,6 +297,7 @@ export {
 } from './infrastructure/store/storage-layout';
 export {
   DEFAULT_TRASH_SWEEP_INTERVAL_MS,
+  MAX_EXPIRED_PER_PASS,
   SETTLED_MS,
   StorageCleaner,
   type CollectOutcome,
