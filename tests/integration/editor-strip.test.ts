@@ -345,6 +345,106 @@ suite('the strip of our own', () => {
   });
 
   /*
+   * Point 2 of the stand, 2026-08-25: "sitting 3 settled with terminals in
+   * columns 2 and 3".
+   *
+   * The strip is remembered as a `ViewColumn`, and a `ViewColumn` is a POSITION
+   * -- closing a group in front of ours moves ours and nothing tells us. When
+   * the move takes our number past the end of the list, the number names no
+   * group at all, and "no group at my number" was read as "the strip is not
+   * ours any more": the next terminal found nothing remembered and split a
+   * second strip.
+   *
+   * Measured in Cursor the same day, sitting 3 of the stand run at 13:17: our
+   * group was made at column 4 with three groups beside it (`a group of our own
+   * was opened below the editors {"column":4}`); 230 ms later the recording
+   * holds three groups in all, with our terminal listed at column 2 -- and the
+   * log's next line is a SECOND `a group of our own was opened below the
+   * editors`. What put the numbering out there is Cursor's own "New Agent"
+   * editor, which lives in an editor part of its own; what is asserted here is
+   * the move itself, made by a person closing a group, because that needs no
+   * fork and no agent pane and is the same defect.
+   */
+  test('finds the strip again when the group it made is renumbered past the end of the list', async () => {
+    const { gateway } = await api();
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+
+    // Two columns of the person's, so the strip is made as a third group and
+    // its number has somewhere to fall from.
+    for (const column of [vscode.ViewColumn.One, vscode.ViewColumn.Two]) {
+      const file = await vscode.workspace.openTextDocument({
+        content: `a file of the person's, in column ${String(column)}`,
+        language: 'plaintext',
+      });
+      await vscode.window.showTextDocument(file, { viewColumn: column });
+    }
+
+    const one = await gateway.create({
+      terminalId: { value: '550e8400-e29b-41d4-a716-4466554400a0' } as unknown as Spec['terminalId'],
+      name: 'gripterm-renumbered-one',
+      cwd: os.tmpdir(),
+      env: {},
+      shellPath: null,
+      shellArgs: [],
+    });
+    try {
+      await waitFor('the first terminal to get a tab', () => columnOf('gripterm-renumbered-one') !== undefined);
+      const made = columnOf('gripterm-renumbered-one');
+      assert.ok(made !== undefined);
+      assert.equal(
+        vscode.window.tabGroups.all.length,
+        3,
+        `the strip was not made as a third group: ${describeGroups()}`
+      );
+
+      /*
+       * The person closes the group at the front. Every column after it loses
+       * one, so the number the strip was made with now names nothing -- which
+       * is the state, and the only state, this test is about.
+       */
+      const first = groupAt(vscode.ViewColumn.One);
+      assert.ok(first, 'there is no first group to close');
+      await vscode.window.tabGroups.close(first, true);
+      await waitFor('the group in front of the strip to go', () => vscode.window.tabGroups.all.length === 2);
+      const moved = columnOf('gripterm-renumbered-one');
+      assert.equal(moved, vscode.ViewColumn.Two, `the strip did not move: ${describeGroups()}`);
+      // `- 1` rather than the plain comparison, because a `ViewColumn` counts
+      // from one and a length from zero: subtracting keeps both of them
+      // numbers, where comparing an enum to a count is a comparison the linter
+      // is right to refuse.
+      assert.ok(
+        made - 1 >= vscode.window.tabGroups.all.length,
+        `the remembered number still names a group: ${describeGroups()}`
+      );
+
+      const two = await gateway.create({
+        terminalId: { value: '550e8400-e29b-41d4-a716-4466554400a1' } as unknown as Spec['terminalId'],
+        name: 'gripterm-renumbered-two',
+        cwd: os.tmpdir(),
+        env: {},
+        shellPath: null,
+        shellArgs: [],
+      });
+      try {
+        await waitFor('the second terminal to get a tab', () => columnOf('gripterm-renumbered-two') !== undefined);
+        // The same GROUP as the first, asked by where the first one is now:
+        // the number it was made with is the thing under test and cannot be
+        // the thing asserted.
+        assert.equal(
+          columnOf('gripterm-renumbered-two'),
+          columnOf('gripterm-renumbered-one'),
+          `a second strip was made instead of the one that was there: ${describeGroups()}`
+        );
+      } finally {
+        two.dispose();
+      }
+    } finally {
+      one.dispose();
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    }
+  });
+
+  /*
    * The customer's first complaint, 2026-08-21: "терминалы открываются в
    * отдельной панели. Однако если перезапустить приложение они откроются в новой
    * панели а старая панель останется пустой".

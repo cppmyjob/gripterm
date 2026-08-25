@@ -1393,7 +1393,10 @@ export class VsCodeEditorStrip {
       return null;
     }
     const group = vscode.window.tabGroups.all.find((one) => one.viewColumn === column);
-    if (group === undefined || group.tabs.some((tab) => !(tab.input instanceof vscode.TabInputTerminal))) {
+    if (group === undefined) {
+      return this._foundByItsTerminals(column);
+    }
+    if (group.tabs.some((tab) => !(tab.input instanceof vscode.TabInputTerminal))) {
       this._column = null;
       return null;
     }
@@ -1415,6 +1418,64 @@ export class VsCodeEditorStrip {
       return null;
     }
     return column;
+  }
+
+  /**
+   * The strip found by what is IN it, for the one case where the remembered
+   * number names NO GROUP AT ALL.
+   *
+   * **Point 2 of the stand, 2026-08-25: "sitting 3 settled with terminals in
+   * columns 2 and 3".** A `ViewColumn` is a position, not an identity: closing
+   * a group in front of ours moves ours and nothing tells us, and when the move
+   * takes our number past the end of the list the number names nothing.
+   * `_kept()` read that as "the strip is not ours any more", let go, and the
+   * next terminal of the same restore split a SECOND strip. Measured in Cursor
+   * that day, sitting 3 of the run at 13:17: our group was made at column 4 of
+   * four; 230 ms later the window listed three groups in all with our terminal
+   * at column 2, and the log's next line is a second `a group of our own was
+   * opened below the editors`. What moved the numbering there is Cursor's own
+   * "New Agent" editor, which lives in an editor part of its own -- but the
+   * move needs no fork: a person closing a group above the strip does the same
+   * thing, and that is what the live suite holds this to.
+   *
+   * **Only when the number names nothing**, and that is the whole of the
+   * narrowness. A number that names a group which is not ours is a number that
+   * has come to mean somebody else's group, and letting go there is right --
+   * that rule is older than this one and is what stops the strip walking into a
+   * layout the customer complained about.
+   *
+   * **And only when the answer is not a guess.** A group is ours here if it
+   * holds something and holds nothing but terminals, which is the same
+   * question `_kept()` asks of the remembered number and the same one
+   * `_aloneInTheArea` asks of a lone group. With two such groups in the window
+   * -- a person's own terminal editors beside ours -- nothing here can tell
+   * which is which, so it lets go exactly as before and the caller makes a
+   * strip. The rule can only ever turn "make a second strip" into "use the one
+   * that is there", never one of the person's groups into ours.
+   */
+  private _foundByItsTerminals(was: vscode.ViewColumn): vscode.ViewColumn | null {
+    const held = vscode.window.tabGroups.all.filter(
+      (group) => group.tabs.length > 0 && group.tabs.every((tab) => tab.input instanceof vscode.TabInputTerminal)
+    );
+    const [only] = held;
+    if (held.length !== 1 || only === undefined) {
+      this._logger.info('the number the terminals` group was remembered by names no group, and nothing in the window says which group is theirs', {
+        was,
+        groups: vscode.window.tabGroups.all.length,
+        holdingNothingButTerminals: held.length,
+      });
+      this._column = null;
+      return null;
+    }
+    this._column = only.viewColumn;
+    // Found BY its terminals, so there is nothing left to wait for.
+    this._awaitingTheFirstTerminal = false;
+    this._logger.info('the number the terminals` group was remembered by named no group, so the group was found again by the terminals in it', {
+      was,
+      column: only.viewColumn,
+      groups: vscode.window.tabGroups.all.length,
+    });
+    return only.viewColumn;
   }
 
   /**
