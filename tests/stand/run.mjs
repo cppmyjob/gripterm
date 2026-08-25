@@ -41,6 +41,11 @@ const require = createRequire(import.meta.url);
 
 const REPO = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const LABEL = 'stand';
+
+// CommonJS, and required rather than imported, because three module systems
+// need this one function: this file and `.vscode-test.mjs` are ESM, and its own
+// suite is Jest. See the head of `tools/fork-build.js`.
+const { forkBuild } = require(join(REPO, 'tools', 'fork-build.js'));
 const BASE = join(REPO, '.vscode-test');
 const STORE = runStore(LABEL);
 const EXTENSIONS = join(BASE, `extensions-${LABEL}`);
@@ -411,6 +416,25 @@ async function main() {
       // `tests/stand/no-machine-in-the-record.test.ts` holds this line, and the
       // observer's `neutral`, over the recordings rather than over the comment.
       editor: basename(editor),
+      /*
+       * WHICH BUILD of it, which the line above cannot say and which every
+       * question this recording is evidence for turns out to need.
+       *
+       * The stand measures a WORKBENCH, and the workbench of a fork ships every
+       * few days. `gate/allowed-red.json` explains a point with a sentence read
+       * out of the "Cursor 3.17.8 bundle"; the Cursor that answered this run is
+       * 3.17.19, published two days after that sentence was written; and until
+       * now the recordings said `Cursor.exe` and stopped. So two runs that
+       * disagree could not be told apart from one run whose editor moved under
+       * it -- and on 2026-08-25 that is not hypothetical: the same probe
+       * measured `newGroupBelow` at 9 of 10 on one day and 10 of 10 on another,
+       * with both the folder and the build different between them, and nothing
+       * written down that separates the two.
+       *
+       * Read from the editor's own `product.json` and neutral by construction:
+       * five fields, no path. `tools/fork-build.js` holds that.
+       */
+      build: forkBuild(editor),
       recordedAt: new Date().toISOString(),
       derivedFrom: ['nothing -- every line after this one was written by the observer inside the window, or by the runner after it closed'],
       notMeasured: [

@@ -168,6 +168,75 @@ export interface AllowanceDocument {
   /** How many lines may live at once. */
   readonly cap: number;
   readonly allowances: readonly Allowance[];
+  /**
+   * The other kind of line: a ceiling on a RATE rather than on a point.
+   *
+   * `cap` deliberately does not count these. It bounds how much of the STAND may
+   * be red at once, and a rate line is not redness admitted -- today's is
+   * `atMost: 0`, which admits nothing and asserts everything. What bounds this
+   * array instead is `ratesAgainstBudget`, which refuses a ceiling over a check
+   * nothing measures: a line here cannot outlive the probe it is about.
+   */
+  readonly rates: readonly RateCeiling[];
+}
+
+/**
+ * A ceiling on how often one editor command may MISS, out of a named number of
+ * attempts.
+ *
+ * **Why the budget needed a second shape.** The stand answers in points -- named
+ * things that went wrong -- and Ш9 measures something a point cannot hold: the
+ * customer's editor is a fork, and the fork's `workbench.action.newGroupBelow`
+ * was measured on 2026-08-22 to do nothing at all on one call in ten. The plan
+ * anticipated exactly that and named the rule for it: "if the miss is really one
+ * in ten, a green run is unreachable, and the rule has to be `the miss rate did
+ * not grow`". A rate is not a count of defects; it is a fraction, and the
+ * denominator is part of the fact.
+ *
+ * Everything about a line's LIFE -- the date, the renewal counter, who admitted
+ * it and who has not -- is the same here as on an allowance, and is read by the
+ * same code, so that a Cursor ceiling nobody tightens dies on its date exactly
+ * as an admitted point does.
+ */
+export interface RateCeiling {
+  /** The check this bounds, spelled as the probe spells it. */
+  readonly check: string;
+  /** What the check asserts, for a reader. Nothing compares it. */
+  readonly says: string;
+  /**
+   * How many attempts the ceiling was measured over.
+   *
+   * The denominator, held because this file stores only the numerator: nought
+   * misses out of one attempt and nought out of ten are not the same fact, and
+   * the first is what a probe that quietly gave up looks like. A run of fewer
+   * attempts than this is refused rather than compared.
+   */
+  readonly of: number;
+  /** The most misses admitted, out of `of`. Worse is refused; better is not. */
+  readonly atMost: number;
+  /** The numbers this check actually came back with, and when. Read by people. */
+  readonly seen: string;
+  /** The magnitude a person needs, in words. Nothing here reads it. */
+  readonly measured: string;
+  /** What closes this line, so that a reader knows whom it is waiting for. */
+  readonly why: string;
+  /** Who decided this ceiling may stand, in their own name. See `Allowance.allowedBy`. */
+  readonly allowedBy: string;
+  /** Who ratified it, or `null` for "nobody has". See `Allowance.ratifiedBy`. */
+  readonly ratifiedBy: string | null;
+  /** How many times `expires` has been moved on this line, from 0. */
+  readonly renewals: number;
+  /** `YYYY-MM-DD`. The first day on which this line no longer stands. */
+  readonly expires: string;
+}
+
+/** What a probe came back with, for one check. */
+export interface RateMeasured {
+  readonly check: string;
+  /** How many attempts were made. Compared with `RateCeiling.of`. */
+  readonly attempts: number;
+  /** How many of them missed. Compared with `RateCeiling.atMost`. */
+  readonly misses: number;
 }
 
 export interface Refusal {
@@ -266,56 +335,18 @@ export function readAllowances(text: string): AllowanceDocument {
           'at this point is admitted too, and leaving it out would decide that by default rather than in writing.'
       );
     }
-    const expires = line.expires;
-    if (typeof expires !== 'string' || !A_DATE.test(expires) || Number.isNaN(Date.parse(expires))) {
-      throw new Error(
-        `allowance ${String(at + 1)} has \`expires\` ${JSON.stringify(expires)}. Every line stops working on a day ` +
-          'named as YYYY-MM-DD -- a workaround with no expiry is a note, not a deadline (II.6).'
-      );
-    }
-    const renewals = line.renewals;
-    if (typeof renewals !== 'number' || !Number.isInteger(renewals) || renewals < 0) {
-      throw new Error(
-        `allowance ${String(at + 1)} has \`renewals\` ${JSON.stringify(renewals)}. It counts how many times ` +
-          '`expires` has been moved on this line, from 0. Leaving it out would make a date somebody moved twice ' +
-          'indistinguishable from one nobody has touched.'
-      );
-    }
-    const ratifiedBy = line.ratifiedBy;
-    if (ratifiedBy !== null && (typeof ratifiedBy !== 'string' || ratifiedBy.trim().length === 0)) {
-      throw new Error(
-        `allowance ${String(at + 1)} has \`ratifiedBy\` ${JSON.stringify(ratifiedBy)}. It is the name of whoever ` +
-          'ratified this line, or `null` for "nobody has, and the owner has not seen it". Leaving the key out ' +
-          'would let silence be read as either one.'
-      );
-    }
-    if (ratifiedBy !== null && !(A_DAY_INSIDE.test(ratifiedBy) && A_PLACE.test(ratifiedBy))) {
-      throw new Error(
-        `allowance ${String(at + 1)} has \`ratifiedBy\` ${JSON.stringify(ratifiedBy)}, which names somebody but ` +
-          'does not say WHEN they said it or WHERE it can be read. A ratification carries a day as YYYY-MM-DD and ' +
-          'a place to go and look -- a commit id, a path, a file, a URL. The shape is all that is checked here: ' +
-          'nothing in this file can tell whether the place says what the line claims, and it does not pretend to.'
-      );
-    }
-    const allowedBy = text_(line, 'allowedBy', at);
-    if (ratifiedBy === null && NAMES_THE_OWNER.test(allowedBy)) {
-      throw new Error(
-        `allowance ${String(at + 1)} says it was allowed by ${JSON.stringify(allowedBy)} while \`ratifiedBy\` is ` +
-          'null, which is to say nobody has ratified it and the owner has not seen it. A line may not put its ' +
-          'own decision on the owner and record no ratification for it: name whoever actually decided in ' +
-          '`allowedBy`, and put the owner in `ratifiedBy` on the day they agree.'
-      );
-    }
+    const what = `allowance ${String(at + 1)}`;
+    const { allowedBy, ratifiedBy, renewals, expires } = deadlineAndSignature(line, what);
 
     return {
       point,
-      says: text_(line, 'says', at),
+      says: text_(line, 'says', what),
       answer: answer as Exclude<Answer, 'green'>,
       atMost,
       mayBeGreen,
-      seen: text_(line, 'seen', at),
-      measured: text_(line, 'measured', at),
-      why: text_(line, 'why', at),
+      seen: text_(line, 'seen', what),
+      measured: text_(line, 'measured', what),
+      why: text_(line, 'why', what),
       allowedBy,
       ratifiedBy,
       renewals,
@@ -323,7 +354,135 @@ export function readAllowances(text: string): AllowanceDocument {
     };
   });
 
-  return { what: whatOf(document), cap, allowances };
+  return { what: whatOf(document), cap, allowances, rates: readRates(document.rates) };
+}
+
+/**
+ * The four fields EVERY line of this document carries, whatever the line is
+ * about, read in one place so that the two kinds cannot drift apart.
+ *
+ * It was written by extracting it rather than by designing it: the rules here
+ * are the ones `readAllowances` already held over an admitted point, and the
+ * rate ceilings of Ш9 have to be held to the same ones -- or the newer kind of
+ * line becomes the cheap place to put a permission nobody dated. What a reader
+ * can rely on is that this document has no second answer to "how long may this
+ * stand" and no second answer to "who said so".
+ *
+ * @param line the object as it stands in the file
+ * @param what how to name it in a refusal -- `allowance 2`, `rate 1`
+ */
+function deadlineAndSignature(
+  line: Record<string, unknown>,
+  what: string
+): { allowedBy: string, ratifiedBy: string | null, renewals: number, expires: string } {
+  const expires = line.expires;
+  if (typeof expires !== 'string' || !A_DATE.test(expires) || Number.isNaN(Date.parse(expires))) {
+    throw new Error(
+      `${what} has \`expires\` ${JSON.stringify(expires)}. Every line stops working on a day ` +
+        'named as YYYY-MM-DD -- a workaround with no expiry is a note, not a deadline (II.6).'
+    );
+  }
+  const renewals = line.renewals;
+  if (typeof renewals !== 'number' || !Number.isInteger(renewals) || renewals < 0) {
+    throw new Error(
+      `${what} has \`renewals\` ${JSON.stringify(renewals)}. It counts how many times ` +
+        '`expires` has been moved on this line, from 0. Leaving it out would make a date somebody moved twice ' +
+        'indistinguishable from one nobody has touched.'
+    );
+  }
+  const ratifiedBy = line.ratifiedBy;
+  if (ratifiedBy !== null && (typeof ratifiedBy !== 'string' || ratifiedBy.trim().length === 0)) {
+    throw new Error(
+      `${what} has \`ratifiedBy\` ${JSON.stringify(ratifiedBy)}. It is the name of whoever ` +
+        'ratified this line, or `null` for "nobody has, and the owner has not seen it". Leaving the key out ' +
+        'would let silence be read as either one.'
+    );
+  }
+  if (ratifiedBy !== null && !(A_DAY_INSIDE.test(ratifiedBy) && A_PLACE.test(ratifiedBy))) {
+    throw new Error(
+      `${what} has \`ratifiedBy\` ${JSON.stringify(ratifiedBy)}, which names somebody but ` +
+        'does not say WHEN they said it or WHERE it can be read. A ratification carries a day as YYYY-MM-DD and ' +
+        'a place to go and look -- a commit id, a path, a file, a URL. The shape is all that is checked here: ' +
+        'nothing in this file can tell whether the place says what the line claims, and it does not pretend to.'
+    );
+  }
+  const allowedBy = text_(line, 'allowedBy', what);
+  if (ratifiedBy === null && NAMES_THE_OWNER.test(allowedBy)) {
+    throw new Error(
+      `${what} says it was allowed by ${JSON.stringify(allowedBy)} while \`ratifiedBy\` is ` +
+        'null, which is to say nobody has ratified it and the owner has not seen it. A line may not put its ' +
+        'own decision on the owner and record no ratification for it: name whoever actually decided in ' +
+        '`allowedBy`, and put the owner in `ratifiedBy` on the day they agree.'
+    );
+  }
+  return { allowedBy, ratifiedBy, renewals, expires };
+}
+
+/**
+ * The rate ceilings, or a throw naming what is wrong with them.
+ *
+ * **Absent is legal here, and this is the one place in this file where absence
+ * is.** Everywhere else a missing field would make the document grant MORE the
+ * worse it was written -- a missing `expires` is a line that never dies, a
+ * missing `atMost` a line that admits any number. A missing `rates` grants
+ * nothing at all: `ratesAgainstBudget` refuses every check it is handed that no
+ * line admits, so a document with no rates in it refuses the whole Cursor
+ * strip. The asymmetry is deliberate, and it is what keeps a budget written
+ * before Ш9 readable by the code that came after it.
+ *
+ * @param value whatever stood at `rates` in the file
+ */
+function readRates(value: unknown): readonly RateCeiling[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`the document's \`rates\` is ${JSON.stringify(value)}, and it must be an array of ceilings`);
+  }
+  const named = new Set<string>();
+  return value.map((row, at) => {
+    const what = `rate ${String(at + 1)}`;
+    const line = asRecord(row, what);
+    const check = text_(line, 'check', what);
+    if (named.has(check)) {
+      throw new Error(
+        `the document bounds ${JSON.stringify(check)} twice, and two ceilings over one check cannot both be the budget`
+      );
+    }
+    named.add(check);
+
+    const of = line.of;
+    if (typeof of !== 'number' || !Number.isInteger(of) || of < 1) {
+      throw new Error(
+        `${what} has \`of\` ${JSON.stringify(of)}. A rate is a fraction and this file stores only its ` +
+          'numerator, so the number of attempts it was measured over is written down beside it: nought misses ' +
+          'out of one and nought out of ten are not the same fact.'
+      );
+    }
+    const atMost = line.atMost;
+    if (typeof atMost !== 'number' || !Number.isInteger(atMost) || atMost < 0 || atMost > of) {
+      throw new Error(
+        `${what} has \`atMost\` ${JSON.stringify(atMost)}, which is not a number of misses out of ` +
+          `${String(of)}. Nought is a legal ceiling here, and the commonest one: unlike an admitted point, a rate ` +
+          'line is written whether or not anything is wrong, because its job is to catch the day it becomes wrong.'
+      );
+    }
+
+    const { allowedBy, ratifiedBy, renewals, expires } = deadlineAndSignature(line, what);
+    return {
+      check,
+      says: text_(line, 'says', what),
+      of,
+      atMost,
+      seen: text_(line, 'seen', what),
+      measured: text_(line, 'measured', what),
+      why: text_(line, 'why', what),
+      allowedBy,
+      ratifiedBy,
+      renewals,
+      expires,
+    };
+  });
 }
 
 /**
@@ -347,6 +506,55 @@ export function standingAllowances(document: AllowanceDocument, today: string): 
     });
   }
 
+  /*
+   * The rate ceilings, held to the same date and the same renewal counter.
+   *
+   * They come through this function rather than through the Cursor stage's own
+   * judge on purpose: `allowance.test.ts` calls this against the real file on
+   * every `npx jest`, so a Cursor ceiling nobody tightened dies on its date in
+   * under a second with no editor -- instead of thirty seconds into a stage
+   * that opens a window, once a fortnight, on somebody's desktop. It is the
+   * same argument that put the points' deadline here.
+   *
+   * The refusal carries `point: null` because a rate is not a point of the
+   * stand, and the check it is about is named in the sentence.
+   */
+  for (const line of document.rates) {
+    if (today >= line.expires) {
+      refusals.push({
+        point: null,
+        because:
+          `the ceiling on ${line.check} was admitted until ${line.expires} by ${line.allowedBy} ` +
+          `(${line.ratifiedBy === null ? 'ratified by nobody since' : `ratified by ${line.ratifiedBy}`}), and that ` +
+          `line expired on ${line.expires}. What closes it: ${line.why}. Measure it again and write down what ` +
+          'came back, or have the owner move the date in gate/allowed-red.json with a reason.',
+      });
+    }
+    /*
+     * The renewal cap, and it applies only where there is a permission to cap.
+     *
+     * `renewals` exists so that a line ADMITTING redness cannot live for ever in
+     * fortnight steps taken by the party that never asked. A ceiling of nought
+     * admits nothing -- it is an assertion that carries a date only because the
+     * fork it was measured on ships every few days, so the NUMBER goes stale
+     * while the check keeps passing. Capping the renewals of a green line would
+     * mean asking the owner to sign, every eight weeks, for a check that has
+     * never once been red: it teaches signing as a way to make a colour go away,
+     * which is the habit this whole document exists against. `expires` still
+     * fires, and that is the pressure that belongs here -- re-measure, do not
+     * ratify.
+     */
+    if (line.atMost > 0 && line.ratifiedBy === null && line.renewals >= 2) {
+      refusals.push({
+        point: null,
+        because:
+          `the ceiling on ${line.check} admits ${String(line.atMost)} miss(es), has been renewed ` +
+          `${String(line.renewals)} times, and nobody has ratified it. An unratified line that admits redness may ` +
+          'be extended ONCE.',
+      });
+    }
+  }
+
   for (const line of document.allowances) {
     if (today >= line.expires) {
       refusals.push({
@@ -367,6 +575,82 @@ export function standingAllowances(document: AllowanceDocument, today: string): 
           'own deadline again, so it takes a name in `ratifiedBy` -- or the point fixed and the line deleted. ' +
           'The count is written by hand and can be written down; doing so is then a lie in a diff, which is the ' +
           'whole of what this buys.',
+      });
+    }
+  }
+
+  return refusals;
+}
+
+/**
+ * Everything the gate refuses about what the Cursor strip measured.
+ *
+ * An empty list is the only thing the gate may call green about that stage --
+ * and unlike every other stage, the exit code is not even a second opinion.
+ * Measured 2026-08-25: a Cursor test host that ran a failing suite exited 0,
+ * where VS Code 1.134.0 exited 1 on the same file. So the number a probe WROTE
+ * DOWN is the whole of the evidence, and this is what reads it.
+ *
+ * **Both directions, and the second is the one that rots quietly.** A check
+ * nothing admits is refused, because a probe measuring something the budget
+ * never named is a number nobody chose to accept. A ceiling over a check
+ * nothing measured is refused too, because a line about a probe that no longer
+ * runs reads as coverage and is none -- the same rule
+ * `verdictAgainstAllowances` holds for a point nothing judged.
+ *
+ * **The deadline is deliberately NOT here.** It is in `standingAllowances`,
+ * which `allowance.test.ts` calls against the real file on every `npx jest`.
+ * Repeating it here would print every expiry twice on a full gate.
+ *
+ * @param measured what the probe wrote down, one entry per check
+ * @param document the budget as read from `gate/allowed-red.json`
+ */
+export function ratesAgainstBudget(
+  measured: readonly RateMeasured[],
+  document: AllowanceDocument
+): readonly Refusal[] {
+  const refusals: Refusal[] = [];
+  const admitted = new Map(document.rates.map((one) => [one.check, one]));
+
+  for (const came of measured) {
+    const line = admitted.get(came.check);
+    if (line === undefined) {
+      refusals.push({
+        point: null,
+        because:
+          `${came.check} missed ${String(came.misses)} of ${String(came.attempts)} and nothing in the budget ` +
+          'names that check. A number nobody admitted is not a number the gate may pass.',
+      });
+      continue;
+    }
+    if (came.attempts < line.of) {
+      refusals.push({
+        point: null,
+        because:
+          `${came.check} was measured over ${String(came.attempts)} attempts and its ceiling was measured over ` +
+          `${String(line.of)}. A rate over fewer attempts is not the same fact -- and a probe that quietly gave ` +
+          'up looks exactly like this.',
+      });
+      continue;
+    }
+    if (came.misses > line.atMost) {
+      refusals.push({
+        point: null,
+        because:
+          `${came.check} missed ${String(came.misses)} of ${String(came.attempts)}, over the ` +
+          `${String(line.atMost)} its line admits. What the line last saw: ${line.seen}`,
+      });
+    }
+  }
+
+  const answered = new Set(measured.map((one) => one.check));
+  for (const line of document.rates) {
+    if (!answered.has(line.check)) {
+      refusals.push({
+        point: null,
+        because:
+          `the budget bounds ${line.check} and nothing measured it. A ceiling over a check that no longer runs ` +
+          'reads as coverage and is none.',
       });
     }
   }
@@ -462,10 +746,10 @@ function whatOf(document: Record<string, unknown>): readonly string[] {
 }
 
 /** One required sentence of a line, refused when it is missing or blank. */
-function text_(line: Record<string, unknown>, key: string, at: number): string {
+function text_(line: Record<string, unknown>, key: string, what: string): string {
   const value = line[key];
   if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new Error(`allowance ${String(at + 1)} has no \`${key}\`, and every line says who admitted what and why`);
+    throw new Error(`${what} has no \`${key}\`, and every line says who admitted what and why`);
   }
   return value;
 }

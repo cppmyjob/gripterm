@@ -557,5 +557,25 @@ export default tseslint.config(
   {
     files: ['**/*.js', '**/*.cjs'],
     languageOptions: { sourceType: 'commonjs' },
+  },
+  {
+    // The Cursor strip is Mocha, run inside an editor, written as CommonJS
+    // because nothing compiles it: `tests/cursor/*.js` is handed straight to the
+    // extension host. The integration suites get these same names from
+    // `"types": ["mocha"]` in their tsconfig, which is a thing a .js file has no
+    // equivalent of -- so they are declared here rather than left to `no-undef`,
+    // which would otherwise be switched off for the whole file and take every
+    // real typo with it.
+    files: ['tests/cursor/*.js'],
+    languageOptions: {
+      globals: {
+        suite: 'readonly',
+        suiteSetup: 'readonly',
+        suiteTeardown: 'readonly',
+        test: 'readonly',
+        setup: 'readonly',
+        teardown: 'readonly',
+      },
+    },
   }
 );

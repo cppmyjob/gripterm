@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ALLOWANCES, readAllowances, standingAllowances, verdictAgainstAllowances } from './allowance';
+import { ALLOWANCES, ratesAgainstBudget, readAllowances, standingAllowances, verdictAgainstAllowances } from './allowance';
 import { BUDGET, judge } from './judge';
 import { parseRecording } from './recording';
-import type { AllowanceDocument } from './allowance';
+import type { AllowanceDocument, RateMeasured } from './allowance';
 import type { Finding, Verdict } from './judge';
 
 /**
@@ -56,8 +56,12 @@ function verdictOf(findings: readonly Finding[]): Verdict {
 }
 
 /** A document with the given lines in it, which every case below then bends. */
-function documentOf(allowances: AllowanceDocument['allowances'], cap = 5): AllowanceDocument {
-  return { what: ['a document written by a test'], cap, allowances };
+function documentOf(
+  allowances: AllowanceDocument['allowances'],
+  cap = 5,
+  rates: AllowanceDocument['rates'] = []
+): AllowanceDocument {
+  return { what: ['a document written by a test'], cap, allowances, rates };
 }
 
 const ONE_LINE = {
@@ -457,6 +461,158 @@ describe('the budget of admitted redness', () => {
       const document = readAllowances(readFileSync(ALLOWANCES, 'utf8'));
 
       expect(verdictAgainstAllowances(judge(recording, BUDGET), document, TODAY)).toStrictEqual([]);
+    });
+  });
+  /*
+   * THE OTHER HALF OF THE SAME DOCUMENT, and it is here rather than in a file of
+   * its own because it is the same question asked of a different measurer.
+   *
+   * The stand answers in POINTS -- named things that went wrong -- and a point
+   * is admitted with a ceiling because 2026-08-25 measured its answer to be
+   * random. The Cursor strip answers in a RATE: how many of N attempts at one
+   * editor command missed. Ш9 anticipated exactly this and named the rule for
+   * it: "if the miss is really one in ten, a green run is unreachable, and the
+   * rule has to be `the miss rate did not grow`". A rate needs the same four
+   * things a point's line needs -- a ceiling, a date, a name, and a count of
+   * renewals -- and putting it anywhere else would be a second budget with a
+   * second expiry regime nobody reads.
+   */
+  describe('a ceiling on a rate, rather than on a point', () => {
+    const CEILING = {
+      check: 'cursor-newGroupBelow',
+      says: 'a group below is made',
+      of: 10,
+      atMost: 0,
+      seen: 'a number this fixture never has to be true about',
+      measured: 'nothing, this is a fixture',
+      why: 'a test',
+      allowedBy: 'a test',
+      ratifiedBy: null,
+      renewals: 0,
+      expires: '2026-09-08',
+    } as const;
+
+    function measured(misses: number, attempts = 10): readonly RateMeasured[] {
+      return [{ check: 'cursor-newGroupBelow', attempts, misses }];
+    }
+
+    it('lets through a rate at the ceiling its line admits', () => {
+      const document = documentOf([], 5, [{ ...CEILING, atMost: 1 }]);
+
+      expect(ratesAgainstBudget(measured(1), document)).toStrictEqual([]);
+    });
+
+    it('lets through a rate BELOW its ceiling, because a rate that improved is not a regression', () => {
+      const document = documentOf([], 5, [{ ...CEILING, atMost: 1 }]);
+
+      expect(ratesAgainstBudget(measured(0), document)).toStrictEqual([]);
+    });
+
+    it('refuses a rate that grew past its ceiling, and says both numbers', () => {
+      const document = documentOf([], 5, [CEILING]);
+
+      const refusals = ratesAgainstBudget(measured(2), document);
+
+      expect(refusals).toHaveLength(1);
+      expect(refusals[0]?.because).toContain('2');
+      expect(refusals[0]?.because).toContain('cursor-newGroupBelow');
+    });
+
+    /*
+     * A rate is a fraction and this budget stores only its numerator, so the
+     * denominator has to be held somewhere: nought misses out of one attempt and
+     * nought out of ten are not the same fact, and the first is what a probe that
+     * quietly gave up looks like.
+     */
+    it('refuses a run of fewer attempts than the ceiling was measured over', () => {
+      const document = documentOf([], 5, [CEILING]);
+
+      const refusals = ratesAgainstBudget(measured(0, 3), document);
+
+      expect(refusals).toHaveLength(1);
+      expect(refusals[0]?.because).toContain('3');
+      expect(refusals[0]?.because).toContain('10');
+    });
+
+    it('refuses a check nothing in the budget admits', () => {
+      const document = documentOf([], 5, []);
+
+      expect(ratesAgainstBudget(measured(0), document)).toHaveLength(1);
+    });
+
+    /*
+     * The other direction, and it is the one that rots quietly: a ceiling over a
+     * check that no longer runs reads as coverage and is none. It is the same
+     * rule `verdictAgainstAllowances` holds for a point nothing judged.
+     */
+    it('refuses a ceiling over a check nothing measured', () => {
+      const document = documentOf([], 5, [CEILING]);
+
+      const refusals = ratesAgainstBudget([], document);
+
+      expect(refusals).toHaveLength(1);
+      expect(refusals[0]?.because).toContain('cursor-newGroupBelow');
+    });
+
+    /*
+     * The deadline and the renewal counter reach the rate lines through the same
+     * function the points use, so that a Cursor ceiling nobody tightens dies on
+     * its date under a bare `npx jest`, with no editor -- and not four minutes
+     * into a gate.
+     */
+    it('expires on its date, like every other line in this document', () => {
+      const document = documentOf([], 5, [{ ...CEILING, expires: '2026-08-25' }]);
+
+      expect(standingAllowances(document, TODAY)).toHaveLength(1);
+    });
+
+    /*
+     * The renewal cap is about a PERMISSION, and a ceiling of nought is not one.
+     *
+     * `renewals` exists so that a line admitting redness cannot live for ever in
+     * fortnight steps taken by the party that never asked. A line whose ceiling
+     * admits no misses at all admits nothing: it is an assertion that happens to
+     * carry a date, because the fork it was measured on ships every few days and
+     * the NUMBER goes stale even while it keeps passing. Making somebody get the
+     * owner's signature every eight weeks for a check that is green would teach
+     * exactly the habit this file is against -- signing to make a colour go away.
+     */
+    it('may be extended once unratified, and not twice, while it admits any miss at all', () => {
+      const once = documentOf([], 5, [{ ...CEILING, atMost: 1, renewals: 1 }]);
+      const twice = documentOf([], 5, [{ ...CEILING, atMost: 1, renewals: 2 }]);
+
+      expect(standingAllowances(once, TODAY)).toStrictEqual([]);
+      expect(standingAllowances(twice, TODAY)).toHaveLength(1);
+    });
+
+    it('may be re-measured as often as the fork ships, while its ceiling admits nothing', () => {
+      const many = documentOf([], 5, [{ ...CEILING, atMost: 0, renewals: 7 }]);
+
+      expect(standingAllowances(many, TODAY)).toStrictEqual([]);
+    });
+
+    it('still expires on its date, ceiling of nought or not, because the fork moves under it', () => {
+      const stale = documentOf([], 5, [{ ...CEILING, atMost: 0, renewals: 7, expires: '2026-08-25' }]);
+
+      expect(standingAllowances(stale, TODAY)).toHaveLength(1);
+    });
+
+    it('may not put its own decision on the owner with no ratification recorded', () => {
+      const document = {
+        what: [],
+        cap: 5,
+        allowances: [],
+        rates: [{ ...CEILING, allowedBy: 'the owner' }],
+      };
+
+      expect(() => readAllowances(JSON.stringify(document))).toThrow(/owner/u);
+    });
+
+    it('is in the document this repository actually carries, and it stands today', () => {
+      const document = readAllowances(readFileSync(ALLOWANCES, 'utf8'));
+
+      expect(document.rates.map((one) => one.check)).toContain('cursor-newGroupBelow');
+      expect(standingAllowances(document, new Date().toISOString().slice(0, 10))).toStrictEqual([]);
     });
   });
 });

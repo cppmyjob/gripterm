@@ -1,13 +1,97 @@
 import { defineConfig } from '@vscode/test-cli';
-import { readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hostUserData, runStore } from './tools/host-user-data.mjs';
 import { refuseStaleBuilds } from './tools/refuse-stale-builds.mjs';
 import { seedRestorableRecord } from './tools/seed-restorable-record.mjs';
 
+const require_ = createRequire(import.meta.url);
 const here = dirname(fileURLToPath(import.meta.url));
 const COMPILED = join(here, 'out', 'tests', 'integration');
+
+/**
+ * The Cursor of this machine, or `null`.
+ *
+ * The path and not a flag, because what the runner needs is the executable and
+ * what the RECORD needs is the build beside it. Neither is downloaded: the
+ * fork the customer works in is the one on this machine, and there is nowhere
+ * to fetch a named build of it from.
+ */
+const CURSOR = join(process.env.LOCALAPPDATA ?? '', 'Programs', 'cursor', 'Cursor.exe');
+
+/** Where the Cursor strip writes the numbers the gate does arithmetic on. */
+const CURSOR_OUT = join(here, '.vscode-test', 'cursor-output', 'rate.json');
+
+/** A folder for the Cursor strip to open, made once and never remade. */
+const CURSOR_PROJECT = join(here, '.vscode-test', 'cursor-project');
+
+/**
+ * The labels that run in Cursor -- none, when there is no Cursor here.
+ *
+ * **What this label is and is not.** It is NOT the live suites in Cursor, and
+ * that is not a choice. Measured 2026-08-25 over three launches and two
+ * launchers, polling for thirty seconds each: Cursor's extension test host --
+ * any window carrying `--extensionTestsPath` -- registers no third-party
+ * extension at all, developed or installed, while the same arguments against VS
+ * Code 1.134.0 register ours at once. Every suite under `tests/integration`
+ * opens by asserting the extension is there, so in Cursor every one of them
+ * fails in its first hook. What runs here instead is the fork's WORKBENCH,
+ * which needs no extension of ours and is where all four of the customer's
+ * defects live.
+ *
+ * **Its exit code is not read by anything.** Measured the same day: this host
+ * exits 0 on a failing run. The stage's answer is the file at `CURSOR_OUT`,
+ * judged by `tools/gate.mjs` against `gate/allowed-red.json`, and a run that
+ * died before writing it is red for that reason. The gate DELETES that file
+ * before it runs the stage -- here would be the wrong place, since this module
+ * is loaded by every label including the two that run in VS Code, and clearing
+ * a Cursor verdict on the way into a VS Code run is how a verdict goes missing
+ * between being written and being read.
+ *
+ * @returns {object[]} the Cursor labels, or an empty list
+ */
+function inCursor() {
+  if (!existsSync(CURSOR)) {
+    return [];
+  }
+  // A folder, and it is load-bearing. Measured 2026-08-25 on Cursor 3.17.19:
+  // in a window with NO folder open, `workbench.action.newGroupBelow` threw
+  // `Invalid editor group provided!` on 10 attempts out of 10, and with a
+  // folder open it made a group on 10 out of 10 -- in the same host, the same
+  // build, the same minute. A probe without a folder would measure a shell no
+  // customer sits in and report a defect that is not there.
+  if (!existsSync(CURSOR_PROJECT)) {
+    mkdirSync(CURSOR_PROJECT, { recursive: true });
+    writeFileSync(
+      join(CURSOR_PROJECT, 'README.md'),
+      '# the folder the Cursor strip opens\n\nA window with no folder is not a window anybody works in.\n',
+      'utf8'
+    );
+  }
+
+  const { forkBuild } = require_('./tools/fork-build.js');
+  return [
+    {
+      label: 'cursor',
+      files: 'tests/cursor/*.js',
+      extensionDevelopmentPath: 'packages/extension',
+      useInstallation: { fromPath: CURSOR },
+      workspaceFolder: CURSOR_PROJECT,
+      launchArgs: [`--user-data-dir=${hostUserData('cursor')}`],
+      env: {
+        GRIPTERM_CURSOR_OUT: CURSOR_OUT,
+        // Read out here, where the executable is known. `vscode.version` inside
+        // the window answers `1.128.0` for Cursor 3.17.19 -- the VS Code it is a
+        // fork OF -- and a workbench measurement filed under that number is
+        // filed under a build that never had this workbench in it.
+        GRIPTERM_CURSOR_BUILD: JSON.stringify(forkBuild(CURSOR)),
+      },
+      mocha: { timeout: TIMEOUT_MS },
+    },
+  ];
+}
 
 // Two minutes because one test waits out a real restore: the twenty-second
 // wait of `RestoreOrchestrator` is the thing under test there, and a real
@@ -110,4 +194,5 @@ export default defineConfig([
     ],
     mocha: { timeout: TIMEOUT_MS },
   },
+  ...inCursor(),
 ]);

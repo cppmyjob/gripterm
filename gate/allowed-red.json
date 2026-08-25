@@ -52,7 +52,15 @@
     "",
     "`atMost` is `Finding.violations` from `tests/stand/judge.ts` -- how many named things went wrong at that point, as an integer. It is not a physical magnitude and two points' numbers do not compare with each other; the magnitude a person needs is in `measured`, which nothing checks.",
     "",
-    "Read by the gate to decide a colour: `point`, `answer`, `atMost`, `mayBeGreen`, `expires`, `cap`, `renewals`. Read by the gate and printed on every full run: `allowedBy`, `ratifiedBy`, `renewals`. Read by people: `says`, `seen`, `measured`, `why`."
+    "Read by the gate to decide a colour: `point`, `answer`, `atMost`, `mayBeGreen`, `expires`, `cap`, `renewals`. Read by the gate and printed on every full run: `allowedBy`, `ratifiedBy`, `renewals`. Read by people: `says`, `seen`, `measured`, `why`.",
+    "",
+    "THE OTHER KIND OF LINE, added by Ш9 on 2026-08-25: `rates`. An admitted POINT is a named thing the stand found wrong; a RATE is how many of N attempts at one editor command missed. Ш9's own words anticipated it -- \"if the miss is really one in ten, a green run is unreachable, and the rule has to be `the miss rate did not grow`\" -- and the measurement that day said the opposite of what the plan feared, so the ceiling below is NOUGHT and the rule is green. The machinery is here anyway, because the thing being measured is a FORK's workbench and it ships every few days: the day the miss comes back, the decision is one number and one date in this file, in front of a reader, rather than an edit to a test.",
+    "",
+    "WHAT A RATE LINE CARRIES THAT A POINT'S DOES NOT: `of`, the number of attempts the ceiling was measured over. A rate is a fraction and this file stores only its numerator, so nought misses out of one and nought out of ten would otherwise be the same sentence -- and the first is what a probe that quietly gave up looks like. A run of fewer attempts than `of` is refused rather than compared.",
+    "",
+    "WHAT IS DIFFERENT ABOUT A CEILING OF NOUGHT. It admits nothing, so it is not a permission, so the ONE-RENEWAL rule does not apply to it: `expires` still fires and forces somebody to measure again, and `renewals` may climb as often as the fork ships. Asking the owner to sign every eight weeks for a check that has never been red would teach signing as a way to make a colour go away. The moment `atMost` goes above nought the line becomes a permission and the one-renewal rule applies to it exactly as it does to a point.",
+    "",
+    "WHAT THE CURSOR STAGE CANNOT COVER, AND IT IS NOT A CHOICE. Measured 2026-08-25 over three launches and two launchers, polling thirty seconds each: Cursor's extension TEST host -- any window carrying `--extensionTestsPath` -- registers no third-party extension at all, neither developed nor installed. `vscode.extensions.all` answers 48 entries, every one of them Cursor's own, where the same arguments against VS Code 1.134.0 answer 100 including ours. So the live suites cannot run in Cursor: every one of them opens by asserting the extension is there. And the same host exits 0 on a failing run, where VS Code exits 1 on the same file -- which is why this budget is read against a file the probe WRITES and never against an exit code. The product in Cursor is covered by `pnpm run test:stand`, which uses a DEV host, where the extension does load."
   ],
   "cap": 5,
   "allowances": [
@@ -122,6 +130,21 @@
       "measured": "every sitting after the first shows a tab with no name on it where sitting 1 showed two named ones. The keys the rows are ordered by did not move.",
       "why": "Ш7 -- the same restore. Whether it is one defect with point 6 or two is not established.",
       "allowedBy": "the Ш6 orchestrator, on its own authority and nobody else's, 2026-08-25",
+      "ratifiedBy": null,
+      "renewals": 0,
+      "expires": "2026-09-08"
+    }
+  ],
+  "rates": [
+    {
+      "check": "cursor-newGroupBelow",
+      "says": "`workbench.action.newGroupBelow`, over an editor area holding one empty group, makes a group below",
+      "of": 10,
+      "atMost": 0,
+      "seen": "0 of 10 in each of FIVE runs of `pnpm run test:cursor` on 2026-08-25, Cursor 3.17.19 (commit ae3a2b72, built 2026-08-24, API 1.128.0): 50 attempts, no miss, no throw. The same probe against VS Code 1.134.0: 0 of 10. This CONTRADICTS the number the plan was written around -- 2026-08-22 recorded 9 of 10 for Cursor and named the first call as the one that silently did nothing -- and the contradiction is not resolved here. Two candidate causes are named in `measured` and neither is established.",
+      "measured": "The window this is measured in has a FOLDER open, and that turned out to be the whole difference. The same probe, the same build, the same minute, in a Cursor window with NO folder: 10 misses out of 10, every one of them the workbench throwing `Invalid editor group provided!` -- the very sentence the 2026-08-22 report records as an occasional throw. VS Code 1.134.0 with no folder: 0 of 10. So `newGroupBelow` over an empty editor area is broken in Cursor in a folderless window and sound in a window with a folder, and the fork differs from its upstream in the first case only. WHICH OF THESE the 2026-08-22 measurement was taken in is NOT established: that probe was `spikes/cursor-probe`, which passes no folder, so a folderless window is likely -- but the build was a different one (that report's neighbouring note reads a `Cursor 3.17.8` bundle) and this repository has no recording from that day to re-read. Both the folder and the build changed between the two measurements, and nothing here separates them.",
+      "why": "It closes by going stale, not by being fixed: a fork ships every few days, and a number measured on 3.17.19 says nothing about 3.18. `expires` is what forces it to be measured again. Raise `atMost` only with the runs behind it written into `seen` -- and the day it is raised, the line stops being an assertion and becomes a permission, with the one-renewal rule on it.",
+      "allowedBy": "the Ш9 orchestrator, on its own authority and nobody else's, 2026-08-25",
       "ratifiedBy": null,
       "renewals": 0,
       "expires": "2026-09-08"

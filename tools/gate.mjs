@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -20,8 +20,23 @@ import { fileURLToPath } from 'node:url';
  *
  * **Two levels, and the reason they are two.** `--fast` is types, lint and the
  * unit suites: measured 51 s on 2026-08-25, no editor, no window, nothing on
- * anyone's desktop. The full gate adds the live suites in a real editor and the
- * two-sitting stand, which opens four windows; measured 7 min 30 s end to end.
+ * anyone's desktop. The full gate adds the live suites in a real editor, the
+ * fork's workbench in Cursor, and the two-sitting stand, which opens four
+ * windows; measured 7 min 30 s end to end before the Cursor stage and 17 s more
+ * with it.
+ *
+ * **Why there is no THIRD level, which is what Ш9 was expected to need.** The
+ * step was written expecting the live suites to run a second time in Cursor --
+ * another 4 min 30 s onto a gate already at 7 to 9 minutes against a ten-minute
+ * ceiling, which would have forced a `gate:full` nobody would run, or Cursor
+ * INSTEAD of VS Code, which would have traded one editor's coverage for the
+ * other's. Neither trade had to be made, because the expensive option turned out
+ * not to exist: measured 2026-08-25, Cursor's extension test host registers no
+ * third-party extension at all, so the live suites cannot run there however long
+ * anybody is willing to wait (see the `cursor-live` entry below). What CAN run
+ * in Cursor is the fork's workbench, and that costs 17 seconds. A level invented
+ * for a cost that is not there would be a level whose only effect is to give
+ * people a shorter gate to run instead of this one.
  *
  * The split is not about taste. `pre-push` runs the fast level, and the rule for
  * what belongs in a hook is: a stage whose failure means "this must not leave
@@ -48,6 +63,17 @@ const HISTORY = join(RECEIPTS, 'receipts.ndjson');
 
 /** What the stand leaves behind for this file to do arithmetic on. */
 const VERDICT = join(REPO, '.vscode-test', 'stand-output', 'verdict.json');
+
+/**
+ * What the Cursor strip leaves behind, and the ONLY thing that stage's colour
+ * may be read from.
+ *
+ * Not its exit code, and that is measured rather than assumed: on 2026-08-25 a
+ * Cursor test host running a deliberately failing mocha file printed `1 failing`
+ * and exited 0, where VS Code 1.134.0 exited 1 on the same file. A stage whose
+ * exit code is always 0 is worse than no stage -- it manufactures green.
+ */
+const CURSOR_RATE = join(REPO, '.vscode-test', 'cursor-output', 'rate.json');
 
 /**
  * The stages, in the order a person wants them to fail in: cheapest first, so
@@ -97,9 +123,43 @@ const STAGES = [
     // directions that matter -- an unadmitted point, a point over its ceiling, a
     // point that has come back green and kept its permission, a line past its
     // date, and one line too many.
-    verdictIsJudgedByTheBudget: true,
+    judgedBy: standAgainstTheBudget,
   },
 ];
+
+/**
+ * The stages inserted only where the editor they need is on this machine.
+ *
+ * Cursor is not downloaded and cannot be: `@vscode/test-electron` fetches
+ * builds of VS Code, and the fork the customer works in has no such feed. So
+ * this stage exists on a machine with Cursor and does not exist on one without
+ * -- and `MISSING` says so out loud in the second case, rather than a green gate
+ * quietly meaning less than it did yesterday.
+ *
+ * @returns {object[]} the Cursor stage, or an empty list
+ */
+function inCursor() {
+  const cursor = join(process.env.LOCALAPPDATA ?? '', 'Programs', 'cursor', 'Cursor.exe');
+  if (!existsSync(cursor)) {
+    return [];
+  }
+  return [
+    {
+      name: 'cursor',
+      fast: false,
+      what: 'pnpm run test:cursor  (the fork`s workbench, in the Cursor installed here; measured 17 s end to end)',
+      command: ['pnpm', 'run', 'test:cursor'],
+      // Yesterday's numbers must not be readable as today's, and this stage has
+      // no exit code to fall back on if they were. The stand does the same in
+      // its own `prepare()`; here it is the gate's job, because the config that
+      // composes the run is loaded by the VS Code labels too and clearing a
+      // Cursor verdict on the way into a VS Code run is how a verdict goes
+      // missing between being written and being read.
+      before: () => { rmSync(dirname(CURSOR_RATE), { recursive: true, force: true }); },
+      judgedBy: cursorAgainstTheBudget,
+    },
+  ];
+}
 
 /**
  * What this gate does NOT cover, printed on every run, green or red.
@@ -110,14 +170,28 @@ const STAGES = [
  */
 const MISSING = [
   {
-    name: 'cursor-strip',
+    name: 'cursor-live',
     why:
-      'Ш9 -- the live suites in Cursor, and the "the miss rate did not grow" rule over 3-5 repeats. ' +
-      'HALF of Ш9 is already here and should not be claimed twice: the `stand` stage runs in Cursor ' +
-      'when Cursor is installed (tests/stand/run.mjs prefers it, and the recording writes down which ' +
-      'editor answered). What is missing is the LIVE suites, which run against a downloaded stable ' +
-      'VS Code (.vscode-test.mjs, `version: stable`, both labels). ' +
-      'To add it: give this a `command` and move the entry into STAGES with `fast: false`.',
+      'The LIVE SUITES in Cursor, and this entry names WHY they are not here rather than only that they ' +
+      'are not. MEASURED 2026-08-25, three launches, two launchers (@vscode/test-cli and a bare spawn), ' +
+      'polling thirty seconds each: Cursor`s extension TEST host -- any window carrying ' +
+      '`--extensionTestsPath` -- registers NO third-party extension at all. Not one loaded from ' +
+      '`--extensionDevelopmentPath`, not one installed into `--extensions-dir`. ' +
+      '`vscode.extensions.all` answers 48 entries, every one of them Cursor`s own; the same arguments ' +
+      'against VS Code 1.134.0 answer 100, ours among them, at once. Every suite under ' +
+      '`tests/integration` opens by asserting `getExtension("gripterm-placeholder.gripterm")` is there, ' +
+      'so in Cursor every one of them fails in its first hook. There is no configuration for this: it ' +
+      'is what that host does. SECOND, INDEPENDENT REASON: the same host exits 0 on a failing run ' +
+      '(measured on a deliberately failing file; VS Code exited 1 on it), so even a suite that could ' +
+      'run there could not be believed by an exit code. ' +
+      'WHAT IS HERE INSTEAD, and it is not nothing: the `cursor` stage runs the fork`s WORKBENCH in ' +
+      'Cursor -- the part that needs no extension of ours, and the part all four of the customer`s ' +
+      'defects live in -- and the `stand` stage runs the PRODUCT in Cursor through a DEV host, where ' +
+      'the extension does load. Between them, what is uncovered is narrower than "Cursor": it is the ' +
+      'product`s behaviour under a Cursor test host, which no Cursor test host can show anybody. ' +
+      'What would close it: the fork loading development extensions in that host, or a driver of our ' +
+      'own in a dev host with an observer extension, as `tests/stand/run.mjs` does -- at the price of ' +
+      'reimplementing mocha`s reporting and the window discipline the stand already carries.',
   },
   {
     name: 'mutation',
@@ -143,6 +217,9 @@ function runStage(stage) {
   const started = Date.now();
   say('');
   say(`=== ${stage.name}  --  ${stage.what}`);
+  if (stage.before !== undefined) {
+    stage.before();
+  }
   const [command, ...args] = stage.command;
   const done = spawnSync(command, args, { cwd: REPO, stdio: 'inherit', shell: process.platform === 'win32' });
   const ms = Date.now() - started;
@@ -245,6 +322,76 @@ function standAgainstTheBudgetOrThrow(ran) {
   };
 }
 
+/**
+ * What the Cursor strip measured, against the ceilings in the budget.
+ *
+ * The whole of this stage's colour, because there is nothing else to read: the
+ * host it ran in exits 0 whatever happened inside it. A file that is not there
+ * is therefore RED and is never silence -- a probe that died before writing is
+ * the one outcome an exit code of 0 and a clean pass look identical from.
+ */
+function cursorAgainstTheBudget(ran) {
+  try {
+    return cursorAgainstTheBudgetOrThrow(ran);
+  } catch (failed) {
+    return { ...ran, ok: false, because: `the Cursor strip could not be judged: ${failed.message}` };
+  }
+}
+
+function cursorAgainstTheBudgetOrThrow(ran) {
+  const { ALLOWANCES, ratesAgainstBudget, readAllowances } =
+    require(join(REPO, 'out', 'tests', 'stand', 'allowance.js'));
+
+  if (!existsSync(CURSOR_RATE)) {
+    return {
+      ...ran,
+      ok: false,
+      because:
+        `the Cursor strip left no numbers at ${CURSOR_RATE}, so there is nothing to hold the budget against. ` +
+        'It died before it measured, and its own output above says where -- its exit code cannot tell you, ' +
+        'because that host exits 0 either way.',
+    };
+  }
+
+  const measured = JSON.parse(readFileSync(CURSOR_RATE, 'utf8'));
+  const document = readAllowances(readFileSync(ALLOWANCES, 'utf8'));
+  const checks = measured.checks.map((one) => ({ check: one.check, attempts: one.attempts, misses: one.misses }));
+  const refusals = ratesAgainstBudget(checks, document);
+
+  say('');
+  // The build, printed rather than left in the file, because it is the point of
+  // recording it: a workbench measurement belongs to a build, a fork ships every
+  // few days, and `vscode.version` inside that window answers the VS Code it is
+  // a fork OF and not the build that was measured.
+  const build = measured.build;
+  say(
+    `--- the Cursor strip, in ${build === null ? 'an editor whose build went unrecorded' : `${build.editor} ${build.version}`}` +
+    `${build === null ? '' : ` (commit ${String(build.commit).slice(0, 8)}, built ${String(build.built).slice(0, 10)}, API ${measured.apiVersion})`}`
+  );
+  for (const one of measured.checks) {
+    const line = document.rates.find((rate) => rate.check === one.check);
+    say(
+      `  ${one.check}: ${String(one.misses)} miss(es) of ${String(one.attempts)}` +
+      `${line === undefined ? '   -- nothing in the budget names this check' : `, and its line admits ${String(line.atMost)} of ${String(line.of)}`}`
+    );
+  }
+  for (const refusal of refusals) {
+    say(`  REFUSED  ${refusal.because}`);
+  }
+  for (const line of measured.notMeasured ?? []) {
+    say(`  NOT MEASURED HERE: ${line}`);
+  }
+
+  return {
+    ...ran,
+    // The exit code is not consulted at all, and that is the point. `ran.ok`
+    // said 0 and would have said 0 over ten failed assertions.
+    ok: refusals.length === 0,
+    because: refusals.length === 0 ? undefined : `${String(refusals.length)} refusal(s) from the budget`,
+    rates: { checks, refusals, build },
+  };
+}
+
 /** The revision this run is about, and whether anything is uncommitted around it. */
 function revision() {
   const git = (...args) => execFileSync('git', args, { cwd: REPO, encoding: 'utf8' }).trim();
@@ -275,9 +422,70 @@ function writeReceipt(receipt) {
   writeFileSync(HISTORY, `${JSON.stringify(receipt)}\n`, { flag: 'a', encoding: 'utf8' });
 }
 
+/**
+ * The stages this machine can run, in the order a person wants them to fail in.
+ *
+ * By name rather than by index: the Cursor stage goes in front of the two that
+ * open windows and take minutes, so that a fork that has moved under us is a
+ * thirty-second answer and not a seven-minute one.
+ *
+ * @returns {object[]} every stage, the machine-dependent ones included
+ */
+function stagesHere() {
+  const at = STAGES.findIndex((stage) => stage.name === 'live');
+  return [...STAGES.slice(0, at), ...inCursor(), ...STAGES.slice(at)];
+}
+
+/**
+ * What this gate does NOT cover on THIS machine, which is not always the same
+ * list.
+ *
+ * A machine with no Cursor loses a stage, and a gate that lost a stage in
+ * silence would print the same green as one that ran it. So the absence is an
+ * entry, printed beside the permanent ones.
+ *
+ * @returns {{name: string, why: string}[]} the entries, in the order printed
+ */
+function notCovered() {
+  const cursorless = inCursor().length === 0
+    ? [{
+      name: 'cursor',
+      why:
+        'There is no Cursor on this machine, so the `cursor` stage does not exist in this run at all -- and ' +
+        'neither does the stand`s preference for it (tests/stand/run.mjs falls back to VS Code). Every one of ' +
+        'the customer`s four defects was reported in Cursor. A green gate here is a green gate about the OTHER ' +
+        'editor.',
+    }]
+    : [];
+  return [...cursorless, ...MISSING];
+}
+
+/**
+ * One named stage, for the person who has just made it go red.
+ *
+ * **It is not a level, and it is written so that it cannot become one.** The
+ * receipt it leaves says `only:<name>`, and `tools/gate-receipt.mjs` accepts
+ * nothing but `full`, so a stage run alone can never stand in for a checked
+ * revision -- the one thing this whole file exists to keep honest.
+ *
+ * What it buys is that a red stand or a red Cursor strip can be re-run in its
+ * own two minutes instead of behind the eight it takes to reach it again. The
+ * alternative, which the person will otherwise do, is to run the underlying
+ * `pnpm run test:...` by hand -- and that skips the BUDGET, which is the half of
+ * those two stages that decides the colour.
+ *
+ * @param {string[]} argv the command line
+ * @returns {string | null} the stage named, or null
+ */
+function onlyStage(argv) {
+  const at = argv.indexOf('--only');
+  return at === -1 ? null : argv[at + 1] ?? null;
+}
+
 function main() {
   const fast = process.argv.includes('--fast');
-  const level = fast ? 'fast' : 'full';
+  const only = onlyStage(process.argv);
+  const level = only === null ? (fast ? 'fast' : 'full') : `only:${only}`;
   const at = revision();
 
   say(`the gate, ${level} level, over ${at.head === null ? 'a revision git would not name' : at.head.slice(0, 12)}${at.dirty === true ? ' + uncommitted changes' : ''}`);
@@ -285,13 +493,26 @@ function main() {
     say('  --fast: types, lint and the unit suites. NOT the live suites and NOT the stand.');
     say('  This level is what `pre-push` runs. It is not what "checked" means -- run `pnpm run gate` for that.');
   }
+  if (only !== null) {
+    say(`  --only ${only}: ONE stage and its budget, for re-running something that just went red.`);
+    say('  The receipt this leaves says so, and `tools/gate-receipt.mjs` accepts none but a full one.');
+  }
 
-  const wanted = STAGES.filter((stage) => !fast || stage.fast);
+  const here = stagesHere();
+  if (only !== null && !here.some((stage) => stage.name === only)) {
+    say('');
+    say(`there is no stage called ${JSON.stringify(only)} on this machine. There is: ${here.map((stage) => stage.name).join(', ')}.`);
+    process.exitCode = 2;
+    return;
+  }
+  const wanted = only === null
+    ? here.filter((stage) => !fast || stage.fast)
+    : here.filter((stage) => stage.name === only);
   const ran = [];
   for (const stage of wanted) {
     let result = runStage(stage);
-    if (stage.verdictIsJudgedByTheBudget === true) {
-      result = standAgainstTheBudget(result);
+    if (stage.judgedBy !== undefined) {
+      result = stage.judgedBy(result);
     }
     ran.push(result);
     if (!result.ok) {
@@ -312,15 +533,16 @@ function main() {
   for (const one of skipped) {
     say(`  ----  ${one.name.padEnd(8)}    -    not reached: an earlier stage failed`);
   }
-  if (fast) {
-    for (const one of STAGES.filter((stage) => !stage.fast)) {
-      say(`  ----  ${one.name.padEnd(8)}    -    not in the fast level: ${one.what}`);
+  if (fast || only !== null) {
+    for (const one of here.filter((stage) => !wanted.includes(stage))) {
+      say(`  ----  ${one.name.padEnd(8)}    -    not in this level: ${one.what}`);
     }
   }
 
+  const uncovered = notCovered();
   say('');
   say('what this gate does NOT cover, whatever colour it just printed:');
-  for (const one of MISSING) {
+  for (const one of uncovered) {
     say(`  * ${one.name}: ${one.why}`);
   }
 
@@ -329,8 +551,8 @@ function main() {
     at: new Date().toISOString(),
     revision: at,
     ok: failed.length === 0,
-    stages: ran.map(({ name, ok, ms, because, budget }) => ({ name, ok, ms, because, budget })),
-    notCovered: MISSING.map((one) => one.name),
+    stages: ran.map(({ name, ok, ms, because, budget, rates }) => ({ name, ok, ms, because, budget, rates })),
+    notCovered: uncovered.map((one) => one.name),
   };
   writeReceipt(receipt);
 
@@ -338,7 +560,7 @@ function main() {
   if (failed.length === 0) {
     say(level === 'full'
       ? 'GREEN. This is the only thing in this repository that may be called "checked".'
-      : 'GREEN at the fast level. This is NOT "checked": the live suites and the stand did not run.');
+      : `GREEN at the ${level} level. This is NOT "checked": ${skipped.length + (here.length - wanted.length)} stage(s) did not run.`);
   } else {
     say(`RED at ${failed.map((one) => one.name).join(', ')}.`);
   }
