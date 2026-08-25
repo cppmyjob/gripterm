@@ -18,6 +18,14 @@ import type { Grid, GridNode, StandGroup, StandRecording, StandSnapshot, Sitting
  * non-zero on an unmeasured point exactly as it does on a failed one. What
  * `unmeasured` buys is a reader who can tell "this build is wrong" from "this
  * recording cannot say".
+ *
+ * **The keyboard is one of the things it can fail to measure.** Points 1, 3 and
+ * 4 rest on a reading of the editor's own layout, and the editor answers that
+ * for the part its ACTIVE group is in. A window that has not got the keyboard is
+ * a window whose active group belongs to whatever took it -- so those three
+ * answer `unmeasured` there rather than red. The run still fails; what changes
+ * is that it stops saying "this build laid the window out wrong" about a window
+ * nobody can prove it was looking at.
  */
 
 export type Answer = 'green' | 'red' | 'unmeasured';
@@ -149,10 +157,11 @@ function theSameFolder(recording: StandRecording): Finding {
  * single sitting: measured on 2026-08-23, seven sittings over one folder went
  * 2, 2, 4, 5, 6, 7, 8 groups, and the second of them was clean.
  *
- * Three refusals stand in front of the comparison, and each of them is a way the
+ * Four refusals stand in front of the comparison, and each of them is a way the
  * comparison would otherwise be about nothing: too few sittings to see a slope,
- * a sitting the measurer never called settled, and -- the one the plan names --
- * an observer that arrived after the product had already tidied the window.
+ * a sitting the measurer never called settled, an observer that arrived after
+ * the product had already tidied the window -- the one the plan names -- and a
+ * window that had not got the keyboard when it was counted.
  */
 function groupsDoNotAccumulate(recording: StandRecording, budget: Budget): Finding {
   const says = 'the groups after sitting N are no more than after N-1';
@@ -180,6 +189,12 @@ function groupsDoNotAccumulate(recording: StandRecording, budget: Budget): Findi
     return finding(1, says, 'red',
       `sitting${unsettled.length === 1 ? '' : 's'} ${unsettled.map((one) => String(one.sitting)).join(', ')} never settled -- no sighting of ${JSON.stringify(SETTLED)} was written, so there is no moment to count the groups at`,
       unsettled.length);
+  }
+
+  const elsewhere = counts.filter((one) => one.settled?.focused === false);
+  if (elsewhere.length > 0) {
+    return finding(1, says, 'unmeasured',
+      theKeyboardWasElsewhere(elsewhere.map((one) => one.sitting), 'settled'));
   }
 
   const groups = counts.map((one) => one.settled?.groups.length ?? 0);
@@ -246,6 +261,12 @@ function theStripIsAThirdAndUnderTheEditors(recording: StandRecording, budget: B
     return finding(3, says, 'unmeasured', 'no sighting recorded whether a tab was a terminal, so the strip cannot be found in the grid');
   }
 
+  const elsewhere = seen.filter((one) => one.snapshot.focused === false);
+  if (elsewhere.length > 0) {
+    return finding(3, says, 'unmeasured',
+      theKeyboardWasElsewhere(elsewhere.map((one) => one.sitting), 'settled'));
+  }
+
   const reasons: string[] = [];
   const shares: string[] = [];
   for (const { sitting, snapshot, strip } of seen) {
@@ -302,6 +323,12 @@ function theFileSatAbove(recording: StandRecording, budget: Budget): Finding {
   });
   if (opened.length === 0) {
     return finding(4, says, 'unmeasured', `no sitting of this recording opened a file: no sighting of ${JSON.stringify(FILE_OPENED)} stands beside a settled one`);
+  }
+
+  const elsewhere = opened.filter((one) => one.before.focused === false || one.after.focused === false);
+  if (elsewhere.length > 0) {
+    return finding(4, says, 'unmeasured',
+      theKeyboardWasElsewhere(elsewhere.map((one) => one.sitting), 'opened a file'));
   }
 
   const reasons: string[] = [];
@@ -382,6 +409,27 @@ function theStripIsNeverAlone(recording: StandRecording): Finding {
  * the one that was there yesterday. `starts.jsonl` carries the intent this build
  * chose for each start, and `launch` where `resume` was expected is exactly the
  * complaint: the terminals came back and the conversations did not.
+ *
+ * **WHAT THIS POINT CANNOT ASK OF THE STAND AS IT IS BUILT TODAY (2026-08-26),
+ * and the reason its red does not mean what it says.** `planRestore` answers
+ * `resume` only for a record whose conversation has a transcript; a transcript
+ * exists only once something has been SAID in that conversation
+ * (`transcript-index.ts`, and `restore-planner.ts` calls the other case
+ * `no-transcript`); the stand types into none of the terminals it makes. So
+ * every start it can produce is a `launch`, and a launch MINTS A NEW
+ * conversation id into the record, which the next sitting finds just as silent.
+ * The loop has no way out: 64 starts over the eight runs whose traces were read
+ * on 2026-08-25 and 2026-08-26, 64 launches, not one resume -- and the same 3
+ * violations in every one of the seven runs measured before them. A red here therefore says "this stand cannot pose the
+ * question", not "the conversations did not come back" -- and the two are the
+ * difference this file's third answer exists for.
+ *
+ * It is NOT answered `unmeasured` all the same, and that is deliberate rather
+ * than an oversight. Half of that change is a line in `gate/allowed-red.json`
+ * admitting point 6 red at 3, which would then admit nothing -- and what a
+ * budget admits is the owner's to say. The other exit is the measurer learning
+ * to lay a transcript so that `resume` becomes reachable at all, which is a step
+ * of its own. Both were put to the owner on 2026-08-26 with what each costs.
  */
 function everythingCameBackAndOneResumed(recording: StandRecording): Finding {
   const says = 'every record came back, at least one of them through `resume`';
@@ -508,6 +556,30 @@ function withinTheBudget(recording: StandRecording, budget: Budget): Finding {
 }
 
 // --- reading a sitting ------------------------------------------------------
+
+/**
+ * Why a point that rests on a layout refuses to answer about a window that had
+ * not got the keyboard.
+ *
+ * `vscode.getEditorLayout` answers for the part of the editor its ACTIVE group
+ * is in -- measured 2026-08-25 on a window carrying Cursor's own agent editor,
+ * twelve settled sightings of twelve -- and a window without the keyboard is a
+ * window whose active group belongs to whatever took it.
+ *
+ * What this does NOT say is that losing the keyboard MOVES the answer. On
+ * 2026-08-21 a live suite failed twice with `window.state.focused` true through
+ * the whole of both runs, so the two are not one fact. The claim is the narrow
+ * one: a point that cannot vouch for the reading it rests on says so, instead
+ * of calling it a defect of the build.
+ */
+function theKeyboardWasElsewhere(sittings: readonly number[], when: string): string {
+  return (
+    `sitting${sittings.length === 1 ? '' : 's'} ${sittings.map((one) => String(one)).join(', ')} ` +
+    `${when} while the window did not hold the keyboard, and the editor answers about the part its ` +
+    'active group is in: what it said there is a reading of some window, and this recording cannot ' +
+    'say it was this one'
+  );
+}
 
 /**
  * One finding, with the number a budget reads.

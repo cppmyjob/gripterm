@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUDGET, judge } from './judge';
-import { parseRecording } from './recording';
+import { FILE_OPENED, parseRecording } from './recording';
 import type { Answer, Verdict } from './judge';
 import type { GridNode, StandGroup, StandRecording, StandSitting, StandSnapshot } from './recording';
 
@@ -103,6 +103,19 @@ describe('the recording a stand writes', () => {
     expect(() => parseRecording('{"kind":"stand","version":1}\nnot json\n')).toThrow(/line 2/u);
   });
 
+  test('a sighting says whether the window held the keyboard while it was taken', () => {
+    // The three points that read the editor's own layout rest on one sighting
+    // each, and the editor answers about the part its ACTIVE group is in. A
+    // window that has not got the keyboard is a window whose active group
+    // belongs to whatever took it -- so a recording that never says which it
+    // was cannot say what its numbers are about.
+    const recording = parseRecording(
+      `${JSON.stringify({ kind: 'stand', version: 1 })}\n` +
+        `${JSON.stringify({ kind: 'snapshot', sitting: 1, ordinal: 1, what: 'settled', groups: [], focused: false })}\n`
+    );
+    expect(recording.sittings[0]?.snapshots[0]?.focused).toBe(false);
+  });
+
   test('the seven measured sittings are read as seven', () => {
     expect(fixture('staircase-2026-08-23').sittings.map((one) => one.sitting)).toEqual([
       1, 2, 3, 4, 5, 6, 7,
@@ -162,7 +175,8 @@ describe('a recording the measurer really wrote', () => {
    * The one place the two halves of the stand are held against each other.
    * Everything else here is a recording written by hand or converted from an
    * older instrument; this one came out of `tests/stand/run.mjs` and the
-   * observer beside it -- four sittings in Cursor on 2026-08-25 -- and it is
+   * observer beside it -- four sittings in Cursor across the midnight of
+   * 2026-08-25, whose own `recordedAt` says 22:12Z -- and it is
    * here so that a change to what the measurer writes cannot pass while the
    * judge still reads yesterday's shape.
    *
@@ -176,7 +190,7 @@ describe('a recording the measurer really wrote', () => {
    * runner writes exactly that today, for exactly that reason. Every other byte
    * is the run's own.
    */
-  const recording = fixture('four-sittings-2026-08-25');
+  const recording = fixture('four-sittings-2026-08-26');
 
   test('parses, and every one of the nine points gets an answer with a reason', () => {
     const verdict = judge(recording, BUDGET);
@@ -188,6 +202,16 @@ describe('a recording the measurer really wrote', () => {
     expect(recording.head.editor).toMatch(/Cursor\.exe|Code\.exe/u);
     expect(recording.sittings.map((one) => one.sitting)).toEqual([1, 2, 3, 4]);
     expect(recording.sittings.filter((one) => one.summary === null)).toEqual([]);
+  });
+
+  test('every sighting of it says whether the window held the keyboard', () => {
+    // The observer's half of the rule three points now rest on. It cannot be
+    // held by anything but a recording a real window wrote: `vscode.window.state`
+    // exists only inside an editor, so a test with no editor can check that the
+    // judge READS the flag and never that the measurer WRITES it.
+    const said = recording.sittings.flatMap((one) => one.snapshots.map((snapshot) => snapshot.focused));
+    expect(said).not.toHaveLength(0);
+    expect(said.filter((one) => one === null)).toEqual([]);
   });
 
   test('says which folder the editor kept the window`s memory under, and says it once', () => {
@@ -435,6 +459,90 @@ describe('what a verdict refuses to be read from', () => {
     const verdict = judge(refused, BUDGET);
     expect(answerTo(verdict, 3)).toBe('red');
     expect(saidAbout(verdict, 3)).toMatch(/Canceled/u);
+  });
+
+  /*
+   * THE WINDOW WITHOUT THE KEYBOARD, and the three points that rest on a
+   * reading of a layout.
+   *
+   * `vscode.getEditorLayout` answers for the part of the editor its ACTIVE
+   * group is in -- measured 2026-08-25, twelve settled sightings of twelve, on
+   * a window carrying Cursor's own agent editor. A window that has not got the
+   * keyboard is a window whose active group belongs to whatever took it, so
+   * what the editor answered there is not a reading of the window a person is
+   * looking at.
+   *
+   * The three tests below put the flag on a recording that would otherwise be
+   * RED at that point, not on a green one. That is the half that matters: a
+   * refusal only worth having is one that outranks a red, because a red is what
+   * a reading taken in the wrong window looks like from outside.
+   *
+   * What is deliberately NOT claimed here is that losing the keyboard CAUSES
+   * the answer to move: 2026-08-21 measured a live suite failing while its
+   * window held the keyboard throughout, so the two are not the same fact. The
+   * claim is only that a point which cannot vouch for its own reading says so.
+   */
+  function withoutTheKeyboard(
+    change: (snapshots: readonly StandSnapshot[]) => readonly StandSnapshot[]
+  ): StandRecording {
+    return healthyBut(3, (snapshots) =>
+      change(snapshots).map((one) =>
+        one.what === 'settled' || one.what === FILE_OPENED ? { ...one, focused: false } : one
+      )
+    );
+  }
+
+  test('1 -- groups counted while the window did not hold the keyboard are unmeasured', () => {
+    const grown = withoutTheKeyboard((snapshots) =>
+      snapshots.map((one) =>
+        one.what === 'settled'
+          ? withGroups(one, [...one.groups, { column: 4, active: false, tabs: [], terminals: 0 }])
+          : one
+      )
+    );
+    const verdict = judge(grown, BUDGET);
+    expect(answerTo(verdict, 1)).toBe('unmeasured');
+    expect(saidAbout(verdict, 1)).toMatch(/keyboard/u);
+  });
+
+  test('3 -- a grid read while the window did not hold the keyboard is unmeasured, not red', () => {
+    const tall = withoutTheKeyboard((snapshots) =>
+      snapshots.map((one) =>
+        one.what === 'settled'
+          ? { ...one, grid: { orientation: 0, groups: [leaf(400), family(343, leaf(70), leaf(273))] } }
+          : one
+      )
+    );
+    const verdict = judge(tall, BUDGET);
+    expect(answerTo(verdict, 3)).toBe('unmeasured');
+    expect(saidAbout(verdict, 3)).toMatch(/keyboard/u);
+  });
+
+  test('4 -- a file opened while the window did not hold the keyboard is unmeasured, not red', () => {
+    const intoTheStrip = withoutTheKeyboard((snapshots) =>
+      snapshots.map((one) =>
+        one.what === FILE_OPENED
+          ? withGroups(one, [
+            { column: 1, active: false, tabs: ['design.md'], terminals: 0 },
+            { column: 2, active: false, tabs: ['notes.md'], terminals: 0 },
+            { column: 3, active: true, tabs: ['project', 'project 2', 'README.md'], terminals: 2 },
+          ])
+          : one
+      )
+    );
+    const verdict = judge(intoTheStrip, BUDGET);
+    expect(answerTo(verdict, 4)).toBe('unmeasured');
+    expect(saidAbout(verdict, 4)).toMatch(/keyboard/u);
+  });
+
+  test('a recording that never asked about the keyboard is judged exactly as it was', () => {
+    // Every recording taken before 2026-08-26, the two the acceptance of the
+    // stand rests on included. `null` is "this recording does not say", and a
+    // rule that read it as "the window had lost it" would turn three points of
+    // every one of them unmeasured -- which is not a stricter stand, it is one
+    // that has stopped answering.
+    const verdict = judge(fixture('four-sittings-2026-08-25'), BUDGET);
+    expect([1, 3, 4].map((point) => answerTo(verdict, point))).toEqual(['green', 'red', 'red']);
   });
 });
 

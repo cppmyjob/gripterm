@@ -75,6 +75,22 @@ export interface StandSnapshot {
    * defect the prototype had: it read the groups AFTER awaiting the grid.
    */
   readonly torn: boolean | null;
+  /**
+   * Whether the window held the keyboard when this sighting was taken.
+   *
+   * `vscode.window.state.focused`, and it is here because three of the nine
+   * points read the editor's own layout, which the editor answers for the part
+   * its ACTIVE group is in (measured 2026-08-25: 12 settled sightings of 12).
+   * A window that has not got the keyboard is a window whose active group
+   * belongs to whatever took it, so a reading taken there is one the judge
+   * refuses rather than one it calls a defect.
+   *
+   * `null` is a recording that never asked -- every one taken before
+   * 2026-08-26 -- and it is NOT read as "the window had lost it": the fixtures
+   * the acceptance of the stand rests on are of that kind, and a rule that
+   * turned them all unmeasured would answer about nothing at all.
+   */
+  readonly focused: boolean | null;
   readonly grid: Grid | null;
   /** What the editor said instead of a grid, when it refused to answer. */
   readonly gridRefused: string | null;
@@ -241,6 +257,7 @@ function readSnapshot(line: number, value: Fields): StandSnapshot {
     productAlreadyActive: maybeFlag(line, 'productAlreadyActive', value.productAlreadyActive),
     workspaceStorage: text(value.workspaceStorage),
     torn: maybeFlag(line, 'torn', value.torn),
+    focused: maybeFlag(line, 'focused', value.focused),
     grid: readGrid(line, value.grid),
     gridRefused: text(value.gridRefused),
     groups: list(line, 'groups', value.groups).map((one) => readGroup(line, one)),

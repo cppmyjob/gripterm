@@ -192,15 +192,37 @@ async function sighting(what) {
     productAlreadyActive,
     workspaceStorage,
     torn,
+    /*
+     * Whether this window held the keyboard at the instant this was taken.
+     *
+     * Three of the nine points read the grid below, and `vscode.getEditorLayout`
+     * answers for the part of the editor its ACTIVE group is in (measured
+     * 2026-08-25, twelve settled sightings of twelve). A window without the
+     * keyboard is a window whose active group belongs to whatever took it -- the
+     * fork's login window, which the owner reported popping up during these very
+     * runs on 2026-08-25, among them. The judge refuses such a reading rather
+     * than calling it a defect; deciding that here would be the measurer
+     * judging.
+     */
+    focused: vscode.window.state.focused,
     grid,
     gridRefused: refused === null ? null : neutral(refused),
     groups: after,
   };
 }
 
-/** What makes two sightings the same picture: the groups and the grid, nothing else. */
+/**
+ * What makes two sightings the same picture: the groups, the grid, and whether
+ * the window held the keyboard.
+ *
+ * The keyboard is in here rather than left out as "not part of the layout"
+ * precisely because the judge now refuses a layout read without it. A pair of
+ * sightings differing only by the flag is two different facts, and collapsing
+ * the second into the first would throw away the only line saying when the
+ * window lost it.
+ */
 function picture(snapshot) {
-  return JSON.stringify([snapshot.groups, snapshot.grid, snapshot.gridRefused]);
+  return JSON.stringify([snapshot.groups, snapshot.grid, snapshot.gridRefused, snapshot.focused]);
 }
 
 /**
@@ -297,6 +319,23 @@ async function activate(context) {
     vscode.window.tabGroups.onDidChangeTabs(() => {
       lastChangeAt = Date.now();
       void note('the tabs changed');
+    })
+  );
+
+  /*
+   * And the keyboard, which is not a tab event and must not be counted as one.
+   *
+   * `lastChangeAt` is deliberately NOT moved here: quiet is the window's own
+   * quiet, and a sitting whose settling could be pushed back by something
+   * outside the editor taking the focus would be waiting on a person's desktop
+   * rather than on the product. What this subscription buys is that a loss and
+   * a recovery BETWEEN two sightings are in the recording at all -- `picture()`
+   * counts the flag, so a sighting that differs only by it is written down
+   * rather than collapsed into its predecessor.
+   */
+  context.subscriptions.push(
+    vscode.window.onDidChangeWindowState((state) => {
+      void note(`the window ${state.focused ? 'took' : 'lost'} the keyboard`);
     })
   );
 
