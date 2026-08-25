@@ -333,6 +333,7 @@ export {
 } from './infrastructure/store/atomic-file';
 export { readJsonFile, writeJsonFile, type JsonRead } from './infrastructure/store/json-file';
 export {
+  CLAIM_EXPIRY_MS,
   FileTerminalRepository,
   type FileTerminalRepositoryOptions,
 } from './infrastructure/store/file-terminal-repository';

@@ -1,7 +1,8 @@
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import {
+  CLAIM_EXPIRY_MS,
   ConflictError,
   FileTerminalRepository,
   HumanMetadata,
@@ -40,6 +41,9 @@ const OTHER_TERMINAL = '9f6b1a20-4d2e-4c88-b3f1-2a7c9e5d0011';
 
 /** The moment a discarded record is stamped with, so its trash path is known. */
 const DISCARDED_AT = new Date('2026-08-12T14:33:07.500Z');
+
+/** An age no claim expiry this store might choose could still call fresh. */
+const LONG_STALE_MS = 60 * 60 * 1000;
 
 class StubPresence implements OwnerPresence {
   private readonly _liveness = new Map<string, OwnerLiveness>();
@@ -141,6 +145,23 @@ async function plant(entry: TerminalEntry): Promise<void> {
   const directory = layout.terminalDir(entry.terminalId);
   await mkdir(directory, { recursive: true });
   await writeFile(layout.recordFile(entry.terminalId), JSON.stringify(encodeRecord(entry)), 'utf8');
+}
+
+/** Writes a claim file for a terminal, as another window would have left it. */
+async function plantClaim(id: TerminalId, content: string): Promise<void> {
+  await writeFile(join(layout.terminalDir(id), 'adopting.json'), content, 'utf8');
+}
+
+/**
+ * Backdates a claim so that it is `ms` old as the repository's clock reads it.
+ *
+ * The age of a claim is the age of its FILE and not of anything written inside
+ * it, which is the only reading that also works for the claim nobody can parse
+ * -- so a test that wants an old claim has to move the file, not the content.
+ */
+async function ageClaim(id: TerminalId, ms: number): Promise<void> {
+  const at = new Date(DISCARDED_AT.getTime() - ms);
+  await utimes(join(layout.terminalDir(id), 'adopting.json'), at, at);
 }
 
 describe('writing', () => {
@@ -455,10 +476,12 @@ describe('adopting', () => {
   });
 
   /*
-   * The half that makes this a claim rather than a lock: no timeout, no stale
-   * policy. §4.8 turned `proper-lockfile` down because its 120-second window
-   * means a crashed editor blocks adoption for two minutes; a claim held by a
-   * DEAD owner is simply not a claim.
+   * The half that makes this a claim rather than a lock: nothing is waited out.
+   * §4.8 turned `proper-lockfile` down because its 120-second window means a
+   * crashed editor blocks adoption for two minutes; a claim held by a DEAD
+   * owner is simply not a claim, and goes at once. The expiry Ш7в added is not
+   * this path and does not delay it -- it is what the tests below reach for,
+   * where liveness has no answer to give.
    */
   it('takes over a claim left behind by a window that has since died', async () => {
     const theirs = entryOwnedBy(THEIRS);
@@ -475,6 +498,174 @@ describe('adopting', () => {
 
     expect(adopted.owner.ownerId.value).toBe(MINE);
     expect(logger.lines.some((line) => line.includes('left behind by a dead window'))).toBe(true);
+  });
+
+  /*
+   * Ш7в, and the four tests below are one defect wearing four faces: a claim
+   * laid and never taken away. `_takeOverOrRefuse` resolves such a claim by
+   * asking whether its holder is alive, and that answers for exactly ONE of
+   * them -- the holder established dead, the test above. For a holder that is
+   * merely `unknown`, for a holder that is plainly alive and simply never
+   * released what it took, and for a claim file nothing can be read out of,
+   * liveness has nothing to say; and "nothing to say" meant "refuse", which for
+   * a claim nobody is ever coming back for meant refuse for ever. Measured
+   * 2026-08-24 and written down as S48.
+   */
+  it('lets a person take over a claim a living window never released', async () => {
+    const theirs = entryOwnedBy(THEIRS);
+    await plant(theirs);
+    presence.say(THEIRS, 'dead');
+    presence.say('window-leaker', 'live');
+    await plantClaim(theirs.terminalId, JSON.stringify({ ownerId: 'window-leaker', pid: 1 }));
+    await ageClaim(theirs.terminalId, LONG_STALE_MS);
+
+    const adopted = await repositoryFor(MINE).adopt(theirs.terminalId, theirs.revision, {
+      force: true,
+    });
+
+    expect(adopted.owner.ownerId.value).toBe(MINE);
+  });
+
+  /*
+   * S48 as the owner meets it: the machine slept, so the window that holds both
+   * the record and the claim is `unknown` on both counts, and the person has
+   * looked at the screen it is not on. `force` reached the record and stopped
+   * at the claim, so the answer was the same refusal either way.
+   */
+  it('lets a person force past a claim whose holder is only unknown', async () => {
+    const theirs = entryOwnedBy(THEIRS);
+    await plant(theirs);
+    presence.say(THEIRS, 'unknown');
+    presence.say('window-silent', 'unknown');
+    await plantClaim(theirs.terminalId, JSON.stringify({ ownerId: 'window-silent', pid: 1 }));
+    await ageClaim(theirs.terminalId, 0);
+
+    const adopted = await repositoryFor(MINE).adopt(theirs.terminalId, theirs.revision, {
+      force: true,
+    });
+
+    expect(adopted.owner.ownerId.value).toBe(MINE);
+  });
+
+  it('takes over a claim its unknown holder left to go stale', async () => {
+    const theirs = entryOwnedBy(THEIRS);
+    await plant(theirs);
+    presence.say(THEIRS, 'dead');
+    presence.say('window-silent', 'unknown');
+    await plantClaim(theirs.terminalId, JSON.stringify({ ownerId: 'window-silent', pid: 1 }));
+    await ageClaim(theirs.terminalId, LONG_STALE_MS);
+
+    const adopted = await repositoryFor(MINE).adopt(theirs.terminalId, theirs.revision);
+
+    expect(adopted.owner.ownerId.value).toBe(MINE);
+  });
+
+  /*
+   * The one case with no other way out, ever. Liveness is asked about a HOLDER,
+   * and this claim names none that can be read -- so no window closing, no
+   * machine rebooting and no person insisting can ever change the answer. Age
+   * is the only fact left about it.
+   */
+  it('takes over a claim nobody can be read out of, once it has gone stale', async () => {
+    const theirs = entryOwnedBy(THEIRS);
+    await plant(theirs);
+    presence.say(THEIRS, 'dead');
+    await plantClaim(theirs.terminalId, 'not json at all');
+    await ageClaim(theirs.terminalId, LONG_STALE_MS);
+
+    const adopted = await repositoryFor(MINE).adopt(theirs.terminalId, theirs.revision);
+
+    expect(adopted.owner.ownerId.value).toBe(MINE);
+  });
+
+  /*
+   * Both sides of the boundary, and the number comes from the store rather than
+   * from here. An expiry that never expires and one that expires at once are
+   * both green against a one-sided test, and a literal 60000 written here would
+   * go on passing after the constant moved -- which is the whole of what it
+   * would be promising.
+   */
+  it('leaves a claim alone while it is one millisecond short of its expiry', async () => {
+    const theirs = entryOwnedBy(THEIRS);
+    await plant(theirs);
+    presence.say(THEIRS, 'dead');
+    presence.say('window-silent', 'unknown');
+    await plantClaim(theirs.terminalId, JSON.stringify({ ownerId: 'window-silent', pid: 1 }));
+    await ageClaim(theirs.terminalId, CLAIM_EXPIRY_MS - 1);
+
+    await expect(
+      repositoryFor(MINE).adopt(theirs.terminalId, theirs.revision)
+    ).rejects.toThrow(ConflictError);
+  });
+
+  it('takes a claim over the moment it reaches its expiry', async () => {
+    const theirs = entryOwnedBy(THEIRS);
+    await plant(theirs);
+    presence.say(THEIRS, 'dead');
+    presence.say('window-silent', 'unknown');
+    await plantClaim(theirs.terminalId, JSON.stringify({ ownerId: 'window-silent', pid: 1 }));
+    await ageClaim(theirs.terminalId, CLAIM_EXPIRY_MS);
+
+    const adopted = await repositoryFor(MINE).adopt(theirs.terminalId, theirs.revision);
+
+    expect(adopted.owner.ownerId.value).toBe(MINE);
+  });
+
+  /*
+   * The other half of an expiry, and the half a stale policy usually gets
+   * wrong. A claim seconds old is one another window is USING: `open(wx)`
+   * creates the file and the write naming its holder follows, so a reader
+   * catching that instant sees an empty file it can attribute to nobody.
+   * Neither age nor a person may take such a claim -- both of these are the
+   * compare-and-swap being asked to stand aside while it is doing its job.
+   */
+  it('refuses a fresh claim it cannot attribute, however hard a person insists', async () => {
+    const theirs = entryOwnedBy(THEIRS);
+    await plant(theirs);
+    presence.say(THEIRS, 'dead');
+    await plantClaim(theirs.terminalId, '');
+    await ageClaim(theirs.terminalId, 0);
+
+    await expect(
+      repositoryFor(MINE).adopt(theirs.terminalId, theirs.revision, { force: true })
+    ).rejects.toThrow(ConflictError);
+  });
+
+  /*
+   * The promise the expiry exists under, and the one test that holds it: no
+   * automatic pass may displace a holder the store can see is `live`, however
+   * old the claim. A stale claim with a living holder is a window that leaked
+   * one -- and a window asleep in the middle of an adoption looks exactly the
+   * same from out here, so age by itself must not be allowed to decide it.
+   *
+   * Green before this change as well, because before it everything was
+   * refused. It guards the widening rather than measuring it, and it is the
+   * cell that keeps the widening to the three cases above.
+   */
+  it('never lets age alone displace a claim whose holder is alive', async () => {
+    const theirs = entryOwnedBy(THEIRS);
+    await plant(theirs);
+    presence.say(THEIRS, 'dead');
+    presence.say('window-holder', 'live');
+    await plantClaim(theirs.terminalId, JSON.stringify({ ownerId: 'window-holder', pid: 1 }));
+    await ageClaim(theirs.terminalId, LONG_STALE_MS);
+
+    await expect(
+      repositoryFor(MINE).adopt(theirs.terminalId, theirs.revision)
+    ).rejects.toThrow(ConflictError);
+  });
+
+  it('refuses a fresh claim held by a living window, however hard a person insists', async () => {
+    const theirs = entryOwnedBy(THEIRS);
+    await plant(theirs);
+    presence.say(THEIRS, 'dead');
+    presence.say('window-holder', 'live');
+    await plantClaim(theirs.terminalId, JSON.stringify({ ownerId: 'window-holder', pid: 1 }));
+    await ageClaim(theirs.terminalId, 0);
+
+    await expect(
+      repositoryFor(MINE).adopt(theirs.terminalId, theirs.revision, { force: true })
+    ).rejects.toThrow(ConflictError);
   });
 
   it.each([

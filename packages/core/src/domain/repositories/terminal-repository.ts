@@ -11,6 +11,11 @@ export interface AdoptOptions {
    * a stale heartbeat, and adopting one starts a second `claude --resume` on a
    * conversation that already has one. The flag exists for the person who has
    * looked and knows the window is gone.
+   *
+   * It is answered TWICE, about two different windows: the one that owns the
+   * record, and whichever one may be holding a claim on it while it adopts.
+   * The sentence is the same both times and so is what it buys -- `unknown`,
+   * never `live` by itself -- and until Ш7в it reached only the first of them.
    */
   readonly force?: boolean;
 }

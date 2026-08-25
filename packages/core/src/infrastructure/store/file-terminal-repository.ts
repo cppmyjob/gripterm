@@ -1,4 +1,4 @@
-import { mkdir, open, readdir, rm } from 'node:fs/promises';
+import { mkdir, open, readdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ConflictError, NotFoundError } from '../../domain/errors/gripterm-error';
 import { OwnerId } from '../../domain/entities/owner-id';
@@ -25,10 +25,35 @@ import type {
 /**
  * The file that says "this terminal is being adopted right now".
  *
- * Its name is deliberately not `.lock`: it is not a lock in the usual sense,
- * because it has no timeout and no stale policy. See `_claim`.
+ * Its name is deliberately not `.lock`, and the difference is which question
+ * gets asked first. A lock waits out a timeout. This asks whether the window
+ * that laid the claim is still there, and takes the claim over at once when it
+ * is not. The expiry below is what happens when that question has no answer --
+ * not what happens first. See `_claim` and `_takeOverOrRefuse`.
  */
 const CLAIM_FILE = 'adopting.json';
+
+/**
+ * How long a claim stays a claim once nothing can be established about whoever
+ * laid it. [П]
+ *
+ * A claim covers a handful of local file operations -- one read of the record,
+ * one comparison, two writes -- so a minute is three or four orders of
+ * magnitude above the work it protects, and nothing still doing that work can
+ * reach it. It is the same minute the store already spends deciding that a
+ * window which has gone quiet is no longer to be believed
+ * (`FRESH_HEARTBEAT_MS`), and it is written out here rather than imported from
+ * there because they are not the same quantity: one is about heartbeats and
+ * the other about file operations, and either must be able to move without
+ * dragging the other along.
+ *
+ * **This is not the stale window §4.8 turned `proper-lockfile` down over.**
+ * That objection was that a crashed editor blocks adoption for two minutes,
+ * and it still stands: a claim whose holder is established dead is taken over
+ * immediately, with nothing waited out. What is below is reached only where
+ * liveness has no answer to give at all.
+ */
+export const CLAIM_EXPIRY_MS = 60_000;
 
 export interface FileTerminalRepositoryOptions {
   readonly layout: StorageLayout;
@@ -36,7 +61,10 @@ export interface FileTerminalRepositoryOptions {
   readonly owner: OwnerRef;
   /** Answers whether the CURRENT owner of a record is still there. */
   readonly presence: OwnerPresence;
-  /** Stamps the trash directory a discarded record goes to, and nothing else. */
+  /**
+   * Stamps the trash directory a discarded record goes to, and reads the age of
+   * an adoption claim against its file's `mtime` (`CLAIM_EXPIRY_MS`).
+   */
   readonly clock: Clock;
   readonly logger: Logger;
 }
@@ -113,6 +141,12 @@ export class FileTerminalRepository implements TerminalRepository {
    * RECORD AGAIN. Without that second read the whole primitive would be
    * decorative: the window that won the claim would still be acting on a
    * revision it read before the race.
+   *
+   * **`options` reaches BOTH questions, which until Ш7в it did not.** It got as
+   * far as the owner of the record and stopped at the claim, so a person who
+   * had looked and knew the other window was gone could get past the first
+   * refusal and not the second -- and the second had no expiry either, which
+   * left them no way through at all (S48).
    */
   public async adopt(
     id: TerminalId,
@@ -123,7 +157,7 @@ export class FileTerminalRepository implements TerminalRepository {
     assertRevision(id, expected, before.revision);
     await this._assertAdoptable(before.owner.ownerId, options);
 
-    const claim = await this._claim(id);
+    const claim = await this._claim(id, options);
     try {
       const current = await this._require(id);
       assertRevision(id, expected, current.revision);
@@ -374,14 +408,20 @@ export class FileTerminalRepository implements TerminalRepository {
    * `EEXIST` and is turned away with a `ConflictError`, which is a caller's cue
    * to re-read rather than an error to show anyone.
    *
-   * There is no timeout and no stale policy, which is what makes this different
-   * from a lock file -- §4.8 turned `proper-lockfile` down precisely because a
-   * 120-second stale window means a crashed editor blocks adoption for two
-   * minutes. A claim left behind by a crash is resolved the same way everything
-   * else in this design is: by asking whether its owner is still alive. A claim
-   * held by a dead owner is not a claim, and is taken over.
+   * A claim left behind by a crash is resolved the way everything else in this
+   * design is: by asking whether its owner is still alive. A claim held by a
+   * dead owner is not a claim and is taken over -- at once, with no stale
+   * window waited out, which is what §4.8 turned `proper-lockfile` down over:
+   * its 120 seconds mean a crashed editor blocks adoption for two minutes.
+   *
+   * There IS an expiry since Ш7в, and it does not touch that. It is reached
+   * only where the liveness question has no answer to give at all. See
+   * `_takeOverOrRefuse` and `CLAIM_EXPIRY_MS`.
    */
-  private async _claim(id: TerminalId): Promise<{ release: () => Promise<void> }> {
+  private async _claim(
+    id: TerminalId,
+    options: AdoptOptions
+  ): Promise<{ release: () => Promise<void> }> {
     const path = join(this._options.layout.terminalDir(id), CLAIM_FILE);
     const mine = { ownerId: this._options.owner.ownerId.value, pid: process.pid };
 
@@ -390,7 +430,7 @@ export class FileTerminalRepository implements TerminalRepository {
       await handle.writeFile(JSON.stringify(mine), 'utf8');
       await handle.close();
     } catch (cause: unknown) {
-      await this._takeOverOrRefuse(id, path, cause);
+      await this._takeOverOrRefuse(id, path, cause, options);
     }
 
     return {
@@ -408,12 +448,53 @@ export class FileTerminalRepository implements TerminalRepository {
    * system leads to the same place by the same reasoning: we did not get the
    * claim, so we do not adopt. The cause travels on the error rather than
    * through a branch no test on this platform could reach.
+   *
+   * **Two questions are asked about the claim, and the second is Ш7в.** Whose
+   * it is, and how old it is. Liveness answers for a holder established dead
+   * and for nobody else: a holder that is merely `unknown`, a holder that is
+   * plainly alive and simply never released what it took, and a claim file
+   * nothing can be read out of are three states it has nothing to say about --
+   * and "nothing to say" meant "refuse", which for a claim nobody is ever
+   * coming back for meant refuse for ever. Those are the three, measured
+   * 2026-08-24 and written down as S48, and the third has no other way out at
+   * all: there is no holder in it to ask liveness about, so no window closing
+   * and no machine rebooting will ever change the answer.
+   *
+   * **What age is allowed to cross and what it is not.** An expiry resolves an
+   * ABSENCE of evidence; it does not overrule evidence. A claim nothing can be
+   * attributed to, and one whose holder is `unknown`, are absences, and the
+   * expiry takes them with nobody asked. A holder the store can see as `live`
+   * is evidence that a window is running right now, so that one takes a person
+   * as well -- and the expiry too, so that no automatic pass can ever displace
+   * a window genuinely in the middle of the few file operations a claim covers.
+   *
+   * **`force` here is the same sentence it is in `_assertAdoptable`** -- a
+   * person saying they have looked and that window is gone -- and it buys the
+   * same thing: `unknown`, never `live` on its own. What Ш7в changed is only
+   * that it arrives.
    */
-  private async _takeOverOrRefuse(id: TerminalId, path: string, cause: unknown): Promise<void> {
+  private async _takeOverOrRefuse(
+    id: TerminalId,
+    path: string,
+    cause: unknown,
+    options: AdoptOptions
+  ): Promise<void> {
+    const stale = await this._claimIsStale(path);
+    const forced = options.force === true;
     const holder = holderOf(await readJsonFile(path));
-    // A claim we cannot attribute is treated as held by somebody: refusing costs
-    // the person one retry, while guessing "nobody" costs a second `--resume`.
+
     if (holder === null) {
+      // A claim we cannot attribute is treated as held by somebody: refusing
+      // costs the person one retry, while guessing "nobody" costs a second
+      // `--resume`. One retry is the true price only while the file is young --
+      // `open` with `wx` creates it and the write naming its holder follows, so
+      // an unattributable claim is most often that instant, caught in the
+      // middle. A file that STAYS unreadable charges that price on every
+      // attempt for ever, and its age is the only fact anyone has left about it.
+      if (stale) {
+        await this._takeClaimOver(id, path, null, 'nothing could be read out of it and it is past its expiry');
+        return;
+      }
       throw new ConflictError('this entry could not be claimed for adoption', {
         cause,
         details: { terminalId: id.value },
@@ -421,20 +502,91 @@ export class FileTerminalRepository implements TerminalRepository {
     }
 
     const liveness = await this._options.presence.livenessOf(holder);
-    if (liveness !== 'dead') {
-      throw new ConflictError('another window is adopting this entry right now', {
-        details: { terminalId: id.value, holder: holder.value, liveness },
+    if (liveness === 'dead') {
+      // The holder is gone. Taking the claim over is a plain overwrite: the
+      // exclusive create has already told us we are not racing a live window,
+      // and the record itself is still protected by the revision check that
+      // follows.
+      this._options.logger.info('an adoption claim left behind by a dead window was taken over', {
+        terminalId: id.value,
+        holder: holder.value,
       });
+      await this._writeClaim(path);
+      return;
+    }
+    if (liveness === 'unknown' && (forced || stale)) {
+      const because = forced
+        ? 'its window is there and silent, and a person asked for this record'
+        : 'its window is there and silent, and the claim is past its expiry';
+      await this._takeClaimOver(id, path, holder, because);
+      return;
+    }
+    if (liveness === 'live' && forced && stale) {
+      await this._takeClaimOver(
+        id,
+        path,
+        holder,
+        'a person asked for this record and the claim is past its expiry'
+      );
+      return;
     }
 
-    // The holder is gone. Taking the claim over is a plain overwrite: the
-    // exclusive create has already told us we are not racing a live window, and
-    // the record itself is still protected by the revision check that follows.
-    this._options.logger.info('an adoption claim left behind by a dead window was taken over', {
-      terminalId: id.value,
-      holder: holder.value,
+    throw new ConflictError('another window is adopting this entry right now', {
+      details: { terminalId: id.value, holder: holder.value, liveness, stale },
     });
+  }
+
+  /**
+   * Overwrites a claim nothing is using, and says in one sentence why.
+   *
+   * One message with the reason as a detail rather than three messages: a
+   * person reading their log finds every takeover of this kind by one string,
+   * and then reads which of the cases it was.
+   */
+  private async _takeClaimOver(
+    id: TerminalId,
+    path: string,
+    holder: OwnerId | null,
+    because: string
+  ): Promise<void> {
+    this._options.logger.info('an adoption claim nobody was using was taken over', {
+      terminalId: id.value,
+      holder: holder === null ? null : holder.value,
+      because,
+    });
+    await this._writeClaim(path);
+  }
+
+  /** This window's claim, written over whatever was there. */
+  private async _writeClaim(path: string): Promise<void> {
     await writeJsonFile(path, { ownerId: this._options.owner.ownerId.value, pid: process.pid });
+  }
+
+  /**
+   * Whether a claim has lain there longer than any adoption could take.
+   *
+   * The age is the FILE's, from its `mtime`, and not a field written inside it.
+   * The deciding reason is the third of three: a field is one more thing a
+   * claim can be wrong about; the file system stamps `mtime` without being
+   * asked; and a claim file nothing can be parsed out of still has one, which
+   * is exactly the case where there is nothing else left to ask.
+   *
+   * An age that cannot be established at all -- the file went away between the
+   * failed create and this read -- counts as fresh, which is the refusing side.
+   * Whoever took it away has already let the next attempt through.
+   *
+   * A claim stamped in the FUTURE reads as fresh as well, by the same
+   * arithmetic and on purpose: it means the wall clock moved, and a clock that
+   * moved is not a reason to seize anything. What this store does about clocks
+   * that jump is a separate question (Ш7г) and lives elsewhere.
+   */
+  private async _claimIsStale(path: string): Promise<boolean> {
+    try {
+      const { mtimeMs } = await stat(path);
+      return this._options.clock.now().getTime() - mtimeMs >= CLAIM_EXPIRY_MS;
+    } catch {
+      return false;
+    }
   }
 
   private _notify(): void {
