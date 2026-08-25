@@ -22,6 +22,16 @@ interface Family {
   readonly siblings: readonly EditorLayoutNode[];
   readonly at: number;
   readonly node: EditorLayoutNode;
+  /**
+   * How that list is laid out: `COLUMNS` or `ROWS`.
+   *
+   * Carried here rather than answered by a second walk of the same tree,
+   * because a second walk is a second place for the leaf counting to be wrong
+   * -- and the leaf counting is the one thing every reader of this file has
+   * got wrong at least once (see `withGroupShare`). `groupShare` and
+   * `withGroupShare` do not read it; `amongRows` is nothing but it.
+   */
+  readonly orientation: number;
 }
 
 /**
@@ -83,6 +93,65 @@ export function rowBelowAtTheEnd(layout: EditorLayout): number | null {
   }
 }
 
+/**
+ * Whether the group at `index` is a ROW AMONG ROWS -- the question
+ * `rowBelowAtTheEnd` asks about the last leaf, asked about any leaf. `null`
+ * when there is no such leaf.
+ *
+ * **What it is for, and the contradiction it removes (2026-08-25).** A strip of
+ * ours is only ever made as a row below the editors, and `_emptyRowBelow`
+ * refuses to adopt an empty group that is a COLUMN beside them -- the
+ * customer's window of 2026-08-22, and the reason `rowBelowAtTheEnd` exists.
+ * The sweep of leftovers in the same turn then closed exactly such a group: the
+ * live suite of 2026-08-25 stood up two columns with the right-hand one empty,
+ * opened a terminal, and the empty column was gone -- `the person's empty
+ * column was taken instead of left alone`. Refusing to take a group and then
+ * taking it away is one rule contradicting itself. What a restart leaves
+ * behind of OURS is a row; a column beside the editors is somebody else's
+ * furniture.
+ *
+ * A family of ONE answers `false`, for the reason `rowBelowAtTheEnd` gives
+ * about the same shape: an editor area holding one group is nobody's strip,
+ * however the grid is oriented, and there is nothing there to be among.
+ *
+ * `index` counts the LEAVES from the left, exactly as in `groupShare` -- a
+ * `ViewColumn` minus one.
+ */
+export function amongRows(layout: EditorLayout, index: number): boolean | null {
+  const family = familyOf(layout.groups, { index, seen: 0 }, layout.orientation);
+  if (family === null) {
+    return null;
+  }
+  return family.siblings.length > 1 && family.orientation === ROWS;
+}
+
+/**
+ * How many COLUMNS the editor area has, counted from the grid.
+ *
+ * **Not the same number as `vscode.window.tabGroups.all.length`, measured
+ * 2026-08-25 over nine runs of the stand.** Cursor keeps editors of its own in
+ * an editor part that is not the main grid -- a "New Agent" tab, restored with
+ * the window -- and the extension API lists that group beside the real ones,
+ * with a `viewColumn` one past the last real column. Every rule that asks "does
+ * the strip still have a neighbour" by counting tab groups counts that one too,
+ * and the answer is wrong in the one direction that hurts: it closes the real
+ * neighbour and leaves the strip alone in the editor area. The stand names the
+ * disagreement in its own words -- "the editor holding a tab group outside its
+ * own grid" -- and point 3 goes red about the consequence.
+ *
+ * The grid is the editor's own answer about its own area, so this is where the
+ * number comes from -- and its ONE honest use is comparing it with the length
+ * of that list. Equal, and every `viewColumn` means what it says. Unequal, and
+ * which group is which cannot be told from here: the outsider was one past the
+ * last column in 139 of the 142 sightings that had one and NOT in the rest, and
+ * the grid answer lags the list during a restore -- `[743]`, one column, while
+ * the editor was listing three groups. `VsCodeEditorStrip._areaGroups` moves
+ * nothing when they disagree, for that reason.
+ */
+export function columnsIn(layout: EditorLayout): number {
+  return layout.groups.reduce((sum, node) => sum + leavesIn(node), 0);
+}
+
 /** How many columns a node of the tree accounts for. */
 function leavesIn(node: EditorLayoutNode): number {
   return node.groups === undefined ? 1 : node.groups.reduce((sum, one) => sum + leavesIn(one), 0);
@@ -109,7 +178,7 @@ function leavesIn(node: EditorLayoutNode): number {
  * see the note there, which is the whole reason both of these are functions.
  */
 export function groupShare(layout: EditorLayout, index: number): number | null {
-  const family = familyOf(layout.groups, { index: assertIndex(index), seen: 0 });
+  const family = familyOf(layout.groups, { index: assertIndex(index), seen: 0 }, layout.orientation);
   if (family === null) {
     return null;
   }
@@ -152,7 +221,7 @@ export function withGroupShare(
     });
   }
 
-  const family = familyOf(layout.groups, { index, seen: 0 });
+  const family = familyOf(layout.groups, { index, seen: 0 }, layout.orientation);
   if (family === null) {
     return null;
   }
@@ -184,10 +253,17 @@ export function withGroupShare(
   return { ...layout, groups: rebuilt(layout.groups, family.siblings, resized) };
 }
 
-/** The list a leaf lives in, counting leaves left to right. */
+/**
+ * The list a leaf lives in, counting leaves left to right, and how that list is
+ * laid out.
+ *
+ * `orientation` alternates on the way down -- the editor's own rule for this
+ * shape, measured and written down at `COLUMNS`/`ROWS` above.
+ */
 function familyOf(
   siblings: readonly EditorLayoutNode[],
-  state: { readonly index: number, seen: number }
+  state: { readonly index: number, seen: number },
+  orientation: number
 ): Family | null {
   // `entries` and not an index: reading `siblings[at]` under
   // `noUncheckedIndexedAccess` would hand back an `undefined` that cannot
@@ -195,11 +271,11 @@ function familyOf(
   for (const [at, node] of siblings.entries()) {
     if (node.groups === undefined) {
       if (state.seen === state.index) {
-        return { siblings, at, node };
+        return { siblings, at, node, orientation };
       }
       state.seen += 1;
     } else {
-      const found = familyOf(node.groups, state);
+      const found = familyOf(node.groups, state, orientation === ROWS ? COLUMNS : ROWS);
       if (found !== null) {
         return found;
       }

@@ -312,9 +312,35 @@ export class WorkbenchView implements vscode.WebviewViewProvider, vscode.Disposa
     return await answer;
   }
 
-  /** Waits for the next measurement the page makes of its own accord. */
-  public async nextMeasurement(timeoutMs: number = ANSWER_WITHIN_MS): Promise<ViewReport> {
-    return await this._wait(this._waitingForMeasurement, timeoutMs, 'the page measured nothing');
+  /**
+   * Waits for the next measurement the page makes of its own accord, and says
+   * WHICH one when it matters.
+   *
+   * The page measures itself for half a dozen reasons -- a strip drawn, a
+   * terminal attached, one ended, the panel resized, the editor restyled -- and
+   * a caller that named none of them used to be handed whichever arrived first.
+   * MEASURED 2026-08-25, and in two halves. In the full live run, `a change of
+   * theme repaints the terminal` failed on the colour the panel had BEFORE the
+   * theme changed -- a report from before its own question. In a probe of the
+   * same window, a wait registered exactly that way was handed `the strip was
+   * drawn`, a report about something else, sent while nothing was being asked.
+   * That is the same defect `measure` was given a name for on 2026-08-17, in
+   * the one place that had been left without one.
+   *
+   * `null` still means "whichever comes first", and it is a real question: a
+   * caller waiting to hear that the panel MOVED does not care what moved it,
+   * and compares the size it is handed rather than trusting the reason.
+   */
+  public async nextMeasurement(
+    timeoutMs: number = ANSWER_WITHIN_MS,
+    because: string | null = null
+  ): Promise<ViewReport> {
+    return await this._wait(
+      this._waitingForMeasurement,
+      timeoutMs,
+      because === null ? 'the page measured nothing' : `the page never reported: ${because}`,
+      because
+    );
   }
 
   /**

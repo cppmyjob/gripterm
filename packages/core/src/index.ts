@@ -42,12 +42,26 @@ export {
 } from './domain/services/window-shutdown';
 
 export {
+  amongRows,
+  columnsIn,
   groupShare,
   rowBelowAtTheEnd,
   withGroupShare,
   type EditorLayout,
   type EditorLayoutNode,
 } from './domain/services/editor-layout';
+
+export {
+  OneTurnAtATime,
+  type OneTurnAtATimeOptions,
+  type TurnFailure,
+} from './domain/services/one-turn-at-a-time';
+
+export {
+  QuietSpell,
+  type QuietEnd,
+  type QuietSpellOptions,
+} from './domain/services/quiet-spell';
 
 export {
   shellQuietVerdict,

@@ -682,11 +682,17 @@ suite('the strip of our own', () => {
    * exactly what a log is for.
    *
    * `takeAwayEmptyGroups` had eight outcomes and wrote a line on two of them.
-   * The three below are the ones a suite can stand up honestly; the other three
-   * silent ones -- the arranging lock, somebody pressing the plus mid-sweep, and
-   * the editor refusing to close a group -- are races this host cannot be made
-   * to enter on purpose, and they are named in the report rather than pretended
-   * about.
+   * The three below are the ones a suite can stand up honestly.
+   *
+   * Two of the ways out that were named here as unenterable races are GONE
+   * rather than still untested (Ш8, 2026-08-25): the arranging lock and
+   * somebody pressing the plus mid-sweep were the boolean and the counter that
+   * `OneTurnAtATime` replaced, and neither state exists any more -- the sweep
+   * is a turn of one queue, and nothing else runs inside it. What is left
+   * untested is still untested and still named rather than pretended about: the
+   * editor refusing to close a group it was asked to, a window taken down while
+   * the sweep was waiting for it to stop moving, and a person who has turned
+   * `workbench.editor.closeEmptyGroups` off.
    *
    * Read out of the FILE IN THE STORE, because that file is the whole of Ш3: it
    * is what a person can be asked for after they have closed the window.

@@ -27,6 +27,19 @@ import type { GriptermApi } from '../../packages/extension/src/extension';
 const SETTLES_MS = 8000;
 const POLL_MS = 100;
 
+/**
+ * How long the page is given to report a layout change before it is taken to
+ * have none to report.
+ *
+ * Measured 2026-08-25, ten reveals of the panel: the page's own report of the
+ * reveal lands 130 to 163 ms after the view becomes visible. This is three
+ * times the longest of those, and it is a ceiling on OUR OWN timer rather than
+ * a guess about the editor's -- the page re-fits and reports eighty
+ * milliseconds after its box stops moving (`SETTLE_MS`,
+ * `packages/webview/src/page/main.ts`).
+ */
+const STILL_MS = 500;
+
 async function api(): Promise<GriptermApi> {
   const extension = vscode.extensions.getExtension<GriptermApi>('gripterm-placeholder.gripterm');
   assert.ok(extension, 'extension not found in the host');
@@ -43,42 +56,55 @@ async function until(ready: () => boolean, ms = SETTLES_MS): Promise<boolean> {
 }
 
 /**
- * A size the page has STOOD STILL at, rather than the first one it answers.
+ * The size the panel has SETTLED at, rather than one it is passing through.
  *
- * **Measured, 2026-08-21, and this helper exists for the measurement.** Polling
- * the page every hundred milliseconds from the moment our view became visible
- * gives, in one ordinary run:
+ * **What this replaces was a bet, and it is worth naming as one.** Until
+ * 2026-08-25 this helper took two answers a hundred milliseconds apart agreeing
+ * with each other. That is not a wait; it is a wager that the panel finishes
+ * laying out inside a hundred milliseconds -- somebody else's schedule -- and it
+ * is a wager that loses precisely under load, which is why it lost in the full
+ * live run and not on its own: three runs of the `own` label by itself were
+ * green here on 2026-08-25, and the register of the two days before it records
+ * four reds of the full run against at least three greens.
  *
- * ```
- * +2ms 25x13 | +112ms 75x13 | +221ms 75x13 | ... (unchanged for two seconds)
- * ```
+ * **Why the bet could be lost at all, measured the same day over ten reveals.**
+ * In NINE of the ten, the page went on answering a size it was not at for 89 to
+ * 147 ms after the view became visible -- `cols` and `rows` are xterm's and move
+ * only when something re-fits it, while the box they are supposed to describe
+ * had already moved. Two answers a hundred milliseconds apart both land inside a
+ * window that wide, agree, and are wrong together. That half is now fixed where
+ * it belonged, in the page (`case 'measure'` in
+ * `packages/webview/src/page/main.ts`): the same ten reveals afterwards have no
+ * wrong answer in them at all, over some seven hundred samples.
  *
- * The first answer is taken while the panel is still laying out -- a THIRD of
- * the width it settles at -- and `workbench.visible` has been true for all of
- * it. A test that measured on the first answer was therefore comparing a size
- * mid-layout with a settled one, which is what dropped a run of the live label
- * with "8 rows before, 13 after" while nothing about the panel had changed.
- *
- * Two agreeing answers in a row rather than a sleep: a sleep is a guess about
- * somebody else's schedule, and this is the same thing said as a condition.
+ * **What is waited for instead: a named event.** The page reports a layout
+ * change of its own accord, and only after it has re-fitted. So a size is
+ * settled when the page's own report agrees with the size asked for here -- and
+ * it is settled just as well when the page has nothing to report, because then
+ * nothing has moved since the measurement was taken. Both ceilings are named:
+ * `STILL_MS` for one report, `SETTLES_MS` for the whole wait.
  */
 async function settledSize(
   workbench: GriptermApi['workbench'],
   because: string
 ): Promise<{ readonly cols: number, readonly rows: number }> {
   const deadline = Date.now() + SETTLES_MS;
-  let last = await workbench.measure(because);
-  const seen = [`${String(last.cols)}x${String(last.rows)}`];
+  // Laid out and fitted before it is answered, so this is the size the page IS
+  // at rather than the size something last resized it to.
+  let size = await workbench.measure(because);
+  const seen = [`${String(size.cols)}x${String(size.rows)}`];
   while (Date.now() < deadline) {
-    await pause(POLL_MS);
-    const next = await workbench.measure(because);
-    if (next.cols === last.cols && next.rows === last.rows) {
-      return { cols: next.cols, rows: next.rows };
+    // Nothing can slip between the answer above and this wait: the host settles
+    // a waiter from inside the callback that heard the message, and the line
+    // below runs in the microtask after it -- before any further message.
+    const heard = await workbench.nextMeasurement(STILL_MS).then((report) => report, () => null);
+    if (heard === null || (heard.cols === size.cols && heard.rows === size.rows)) {
+      return { cols: size.cols, rows: size.rows };
     }
-    seen.push(`${String(next.cols)}x${String(next.rows)}`);
-    last = next;
+    size = heard;
+    seen.push(`${String(size.cols)}x${String(size.rows)}`);
   }
-  throw new Error(`the page never stood still at one size (${because}): ${seen.join(' -> ')}`);
+  throw new Error(`the panel never stopped moving (${because}): ${seen.join(' -> ')}`);
 }
 
 /** Long enough for the editor to have done a thing it does not announce. */

@@ -89,9 +89,9 @@ const STAGES = [
     fast: false,
     what: 'pnpm run test:stand  (four windows on this desktop; measured 2 min 10 s), then gate/allowed-red.json',
     command: ['pnpm', 'run', 'test:stand'],
-    // The stand's own exit code is not the answer. Four or five of its nine
-    // points come back red on this revision -- four every time and a fifth that
-    // comes and goes -- and all five are admitted by name in
+    // The stand's own exit code is not the answer. Two or three of its nine
+    // points come back red on this revision -- two every time and a third that
+    // comes and goes with the window -- and all three are admitted by name in
     // `gate/allowed-red.json` by the Ш6 orchestrator, which the owner has not
     // ratified. The budget decides, and it is stricter than the stand in the
     // directions that matter -- an unadmitted point, a point over its ceiling, a

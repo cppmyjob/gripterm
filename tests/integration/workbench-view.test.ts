@@ -19,6 +19,26 @@ import type { GriptermApi } from '../../packages/extension/src/extension';
 const SETTLES_WITHIN_MS = 30_000;
 
 /**
+ * How far the border is dragged when a test needs it to have moved.
+ *
+ * Wide enough that the terminal half loses more than a dozen columns, so that a
+ * column count from before the drag cannot be mistaken for one from after it.
+ */
+const BORDER_DRAG_PX = 120;
+
+/**
+ * The page's own words for the two reports waited for below.
+ *
+ * Written out rather than imported, for the same reason `PANEL_CONTAINER` is: an
+ * integration suite may take types from the extension package and no values.
+ * They are `whenLayoutChanged`'s and `case 'restyle'`'s own strings in
+ * `packages/webview/src/page/main.ts`, and a wait that names one of them is
+ * refused every other report the page sends.
+ */
+const RELAID = 'the panel changed size';
+const REPAINTED = 'the editor changed how we look';
+
+/**
  * The panel container's id, written out rather than imported.
  *
  * An integration suite may take TYPES from the extension package and no values:
@@ -153,7 +173,7 @@ suite('the panel this extension draws in', () => {
     // Dragged by the page on the suite's order, because a suite has no pointer:
     // the page dispatches real pointer events at the splitter, so what is being
     // exercised is the handler a person's mouse would reach.
-    const after = await workbench.dragSplitterBy(-120, SETTLES_WITHIN_MS);
+    const after = await workbench.dragSplitterBy(-BORDER_DRAG_PX, SETTLES_WITHIN_MS);
 
     assert.ok(
       after.terminalWidth < before.terminalWidth,
@@ -166,7 +186,44 @@ suite('the panel this extension draws in', () => {
     // The screen followed the border rather than keeping its old size.
     assert.ok(after.cols < before.cols, `xterm kept ${String(before.cols)} columns`);
 
-    await workbench.dragSplitterBy(120, SETTLES_WITHIN_MS);
+    await workbench.dragSplitterBy(BORDER_DRAG_PX, SETTLES_WITHIN_MS);
+  });
+
+  test('answers with a box and a column count from the same instant', async () => {
+    const { workbench } = await api();
+    await show();
+    await workbench.whenReady(SETTLES_WITHIN_MS);
+
+    // ORDERED rather than awaited, and that is the whole shape of the question.
+    // `dragSplitterBy` waits for the report the page sends of its own accord,
+    // which arrives after it has re-fitted; what is asked here is what the page
+    // says in BETWEEN -- while its box has already moved and its screens have
+    // not yet been told.
+    //
+    // Deterministic rather than a race: the two messages leave this window one
+    // after the other with nothing awaited between them, so the page takes the
+    // drag and then the question as two tasks of one event loop -- and the
+    // re-fit it would do by itself is behind a timer of eighty milliseconds
+    // (`SETTLE_MS` in `packages/webview/src/page/main.ts`), which cannot cut in
+    // front of a message already queued.
+    workbench.post({ kind: 'probe', action: { kind: 'drag-splitter', byPx: -BORDER_DRAG_PX } });
+    const asked = await workbench.measure('right after the border moved', SETTLES_WITHIN_MS);
+
+    try {
+      // A drag of nought moves nothing and waits for the page's own report:
+      // the answer the page would have given had it not been asked early.
+      const settled = await workbench.dragSplitterBy(0, SETTLES_WITHIN_MS);
+
+      assert.equal(
+        asked.cols,
+        settled.cols,
+        `the page answered ${String(asked.cols)} columns for a half ${String(Math.round(asked.terminalWidth))}px wide ` +
+        `and settled at ${String(settled.cols)} columns for a half ${String(Math.round(settled.terminalWidth))}px wide -- ` +
+        'one number from before the border moved and one from after it, handed out as one measurement'
+      );
+    } finally {
+      await workbench.dragSplitterBy(BORDER_DRAG_PX, SETTLES_WITHIN_MS);
+    }
   });
 
   test('a change of theme repaints the terminal', async () => {
@@ -182,7 +239,7 @@ suite('the panel this extension draws in', () => {
       ? 'Default Dark Modern'
       : 'Default Light Modern';
     try {
-      const repainted = workbench.nextMeasurement(SETTLES_WITHIN_MS);
+      const repainted = workbench.nextMeasurement(SETTLES_WITHIN_MS, REPAINTED);
       await settings.update('colorTheme', other, vscode.ConfigurationTarget.Global);
       const after = await repainted;
 
@@ -193,7 +250,7 @@ suite('the panel this extension draws in', () => {
       );
     } finally {
       await settings.update('colorTheme', previous, vscode.ConfigurationTarget.Global);
-      await workbench.nextMeasurement(SETTLES_WITHIN_MS).catch(() => null);
+      await workbench.nextMeasurement(SETTLES_WITHIN_MS, REPAINTED).catch(() => null);
     }
   });
 
@@ -203,7 +260,7 @@ suite('the panel this extension draws in', () => {
     const before = await workbench.whenReady(SETTLES_WITHIN_MS);
 
     try {
-      const relaid = workbench.nextMeasurement(SETTLES_WITHIN_MS);
+      const relaid = workbench.nextMeasurement(SETTLES_WITHIN_MS, RELAID);
       await vscode.commands.executeCommand('workbench.action.zoomIn');
       const after = await relaid;
 
@@ -216,7 +273,44 @@ suite('the panel this extension draws in', () => {
       );
     } finally {
       await vscode.commands.executeCommand('workbench.action.zoomReset');
-      await workbench.nextMeasurement(SETTLES_WITHIN_MS).catch(() => null);
+      await workbench.nextMeasurement(SETTLES_WITHIN_MS, RELAID).catch(() => null);
+    }
+  });
+
+  test('a wait for one report is not settled by another', async () => {
+    const { workbench } = await api();
+    await show();
+    const before = await workbench.measure('the size before the editor is zoomed', SETTLES_WITHIN_MS);
+
+    try {
+      const relaid = workbench.nextMeasurement(SETTLES_WITHIN_MS, RELAID);
+      // A report about something else, sent first and on purpose.
+      //
+      // It stands in for the ones this window really sends: the page measures
+      // itself when a strip is drawn, when a terminal attaches, when one ends,
+      // when the panel is resized. MEASURED 2026-08-25, and this test exists
+      // because of it -- the wait in `a change of theme repaints the terminal`
+      // was handed `the strip was drawn`, 5.3 seconds after it began, and the
+      // colour it then asserted on was the colour from before the theme
+      // changed. That is the whole failure: not a wrong number, but the right
+      // number to a question nobody asked.
+      //
+      // Deterministic rather than a race: this leaves the window before the
+      // command below and is answered in the next task of the page's event
+      // loop, while the zoom has to reach the editor, move the box and wait out
+      // the page's own eighty-millisecond debounce.
+      workbench.post({ kind: 'measure', because: 'a report nobody here is waiting for' });
+      await vscode.commands.executeCommand('workbench.action.zoomIn');
+      const after = await relaid;
+
+      assert.ok(
+        after.cols < before.cols || after.rows < before.rows,
+        `the wait was settled by the other report: ${String(before.cols)}x${String(before.rows)} before, ` +
+        `${String(after.cols)}x${String(after.rows)} handed over as the answer to the zoom`
+      );
+    } finally {
+      await vscode.commands.executeCommand('workbench.action.zoomReset');
+      await workbench.nextMeasurement(SETTLES_WITHIN_MS, RELAID).catch(() => null);
     }
   });
 

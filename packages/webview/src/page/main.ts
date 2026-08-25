@@ -505,6 +505,22 @@ function start(root: HTMLElement): void {
         post({ kind: 'measured', report: report(), because: 'the editor changed how we look' });
         return;
       case 'measure':
+        // Laid out and fitted BEFORE it is answered, and that is the whole of
+        // this branch. `cols` and `rows` are xterm's, and they move only when
+        // something resizes it; `terminalWidth` and `detailsWidth` are the
+        // boxes', read at the moment of asking. Reported without this pair of
+        // calls, one answer carries numbers from two different instants -- 75
+        // columns for a half 476px wide that holds 60, measured on 2026-08-25
+        // by `answers with a box and a column count from the same instant`.
+        //
+        // It costs the asker a resize it would have got anyway: `whenLayoutChanged`
+        // does the same two calls eighty milliseconds after the box stops
+        // moving, and `fit` resizes nothing when nothing has changed. So this
+        // brings the page's own settling forward rather than making it settle
+        // somewhere else -- which is the only kind of measurement that may
+        // touch what it measures.
+        layout.apply();
+        screens.fit();
         post({ kind: 'measured', report: report(), because: message.because });
         return;
       case 'attach': {

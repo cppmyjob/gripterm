@@ -1,17 +1,22 @@
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ALLOWANCES, readAllowances, standingAllowances, verdictAgainstAllowances } from './allowance';
+import { BUDGET, judge } from './judge';
+import { parseRecording } from './recording';
 import type { AllowanceDocument } from './allowance';
 import type { Finding, Verdict } from './judge';
 
 /**
  * The budget of admitted redness, over a verdict and a date and nothing else.
  *
- * **What it is for.** On 2026-08-25 five points of the stand need a line: four
- * of them (3, 4, 6, 7) came back red in every run measured, and point 1 comes
- * and goes. They belong to steps that have not happened -- Ш7 (the restore
- * traps) and Ш8 (the strip's queue and adoption). A gate that included the stand
- * as it is would be red until those land, and a `pre-push` hook over a
- * permanently red gate comes off with the first `--no-verify`.
+ * **What it is for.** On 2026-08-25 three points of the stand need a line: two
+ * of them (6 and 7) came back red in every run measured, and point 1 comes and
+ * goes with the window it is handed. 6 and 7 belong to a step that has not
+ * happened -- Ш7, the restore traps. Points 3 and 4 had lines of their own
+ * until the second half of Ш8 fixed them the same day, and `gate/allowed-red.json`
+ * records what went out and why. A gate that included the stand as it is would
+ * be red until Ш7 lands, and a `pre-push` hook over a permanently red gate
+ * comes off with the first `--no-verify`.
  *
  * So the redness is admitted BY NAME, in a file, with a ceiling and a date, and
  * the admission is held to five things a comment could not hold it to:
@@ -413,6 +418,45 @@ describe('the budget of admitted redness', () => {
         .map((one) => `point ${String(one.point)}: ${one.allowedBy}`);
 
       expect(onTheOwner).toStrictEqual([]);
+    });
+
+    /*
+     * THE RULE THIS FILE EXISTS FOR, HELD OVER A WINDOW THE STAND REALLY MEETS
+     * -- and the one assertion here that reads a recording.
+     *
+     * On 2026-08-25 points 3 and 4 came back green four runs running and their
+     * lines were taken out of `gate/allowed-red.json`. On the fifth run they
+     * were red again and the budget refused the gate. What separated the fifth
+     * run from the four was not the product: it was that Cursor restored an
+     * editor of its OWN into the window, a tab labelled `New Agent`, which lives
+     * in an editor part the grid does not hold while `tabGroups.all` lists it
+     * all the same. `vscode.getEditorLayout` answers for the part that holds the
+     * ACTIVE group, so with that tab focused the grid the observer writes down
+     * is the agent pane's and not the editor area's -- and every point that
+     * indexes the grid by a `ViewColumn` is then reading one container with
+     * another's numbers.
+     *
+     * The four green runs cannot be re-read: `prepare()` deletes
+     * `.vscode-test/stand-output/` at the start of every run, so "green with the
+     * agent editor in the window" rested on a report, and the budget said so.
+     * `agent-editor-2026-08-25.ndjson` is the fifth run's own recording, kept
+     * before the next run could delete it, and this test is what it buys: the
+     * budget now has to cover a window of that kind or fail here, in a second,
+     * with no editor -- instead of four minutes into a gate on somebody's
+     * desktop, once a fortnight, when Cursor happens to restore one.
+     *
+     * It does NOT pin which points were red that day, for the reason
+     * `judge.test.ts` gives about the other real recording: that would turn
+     * fixing one of them into a failing test. It pins the only thing the budget
+     * is for -- that whatever this recording answers, the budget admits it.
+     */
+    it('admits the run of 2026-08-25 whose window carried Cursor`s own agent editor', () => {
+      const recording = parseRecording(
+        readFileSync(join(__dirname, 'fixtures', 'agent-editor-2026-08-25.ndjson'), 'utf8')
+      );
+      const document = readAllowances(readFileSync(ALLOWANCES, 'utf8'));
+
+      expect(verdictAgainstAllowances(judge(recording, BUDGET), document, TODAY)).toStrictEqual([]);
     });
   });
 });

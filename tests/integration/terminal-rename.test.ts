@@ -66,11 +66,52 @@ async function closeAll(terminals: readonly vscode.Terminal[]): Promise<void> {
   );
 }
 
-/** The editor's own object for a terminal we made, found by the name it was given. */
-function terminalNamed(name: string): vscode.Terminal {
-  const found = vscode.window.terminals.find((one) => one.name === name);
-  assert.ok(found, `the editor has no terminal called ${name}`);
-  return found;
+/**
+ * The editor's own object for a terminal we made, WAITED for by the name it was
+ * given.
+ *
+ * **A wait and not a read, and the measurement is why (2026-08-25).** This was
+ * a single look at `window.terminals`, and it went red on a build that had made
+ * the terminal perfectly well: `the editor has no terminal called
+ * gripterm-waiting-before: it holds ["cmd","gripterm-elsewhere"]`. Polled every
+ * 25 ms from the moment `createTerminal` returned, the name reads
+ *
+ *     0 ms   gripterm-waiting-before
+ *     75 ms  cmd                       <- the process, for three ticks
+ *     150 ms gripterm-waiting-before   <- and the name we gave it, ever after
+ *
+ * `Terminal.name` is a mirror the workbench pushes to the extension host
+ * (`$acceptTerminalTitleChange`), and while the shell is starting it carries
+ * the PROCESS title for about seventy milliseconds before the name the API was
+ * given wins. Nothing in this build reads that name -- handles are matched by
+ * object identity -- so it is a fact about the platform and not a defect in the
+ * product. It is a defect in a test that looked exactly once: which of the two
+ * names a single read catches depends on how long the call before it took, and
+ * that is not something a suite may rest on.
+ *
+ * The ceiling is the file's own, and the failure still lists what the editor
+ * DOES hold: "never made", "made and closed" and "made under another name" are
+ * three different diagnoses, and a bare "no such terminal" tells them apart for
+ * nobody.
+ */
+async function terminalNamed(name: string): Promise<vscode.Terminal> {
+  const until = Date.now() + 5000;
+  for (;;) {
+    const found = vscode.window.terminals.find((one) => one.name === name);
+    if (found !== undefined) {
+      return found;
+    }
+    if (Date.now() > until) {
+      assert.fail(
+        `the editor has no terminal called ${name}: it holds ${JSON.stringify(
+          vscode.window.terminals.map((one) => one.name)
+        )}, and its groups are ${vscode.window.tabGroups.all
+          .map((group) => `[${String(group.viewColumn)}] ${group.tabs.map((tab) => tab.label).join(', ')}`)
+          .join(' | ')}`
+      );
+    }
+    await sleep(25);
+  }
 }
 
 suite('renaming the tab of a terminal', () => {
@@ -86,7 +127,7 @@ suite('renaming the tab of a terminal', () => {
       shellArgs: shell.args,
     });
 
-    const terminal = terminalNamed('gripterm-rename-before');
+    const terminal = await terminalNamed('gripterm-rename-before');
     try {
       handle.show(true);
       await waitFor('the terminal to become the active one', () => vscode.window.activeTerminal === terminal);
@@ -148,8 +189,8 @@ suite('renaming the tab of a terminal', () => {
       shellArgs: shell.args,
     });
 
-    const waiting = terminalNamed('gripterm-waiting-before');
-    const elsewhere = terminalNamed('gripterm-elsewhere');
+    const waiting = await terminalNamed('gripterm-waiting-before');
+    const elsewhere = await terminalNamed('gripterm-elsewhere');
     try {
       second.show(true);
       await waitFor('the other terminal to be the active one', () => vscode.window.activeTerminal === elsewhere);

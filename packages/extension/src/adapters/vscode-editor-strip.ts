@@ -1,6 +1,15 @@
 import * as vscode from 'vscode';
-import { groupShare, rowBelowAtTheEnd, withGroupShare } from '@gripterm/core';
-import type { EditorLayout, Logger } from '@gripterm/core';
+import {
+  OneTurnAtATime,
+  QuietSpell,
+  SystemScheduler,
+  amongRows,
+  columnsIn,
+  groupShare,
+  rowBelowAtTheEnd,
+  withGroupShare,
+} from '@gripterm/core';
+import type { EditorLayout, Logger, QuietEnd } from '@gripterm/core';
 
 /**
  * How much of the space it shares our strip asks for when it is made. A third
@@ -25,6 +34,28 @@ const NEW_GROUP_ABOVE = 'workbench.action.newGroupAbove';
 const LOCK_GROUP = 'workbench.action.lockEditorGroup';
 const GET_LAYOUT = 'vscode.getEditorLayout';
 const SET_LAYOUT = 'vscode.setEditorLayout';
+
+/**
+ * Taking the lock back off a group, read out of the Cursor 3.17.8 bundle on
+ * 2026-08-25 beside `lockEditorGroup` and `toggleEditorGroupLock`.
+ *
+ * **Why an extension that locks groups has to be able to unlock them, measured
+ * on the stand the same day.** The workbench remembers which groups were
+ * locked and brings that back with the grid, so the strip this file locked
+ * yesterday comes back as a LOCKED EMPTY GROUP -- and an empty locked group is
+ * a door with no handle: `editorGroupFinder` in that bundle walks the groups
+ * looking for one that is not locked and, finding none, makes a new group
+ * beside the active one. That is what the recording shows in sitting 4 of every
+ * run -- `README.md` opened over the strip landed in a new column BESIDE the
+ * terminals, with an empty group sitting unusable above them, which is the
+ * customer's "слева терминал, справа файл" reached by a different road.
+ *
+ * Like every other group command it names no target and acts on the ACTIVE
+ * group, so it costs a moment of the focus -- and it is only ever asked of a
+ * group this file has just found EMPTY, in a window whose own
+ * `closeEmptyGroups` says an empty group is not something anybody keeps.
+ */
+const UNLOCK_GROUP = 'workbench.action.unlockEditorGroup';
 
 /**
  * Closing an editor group, read out of the Cursor 3.17.8 bundle on 2026-08-22
@@ -99,17 +130,46 @@ const REPAIR_ROUNDS = 4;
 const REPAIR_WAIT_MS = 500;
 
 /**
- * How many times the editor area is looked at, while a window is waking, for
- * the grid to come back.
+ * When the workbench counts as having finished with the editor area, and the
+ * longest this file will wait to be told so.
  *
- * An extension activates while the workbench is still restoring, and a look
- * taken too early sees the one group every empty window has and finds nothing
- * to do. Six looks half a second apart is three seconds, which is longer than
- * any restore measured on this machine and short enough that a person pressing
- * the plus straight away is not kept waiting -- and if they do press it, the
- * strip they make cancels this outright.
+ * **Not a sleep, and that is the whole change (Ш8).** What stood here was six
+ * looks half a second apart and then one more pause -- three and a half seconds
+ * of waiting whatever the window was doing. Measured on the stand of
+ * 2026-08-25, over four sittings: the grid was back 1.3 s after activation, so
+ * two thirds of that wait was spent on nothing, and by the time it ended a
+ * strip had already been made and the sweep it was waiting for refused to run
+ * ("the terminals already have a group of their own"). The empty groups a
+ * restart brought back then stood for the whole sitting -- the staircase the
+ * stand exists for.
+ *
+ * A second is measured from the last tab or group EVENT, which is the
+ * difference between waiting for something and betting on a number. The
+ * measured restores are bursts of events 20-60 ms apart, so a second of silence
+ * is well clear of the gaps inside one; and the observer of the stand calls a
+ * window settled after three, so a repair made at one second is a repair the
+ * recording sees.
+ *
+ * The ceiling is not optional and is not a fallback: silence is also what a
+ * window that never woke up sounds like, and a wait with no end is a charge
+ * against the time a person's window takes to come back (S42) with nothing in
+ * the log to say what was being waited for. `QuietSpell` says which of the two
+ * ended each burst.
  */
-const AREA_LOOKS = 6;
+const QUIET_MS = 1000;
+const QUIET_CEILING_MS = 8000;
+
+/**
+ * The names the turns of the queue are known by, in the log and to each other.
+ *
+ * Spelled once because `SETTLED` is the name a NUDGE collapses on: two spellings
+ * of it would be two queues that never noticed each other, which is the defect
+ * a queue is here to remove wearing a different hat.
+ */
+const A_GROUP_FOR_THE_TERMINALS = 'a group for the terminals';
+const SETTLED = 'the window stopped changing';
+const THE_EMPTY_GROUPS = 'the empty groups a restart brought back';
+const THE_STRIP_ITSELF = 'the strip, for the button that maximises it';
 
 /**
  * Why a sweep of the empty groups stopped, in the words the log carries.
@@ -120,10 +180,28 @@ const AREA_LOOKS = 6;
  */
 type SweepEnd =
   | 'every empty group was taken away'
-  | 'somebody asked for a group of terminals while the sweep was running'
   | 'the editor area holds one group, and an area with nothing in it is nobody`s problem'
+  | 'the strip would have been left alone in the editor area'
   | 'every group in the editor area holds something'
+  | 'the empty groups left standing are beside the editors, which is not where a strip of ours goes'
+  | 'empty editor groups are the person`s own setting here'
+  | 'the editor`s own grid and its list of tab groups do not agree on how many groups there are'
+  | 'the window was being taken down while this was waiting for it to stop'
   | 'the editor would not close a group that had nothing in it';
+
+/**
+ * The editor area answered as BOTH of the things a rule about it needs: the tab
+ * groups, and the grid they are supposed to be the leaves of.
+ *
+ * One answer rather than two calls, because the two would be taken a moment
+ * apart over a window that is allowed to move in between -- and the whole point
+ * of `_areaGroups` is that these two are only usable when they agree with each
+ * other.
+ */
+interface AreaGroups {
+  readonly groups: readonly vscode.TabGroup[];
+  readonly layout: EditorLayout;
+}
 
 /**
  * A group of the editor area that holds our terminals and nothing else.
@@ -185,9 +263,28 @@ function locksTerminals(): boolean {
 export class VsCodeEditorStrip {
   private readonly _logger: Logger;
   private readonly _watch: vscode.Disposable;
+  /**
+   * The column of our strip, as a CACHE and never as the answer.
+   *
+   * Everything that reads it goes through `_kept()`, which asks the editor
+   * whether the group at that number is still one holding nothing but our
+   * terminals -- because closing a group renumbers the ones after it and the
+   * number can come to name somebody else's. The one place the cache is the
+   * only thing there is: between the group being adopted and the terminal
+   * arriving in it, the strip holds no tabs and no search can find it. That
+   * window used to be guarded by counting the callers (`_asked`); it is now
+   * held by the queue, inside which nothing else runs at all.
+   */
   private _column: vscode.ViewColumn | null = null;
-  /** True while this object is making a group, so its own change is not answered. */
-  private _arranging = false;
+  /**
+   * One queue for every entrance, in place of the boolean that said "busy".
+   *
+   * See `OneTurnAtATime`: the boolean lost every wake-up that arrived while a
+   * turn was running, which is the class of wake-up that mattered most.
+   */
+  private readonly _turns: OneTurnAtATime;
+  /** "The workbench has stopped moving things", as something to be told rather than slept through. */
+  private readonly _quiet: QuietSpell;
   /**
    * True while the strip still owes the editor a size.
    *
@@ -196,27 +293,62 @@ export class VsCodeEditorStrip {
    * nothing in it. Measured in Cursor on 2026-08-22: `getEditorLayout` answers
    * with no sizes at all until the tab appears, and then answers 70/673. So the
    * asking cannot end when the group is made: what is owed is remembered, and
-   * paid the moment the group's tabs change.
+   * paid when the window has stopped moving.
+   *
+   * **Paid at the END of a burst and not in the middle of one, which is Ш8.**
+   * The debt used to be discharged by the first tab change that found a share
+   * at or under a third, and the stand of 2026-08-25 shows what that bought: at
+   * 35 s the first terminal's tab arrived, the share read 0.334 and the debt
+   * was dropped; at 37.8 s the second terminal opened, the workbench took the
+   * space back to 70/673, and nothing was owed to anybody any more. The
+   * recording the stand judges is the one taken after that.
    */
   private _owed = false;
   /**
-   * How many times this window has been asked where the terminals go.
+   * True between the moment a group is taken for the terminals and the moment a
+   * terminal is first seen in it -- and FALSE ever after.
    *
-   * Counted rather than remembered as a flag, and read across the awaits of
-   * `takeAwayAnEmptyStrip`: the group is adopted BEFORE the terminal going into
-   * it exists, so between those two instants the strip holds no tabs -- and a
-   * sweep that read "no tabs" as "not ours" would close the group the gateway
-   * had just been given, leaving the terminal to land wherever the editor felt
-   * like putting it. What has to be true is not "this window never made a
-   * strip" but "nobody asked for one WHILE this was deciding", which a number
-   * says and a flag cannot.
+   * **The half of `_ours()` that was missing, measured 2026-08-25.** `_ours()`
+   * was written so that an empty group at the remembered number still counts as
+   * the strip, because the strip is made before the terminal that goes into it
+   * -- in sitting 1 of the stand by thirty-three seconds -- and `_kept()`, which
+   * lets go of an empty group, forgot it in the gap. That is right for the gap
+   * and wrong for ever after: a strip whose last terminal has gone is closed by
+   * the editor, and the number then names a group somebody else made. With no
+   * end to the exemption, four tests of the live suite watched the sweep decline
+   * to touch anything and say `the strip would have been left alone in the
+   * editor area` about a window that had no strip in it at all -- a false
+   * sentence in the one log a person can be asked for.
+   *
+   * So the exemption has a beginning and an end: it begins when the group is
+   * taken and ends the first time a terminal is seen in it, which is an EVENT
+   * this object already listens for and not a length of time.
    */
-  private _asked = 0;
+  private _awaitingTheFirstTerminal = false;
 
   constructor(logger: Logger) {
     this._logger = logger;
+    this._turns = new OneTurnAtATime({
+      onFailed: ({ what, cause }) => {
+        // A nudged turn has no caller to throw at. Without this line its throw
+        // would be an unhandled rejection in an extension host: a message in
+        // somebody else's log and in none of ours.
+        this._logger.warn('a turn of the editor strip threw', { what, cause });
+      },
+    });
+    this._quiet = new QuietSpell({
+      quietMs: QUIET_MS,
+      ceilingMs: QUIET_CEILING_MS,
+      scheduler: new SystemScheduler(),
+      onQuiet: (why) => {
+        this._turns.nudge(SETTLED, async () => {
+          await this._settle(why);
+        });
+      },
+    });
     const look = (): void => {
-      void this._afterAChange();
+      this._noteATerminalArrived();
+      this._quiet.stir();
     };
     // Both events, because they are different: a group appearing or going is a
     // group change, and a TAB appearing in a group is a tab change -- and the
@@ -229,11 +361,96 @@ export class VsCodeEditorStrip {
 
   public dispose(): void {
     this._watch.dispose();
+    // Before the watch would be the same; after it is the order that says what
+    // this means -- stop listening, then let go of whoever was waiting to be
+    // told the window had stopped.
+    this._quiet.dispose();
   }
 
-  /** The column our terminals open in, making it if there is not one. */
+  /**
+   * The column our terminals open in, making it if there is not one.
+   *
+   * A turn of the queue, so that the answer cannot be renumbered under it by
+   * this object's own rules running inside its awaits. That was not a
+   * theoretical race: `column()` was the one entrance with no guard at all,
+   * while making a group ABOVE the strip -- which `_keepCompany` does on an
+   * event -- moves every column after it by one.
+   */
   public async column(): Promise<vscode.ViewColumn> {
-    this._asked += 1;
+    return await this._turns.ask(A_GROUP_FOR_THE_TERMINALS, async () => await this._makeOrAdoptAStrip());
+  }
+
+  /**
+   * The empty groups a restart brings back, taken away.
+   *
+   * **The owner, 2026-08-22 and again on 2026-08-23.** First: "при
+   * переоткрытии остаётся пустая панель". Then, on the build that fixed exactly
+   * that: "повторилось также появились пустые группы" -- with a picture of
+   * THREE empty groups stacked above their terminals.
+   *
+   * The first rule was cut to the shape that had been measured -- an empty
+   * strip at the END of the area -- and their window is the other shape: the
+   * empty groups are ABOVE and the terminals are at the bottom, so the rule
+   * looked at the last group, found a terminal in it, and did nothing. The
+   * owner's word for that was going in circles, and they were right.
+   *
+   * Where they come from is not in doubt: every terminal we make is
+   * `isTransient: true` (A3), so the tabs do not come back from a restart while
+   * the GROUPS do -- the grid is the editor's -- and each restart that leaves a
+   * strip behind adds one (measured 2026-08-21, §4 of the protocol: "каждый
+   * перезапуск добавлял пустую группу").
+   *
+   * **Only what the editor would have done itself.** `closeEmptyGroups` is the
+   * workbench's own setting and it is on by default: with it on, a group that
+   * loses its last editor is closed by the platform, and the ONLY empty groups
+   * that survive are the ones restored that way. So this asks the setting
+   * first, and a person who turned it off keeps every empty group they made --
+   * the answer to "is an empty group wanted here" is theirs and it is already
+   * written down.
+   *
+   * **Never the last one.** An editor area with nothing in it anywhere is how
+   * every window starts, and it is nobody's problem.
+   */
+  public async takeAwayEmptyGroups(): Promise<number> {
+    /*
+     * Waited for OUTSIDE the queue, and that is the whole of why the wait can
+     * be this long without costing anybody anything: a person who presses the
+     * plus while this is waiting takes the queue in front of it, makes their
+     * strip, and sweeps around it in their own turn -- and this one then runs
+     * over a window that has already been tidied and says so. A wait taken
+     * inside a turn would have been a person watching a spinner for a second.
+     */
+    const settled = await this._quiet.whenQuiet();
+    return await this._turns.ask(THE_EMPTY_GROUPS, async () => await this._sweepOnWaking(settled));
+  }
+
+  /**
+   * Puts the editor on the strip, if there is one and it is still ours.
+   *
+   * For the maximise button, which acts on the ACTIVE group and names no
+   * target. Pressed from the list of terminals -- which is where the customer
+   * will find it, Cursor having refused three times to draw it on the tab bar
+   * of a terminal -- the active group is whatever file they last touched, and
+   * maximising THAT is the button doing the opposite of what it says.
+   *
+   * A turn of the queue like every other entrance: pressed while a strip is
+   * being made, it must act on the strip that comes OUT of that, not on the
+   * half-made picture in the middle of it.
+   */
+  public async standOnTheStrip(): Promise<boolean> {
+    return await this._turns.ask(THE_STRIP_ITSELF, async () => {
+      const column = this._kept();
+      if (column === null) {
+        return false;
+      }
+      if (vscode.window.tabGroups.activeTabGroup.viewColumn === column) {
+        return true;
+      }
+      return await this._focus(column);
+    });
+  }
+
+  private async _makeOrAdoptAStrip(): Promise<vscode.ViewColumn> {
     const kept = this._kept();
     if (kept !== null) {
       /*
@@ -286,7 +503,7 @@ export class VsCodeEditorStrip {
         // it did NOT lock the only group of an empty area.
         editorLocksTerminals: locksTerminals(),
       });
-      return empty;
+      return await this._tidyAround(empty);
     }
 
     await this._standWhereTheEditorsAre();
@@ -314,6 +531,9 @@ export class VsCodeEditorStrip {
        */
       const column = vscode.window.tabGroups.activeTabGroup.viewColumn;
       this._column = column;
+      // The terminal is going there whatever else is in it, so the number is
+      // held the same way as on every other path out of here.
+      this._awaitingTheFirstTerminal = true;
       this._logger.warn('the editor would not make a group for the terminals, so they are going into the one that is there', {
         column,
         attempts: SPLIT_ATTEMPTS,
@@ -342,161 +562,297 @@ export class VsCodeEditorStrip {
 
     this._column = made;
     this._logger.info('a group of our own was opened below the editors', { column: made });
-    return made;
+    return await this._tidyAround(made);
   }
 
   /**
-   * The empty groups a restart brings back, taken away.
+   * The leftovers of every restart before this one, taken away NOW -- in the
+   * same turn, after the strip is ours -- and the door left open above it.
    *
-   * **The owner, 2026-08-22 and again on 2026-08-23.** First: "при
-   * переоткрытии остаётся пустая панель". Then, on the build that fixed exactly
-   * that: "повторилось также появились пустые группы" -- with a picture of
-   * THREE empty groups stacked above their terminals.
+   * **Why here and not in the sweep that runs when the window wakes (Ш8).**
+   * That sweep begins with "if the terminals already have a group of their own,
+   * leave everything alone", and by the time it had finished waiting for the
+   * grid they always did. Measured over three runs of the stand on 2026-08-25:
+   * the groups went 2, 2, 2, 2 in one run and 2, 4, 5, 6 and 2, 2, 4, 5 in the
+   * other two -- the staircase, in a build whose sweep never once ran. The
+   * moment the leftovers are certainly there and certainly not ours is the
+   * moment we have just taken a group of our own, and it is this one.
    *
-   * The first rule was cut to the shape that had been measured -- an empty
-   * strip at the END of the area -- and their window is the other shape: the
-   * empty groups are ABOVE and the terminals are at the bottom, so the rule
-   * looked at the last group, found a terminal in it, and did nothing. The
-   * owner's word for that was going in circles, and they were right.
-   *
-   * Where they come from is not in doubt: every terminal we make is
-   * `isTransient: true` (A3), so the tabs do not come back from a restart while
-   * the GROUPS do -- the grid is the editor's -- and each restart that leaves a
-   * strip behind adds one (measured 2026-08-21, §4 of the protocol: "каждый
-   * перезапуск добавлял пустую группу").
-   *
-   * **Only what the editor would have done itself.** `closeEmptyGroups` is the
-   * workbench's own setting and it is on by default: with it on, a group that
-   * loses its last editor is closed by the platform, and the ONLY empty groups
-   * that survive are the ones restored that way. So this asks the setting
-   * first, and a person who turned it off keeps every empty group they made --
-   * the answer to "is an empty group wanted here" is theirs and it is already
-   * written down.
-   *
-   * **Never the last one.** An editor area with nothing in it anywhere is how
-   * every window starts, and it is nobody's problem.
+   * Answers with the strip's column, which the sweep can MOVE: closing a group
+   * before ours renumbers it, and the caller is about to open a terminal in
+   * whatever number this hands back.
    */
-  public async takeAwayEmptyGroups(): Promise<number> {
-    if (this._arranging) {
-      this._logger.info('the empty groups were left alone: this window is in the middle of arranging its own');
+  private async _tidyAround(strip: vscode.ViewColumn): Promise<vscode.ViewColumn> {
+    this._column = strip;
+    // Every way here is over a group with NO TABS -- one just split off, or one
+    // `_emptyRowBelow` found empty -- and the caller is about to put a terminal
+    // in it. That is the whole of the exemption `_awaitingTheFirstTerminal`
+    // names, and this is where it begins.
+    this._awaitingTheFirstTerminal = true;
+    await this._sweepEmptyGroups();
+    await this._openTheDoor();
+    return this._remembered() ?? strip;
+  }
+
+  /**
+   * The remembered column, read through a call on purpose.
+   *
+   * It is moved by `_sweepEmptyGroups`, which closes groups in front of ours
+   * and renumbers it -- and the compiler, reading the straight line above and
+   * seeing no assignment along it, holds the field to the value it was just
+   * given and calls the `??` pointless. It is not pointless: it is the whole of
+   * why the caller can open a terminal in the number this hands back. The same
+   * lesson `_kept()` learnt about a number that survives an await.
+   */
+  private _remembered(): vscode.ViewColumn | null {
+    return this._column;
+  }
+
+  /**
+   * The groups of the EDITOR AREA -- or `null`, meaning "this cannot be told
+   * from here, so move nothing".
+   *
+   * **Measured over ten runs of the stand, 2026-08-25, and the refusal is the
+   * result.** In some runs and not others, Cursor's own "New Agent" editor is
+   * restored with the window. It lives in an editor part of its own, the grid
+   * does not hold it, and `vscode.window.tabGroups.all` lists it all the same
+   * with a `viewColumn` of its own. The stand names the disagreement whenever
+   * it has one -- "the grid accounted for 2, 2, 2, 1 of them, which is the
+   * editor holding a tab group outside its own grid" -- and it lands on exactly
+   * one kind of rule: anything that counts tab groups to decide whether the
+   * strip still has a neighbour, or picks a group by its number to close.
+   *
+   * **What was tried first and is not here.** Taking the outsider to be the one
+   * past the last grid column: true of 139 of the 142 sightings that have one,
+   * and FALSE of the rest -- and worse, the grid answer lags the list during a
+   * restore (measured: `[743]`, one column, while the editor was listing two
+   * empty groups and an agent). A rule resting on either would be a guess about
+   * which group is which, made in the one window where guessing wrong closes
+   * somebody's editor group.
+   *
+   * So the only thing said here is what can be checked: when the two counts
+   * agree there is nothing outside the area and every number means what it
+   * says; when they do not, this answers `null` and its callers do NOTHING.
+   * A window with an agent editor open therefore keeps the empty groups a
+   * restart brought it -- which is what every window did before Ш8, and is not
+   * a trade being made quietly: it is written in the log, on every sweep, with
+   * both counts in it.
+   *
+   * It is lifted the day the API says which editor part a group belongs to.
+   */
+  private async _areaGroups(): Promise<AreaGroups | null> {
+    const all = vscode.window.tabGroups.all;
+    const layout = await vscode.commands.executeCommand<EditorLayout>(GET_LAYOUT);
+    const columns = columnsIn(layout);
+    if (columns === all.length) {
+      // The grid comes back WITH the list, because the callers need both and a
+      // second `getEditorLayout` would be a second answer -- taken a moment
+      // later, over a window that is allowed to have moved in between.
+      return { groups: all, layout };
+    }
+    this._logger.info('the editor`s grid and its list of tab groups do not agree on how many groups there are, so none of them is moved', {
+      groups: all.length,
+      columns,
+      // Both, because the disagreement goes both ways: more groups than columns
+      // is an editor part of its own, and fewer is a grid answered before it
+      // was laid out. Neither can be told from the other here.
+      layout: JSON.stringify(layout),
+    });
+    return null;
+  }
+
+  private async _sweepOnWaking(settled: QuietEnd): Promise<number> {
+    if (settled === 'nothing is watching the window any more') {
+      // The window went down while this was waiting for it to stop moving.
+      // Closing groups in it now would be tidying a room on its way to being
+      // demolished, over an editor that is answering commands out of courtesy.
+      this._logger.info('the sweep of empty groups is over', {
+        closed: 0,
+        why: 'the window was being taken down while this was waiting for it to stop' satisfies SweepEnd,
+        settled,
+      });
       return 0;
     }
-    const ours = this._kept();
+    const ours = this._ours();
     if (ours !== null) {
       this._logger.info('the empty groups were left alone: the terminals already have a group of their own', {
         column: ours,
+        settled,
       });
       return 0;
     }
+    const { closed } = await this._sweepEmptyGroups(settled);
+    return closed;
+  }
+
+  /**
+   * Every empty group but the ones this window needs, closed, and the strip's
+   * own column kept in step while they go.
+   *
+   * **What it keeps, and it is two different numbers.** With a strip of ours in
+   * the area it stops at TWO groups, because a locked strip alone in the editor
+   * area is a window a person cannot open a file in (complaint 6, and point 5
+   * of the stand). With no strip it stops at one, because an editor area
+   * holding nothing anywhere is how every window starts and is nobody's
+   * problem.
+   *
+   * **From the far end backwards.** The empty group with the LARGEST column
+   * goes first, and that is not a detail: a strip is only a strip while it is
+   * the last thing in the area, and closing the leftovers from the near end
+   * would walk the strip up the grid instead of down it. Measured on the stand,
+   * 2026-08-25: "sitting 2 left the strip in column 2 of 3, and the row at the
+   * end of the area is column 3" is that exact picture, red at point 3.
+   *
+   * **And only ROWS.** What a restart leaves of ours is a row, because a strip
+   * is only ever made as one; an empty COLUMN beside the editors is the
+   * person's own furniture, and `_emptyRowBelow` already refuses to adopt it
+   * for exactly that reason. Until 2026-08-25 this closed it in the same turn,
+   * two lines later -- one rule contradicting itself, and the live suite's
+   * "the person's empty column was taken instead of left alone". `amongRows`
+   * is that question.
+   */
+  private async _sweepEmptyGroups(settled: QuietEnd | null = null): Promise<{ closed: number, why: SweepEnd }> {
     if (!closesEmptyGroups()) {
       this._logger.info('empty editor groups are the person`s own setting here, so they are left alone');
-      return 0;
+      return { closed: 0, why: 'empty editor groups are the person`s own setting here' };
     }
-    const askedBefore = this._timesAsked();
-    this._arranging = true;
-    try {
-      for (let look = 1; look <= AREA_LOOKS; look += 1) {
-        if (vscode.window.tabGroups.all.length > 1) {
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, REPAIR_WAIT_MS));
+    let closed = 0;
+    let why: SweepEnd = 'every empty group was taken away';
+    /*
+     * The bound is taken ONCE. Read inside the condition it shrinks with
+     * every group closed and the loop stops halfway -- which is what the live
+     * suite caught on the owner's own shape: two of their three empty groups
+     * went and the third stayed. Closing renumbers the rest, so each round
+     * still asks the editor again rather than working from a list.
+     */
+    const rounds = vscode.window.tabGroups.all.length;
+    for (let round = 1; round <= rounds; round += 1) {
+      const mine = this._ours();
+      const floor = mine === null ? 1 : 2;
+      const area = await this._areaGroups();
+      if (area === null) {
+        why = 'the editor`s own grid and its list of tab groups do not agree on how many groups there are';
+        break;
       }
-      // One more pause before deciding: the groups come back one at a time.
-      await new Promise((resolve) => setTimeout(resolve, REPAIR_WAIT_MS));
-
-      let closed = 0;
-      let why: SweepEnd = 'every empty group was taken away';
-      /*
-       * The bound is taken ONCE. Read inside the condition it shrinks with
-       * every group closed and the loop stops halfway -- which is what the live
-       * suite caught on the owner's own shape: two of their three empty groups
-       * went and the third stayed. Closing renumbers the rest, so each round
-       * still asks the editor again rather than working from a list.
-       */
-      const rounds = vscode.window.tabGroups.all.length;
-      for (let round = 1; round <= rounds; round += 1) {
-        // Asked again every round, because each one awaits: a person who
-        // pressed the plus meanwhile has been given a group that has no tab in
-        // it yet, and it must not be closed under them.
-        if (this._timesAsked() !== askedBefore) {
-          why = 'somebody asked for a group of terminals while the sweep was running';
-          break;
-        }
-        const groups = vscode.window.tabGroups.all;
-        if (groups.length < 2) {
-          why = 'the editor area holds one group, and an area with nothing in it is nobody`s problem';
-          break;
-        }
-        const empty = groups.find((group) => group.tabs.length === 0);
-        if (empty === undefined) {
-          why = 'every group in the editor area holds something';
-          break;
-        }
-        if (!(await this._closeGroup(empty.viewColumn))) {
-          why = 'the editor would not close a group that had nothing in it';
-          break;
-        }
-        closed += 1;
+      const { groups, layout } = area;
+      if (groups.length <= floor) {
+        why = mine === null
+          ? 'the editor area holds one group, and an area with nothing in it is nobody`s problem'
+          : 'the strip would have been left alone in the editor area';
+        break;
+      }
+      const standing = groups.filter((group) => group.tabs.length === 0 && group.viewColumn !== mine);
+      if (standing.length === 0) {
+        why = 'every group in the editor area holds something';
+        break;
       }
       /*
-       * ONE LINE, ALWAYS, AND THIS IS THE POINT OF THE METHOD RATHER THAN A
-       * DECORATION ON IT (Ш3).
+       * AND EACH OF THEM A ROW, which is the half this did not ask until the
+       * live suite of 2026-08-25 caught it (see `amongRows`).
        *
-       * Measured 2026-08-23: in a sitting where five empty groups stood for
-       * forty seconds, this said NOTHING -- it wrote a line only when it had
-       * closed something -- and the log did not allow anybody to tell which of
-       * its six silent ways out it had taken. The cause had to be recovered by
-       * reading sources and comparing timestamps, which is precisely the
-       * position this product was putting its owner in.
-       *
-       * `column()` in this same file learnt the identical lesson on 2026-08-22
-       * and its comment says so: a path that says nothing cannot be diagnosed
-       * from a log, and a log is all there is when the window is somebody
-       * else's.
+       * A strip of ours is only ever made as a row below the editors, and
+       * `_emptyRowBelow` refuses to ADOPT an empty group beside them -- and
+       * then this closed one, in the same turn, two lines later: "the person's
+       * empty column was taken instead of left alone". A leftover of ours is a
+       * row; a column standing beside the editors is the person's furniture,
+       * and taking it away is not tidying up.
        */
-      this._logger.info('the sweep of empty groups is over', {
-        closed,
-        why,
-        groups: vscode.window.tabGroups.all.length,
-      });
-      return closed;
-    } finally {
-      this._arranging = false;
+      const empty = standing
+        .filter((group) => amongRows(layout, group.viewColumn - 1) === true)
+        .reduce<vscode.TabGroup | null>(
+          (furthest, group) => (furthest === null || group.viewColumn > furthest.viewColumn ? group : furthest),
+          null
+        );
+      if (empty === null) {
+        why = 'the empty groups left standing are beside the editors, which is not where a strip of ours goes';
+        break;
+      }
+      if (!(await this._closeGroup(empty.viewColumn))) {
+        why = 'the editor would not close a group that had nothing in it';
+        break;
+      }
+      // The columns before the one that went keep their numbers and the ones
+      // after it do not, so ours moves only when the group that went was in
+      // front of it.
+      if (mine !== null && empty.viewColumn < mine) {
+        this._column = mine - 1;
+      }
+      closed += 1;
     }
+    /*
+     * ONE LINE, ALWAYS, AND THIS IS THE POINT OF THE METHOD RATHER THAN A
+     * DECORATION ON IT (Ш3).
+     *
+     * Measured 2026-08-23: in a sitting where five empty groups stood for
+     * forty seconds, this said NOTHING -- it wrote a line only when it had
+     * closed something -- and the log did not allow anybody to tell which of
+     * its six silent ways out it had taken. The cause had to be recovered by
+     * reading sources and comparing timestamps, which is precisely the
+     * position this product was putting its owner in.
+     *
+     * `column()` in this same file learnt the identical lesson on 2026-08-22
+     * and its comment says so: a path that says nothing cannot be diagnosed
+     * from a log, and a log is all there is when the window is somebody
+     * else's.
+     */
+    this._logger.info('the sweep of empty groups is over', {
+      closed,
+      why,
+      groups: vscode.window.tabGroups.all.length,
+      column: this._column,
+      settled,
+    });
+    return { closed, why };
   }
 
   /**
-   * Puts the editor on the strip, if there is one and it is still ours.
+   * The lock taken off every empty group that is left standing.
    *
-   * For the maximise button, which acts on the ACTIVE group and names no
-   * target. Pressed from the list of terminals -- which is where the customer
-   * will find it, Cursor having refused three times to draw it on the tab bar
-   * of a terminal -- the active group is whatever file they last touched, and
-   * maximising THAT is the button doing the opposite of what it says.
-   */
-  public async standOnTheStrip(): Promise<boolean> {
-    const column = this._kept();
-    if (column === null) {
-      return false;
-    }
-    if (vscode.window.tabGroups.activeTabGroup.viewColumn === column) {
-      return true;
-    }
-    return await this._focus(column);
-  }
-
-  /**
-   * The count, read through a call on purpose.
+   * **The half of Ш8 that had no name until the stand was read, 2026-08-25.**
+   * The workbench remembers which groups were locked and restores that with the
+   * grid, so yesterday's strip comes back as an empty LOCKED group -- and
+   * `editorGroupFinder` in the Cursor 3.17.8 bundle walks the groups looking
+   * for one that is not locked and, finding none, makes a NEW group beside the
+   * active one. That is sitting 4 of the recording, every run: `README.md`
+   * opened while the strip had the focus landed in a new column BESIDE the
+   * terminals, with a perfectly good empty group above them that no editor
+   * could be put into. Point 4 of the stand is that sentence.
    *
-   * It is raised in `column()`, which runs BETWEEN the awaits of
-   * `takeAwayAnEmptyStrip` -- and the compiler, reading the one straight line
-   * in front of it and seeing no assignment along it, holds the field to the
-   * value it had at the top of the method and calls the second look pointless.
-   * It is not pointless: it is the whole of the guard against closing a group
-   * the gateway has just been given.
+   * Asked of every empty group rather than of the ones known to be locked,
+   * because there is nothing to ask: `vscode.window.tabGroups` does not say
+   * whether a group is locked, and the workbench's own answer is a context key
+   * an extension cannot read. Unlocking one that was not locked does nothing.
+   *
+   * The boundary, named: this runs only where `closeEmptyGroups` is on, which
+   * is the window saying an empty group is not something anybody here keeps on
+   * purpose, and only over groups with nothing in them. It is lifted the day
+   * the API says which groups are locked, or the day the workbench stops
+   * restoring the lock of a group it restores empty.
    */
-  private _timesAsked(): number {
-    return this._asked;
+  private async _openTheDoor(): Promise<void> {
+    if (!closesEmptyGroups()) {
+      return;
+    }
+    const mine = this._column;
+    const area = await this._areaGroups();
+    if (area === null) {
+      return;
+    }
+    const shut = area.groups.filter((group) => group.tabs.length === 0 && group.viewColumn !== mine);
+    if (shut.length === 0) {
+      return;
+    }
+    const opened: number[] = [];
+    for (const group of shut) {
+      if (await this._setLock(group.viewColumn, false)) {
+        opened.push(group.viewColumn);
+      }
+    }
+    this._logger.info('the empty groups left beside the terminals were unlocked, so the next file has somewhere to go', {
+      opened,
+      asked: shut.map((group) => group.viewColumn),
+      column: mine,
+    });
   }
 
   /**
@@ -543,22 +899,29 @@ export class VsCodeEditorStrip {
    * active group would lock somebody else's.
    */
   private async _lock(column: vscode.ViewColumn): Promise<boolean> {
+    return await this._setLock(column, true);
+  }
+
+  /** Both halves of the same command pair, because both need the same focus dance. */
+  private async _setLock(column: vscode.ViewColumn, locked: boolean): Promise<boolean> {
+    const command = locked ? LOCK_GROUP : UNLOCK_GROUP;
     const was = vscode.window.tabGroups.activeTabGroup.viewColumn;
     if (was === column) {
-      await vscode.commands.executeCommand(LOCK_GROUP);
+      await vscode.commands.executeCommand(command);
       return true;
     }
     if (!(await this._focus(column))) {
-      this._logger.warn('the editor would not put the focus on the group of the terminals, which is left unlocked', {
+      this._logger.warn('the editor would not put the focus on a group whose lock was to be changed', {
         column,
+        locked,
       });
       return false;
     }
-    await vscode.commands.executeCommand(LOCK_GROUP);
+    await vscode.commands.executeCommand(command);
     // Back where the person was. A failure here is worth a line and nothing
     // more: the lock is done, and the focus is the editor's to argue about.
     if (!(await this._focus(was))) {
-      this._logger.info('the focus was not put back after the terminals` group was locked', { was, column });
+      this._logger.info('the focus was not put back after a group`s lock was changed', { was, column, locked });
     }
     return true;
   }
@@ -573,6 +936,29 @@ export class VsCodeEditorStrip {
   private async _closeGroup(column: vscode.ViewColumn): Promise<boolean> {
     const was = vscode.window.tabGroups.activeTabGroup.viewColumn;
     const before = vscode.window.tabGroups.all.length;
+    /*
+     * A column that names more than one group is a column nothing here may act
+     * on, and this refusal is new (Ш8).
+     *
+     * The stand of 2026-08-25 caught the shape: `the grid accounted for 2, 3,
+     * 4, 5 of them`, which is `vscode.window.tabGroups.all` holding a group the
+     * editor's own grid does not -- an editor part of its own, and Cursor has
+     * one. Every command this file uses names a group by its NUMBER, and two
+     * groups answering to one number is the one state in which "close the empty
+     * one" can close a group with a person's file in it. So the group is looked
+     * up again by the number that is about to be used, and a number that does
+     * not name exactly one empty group is left alone.
+     */
+    const named = vscode.window.tabGroups.all.filter((group) => group.viewColumn === column);
+    const only = named[0];
+    if (named.length !== 1 || only === undefined || only.tabs.length > 0) {
+      this._logger.warn('the number of the group to be closed does not name exactly one empty group, so nothing was closed', {
+        column,
+        named: named.length,
+        tabs: only?.tabs.length ?? null,
+      });
+      return false;
+    }
     if (!(await this._focus(column))) {
       this._logger.warn('the editor would not stand on the empty strip, which is left where it is', { column });
       return false;
@@ -657,31 +1043,55 @@ export class VsCodeEditorStrip {
   }
 
   /**
-   * Everything this object does in answer to the editor moving something.
+   * Everything this object does once the editor has STOPPED moving things.
+   *
+   * Answered at the end of a burst rather than on each event of one, which is
+   * the second half of Ш8: the editor announces a restore as a dozen events
+   * twenty milliseconds apart, and a rule that fired on each of them was a rule
+   * arguing with a window still being built. What matters is what the window
+   * ended up as.
    *
    * Two rules, in this order and not the other: a strip alone in the editor
    * area is a trap and is undone first, and only then is a size asked for --
    * because making a group above renumbers ours, and a size asked for the old
    * number would be a size asked for somebody else's group.
    */
-  private async _afterAChange(): Promise<void> {
+  private async _settle(why: QuietEnd): Promise<void> {
     await this._keepCompany();
-    await this._payWhatIsOwed();
+    await this._payWhatIsOwed(why);
   }
 
   /**
    * The size the strip was promised when its group was made, asked for again
-   * now that there is something in the group to lay out.
+   * now that the window has stopped moving.
    *
-   * Once, and only while it is owed: `_askForAThird` never grows the strip, so
-   * the moment a real share is read and it is no more than a third the debt is
-   * gone and no later drag of the person's is ever answered.
+   * **When the debt is discharged, and why that is not "the first time a third
+   * is read" (Ш8).** `_askForAThird` never grows the strip, so the risk this
+   * guards is the opposite one: a size the PERSON chose, undone by us. The old
+   * rule dropped the debt at the first tab change that read a share at or under
+   * a third -- and the stand of 2026-08-25 measured what that costs. The first
+   * terminal's tab arrived, 0.334 was read, the debt went; the second terminal
+   * opened two seconds later, the workbench gave the space back to 70/673, and
+   * the strip finished the sitting holding 0.906 of the editor area with
+   * nothing left to ask again. Point 3 of the stand is that number.
+   *
+   * So the debt stands until a third is read at a moment when the reading is
+   * one nobody has to fight for: the window is quiet AND some other group in
+   * the area holds something. While every other group is EMPTY the editor
+   * squeezes it to its own minimum whenever an editor opens beside it -- 70 of
+   * 743, measured -- so the strip's share there is the workbench's arithmetic
+   * and not a size anybody chose, and re-asking cannot be undoing a drag.
+   *
+   * The boundary this does not cross: nothing here ever makes the strip BIGGER,
+   * so the worst it can do is leave a strip smaller than somebody wanted, one
+   * drag away from being right. It is lifted the day a strip is measured to
+   * keep its share across a terminal opening beside an empty neighbour.
    */
-  private async _payWhatIsOwed(): Promise<void> {
-    if (!this._owed || this._arranging) {
+  private async _payWhatIsOwed(why: QuietEnd): Promise<void> {
+    if (!this._owed) {
       return;
     }
-    const column = this._kept();
+    const column = this._ours();
     if (column === null) {
       // The group is gone, or is not ours any more. Nothing is owed to it.
       this._owed = false;
@@ -690,15 +1100,23 @@ export class VsCodeEditorStrip {
     const group = vscode.window.tabGroups.all.find((one) => one.viewColumn === column);
     if (group === undefined || group.tabs.length === 0) {
       // Still empty, so still the answer that was measured to be provisional.
-      // The debt stands and the next change to the tabs asks again.
+      // The debt stands and the next quiet window asks again.
       return;
     }
-    this._arranging = true;
-    try {
-      this._owed = (await this._askForAThird(column)) === 'unlaid';
-    } finally {
-      this._arranging = false;
-    }
+    const answer = await this._askForAThird(column);
+    const alone = !vscode.window.tabGroups.all.some(
+      (one) => one.viewColumn !== column && one.tabs.length > 0
+    );
+    this._owed = answer === 'unlaid' || (answer === 'settled' && alone);
+    this._logger.info('the size the terminals were promised was asked for again once the window had stopped', {
+      column,
+      answer,
+      why,
+      owed: this._owed,
+      // The one fact that decides whether the debt stands: an empty neighbour
+      // has no size of its own, so neither has the strip beside it.
+      somethingElseHoldsSomething: !alone,
+    });
   }
 
   /**
@@ -723,50 +1141,45 @@ export class VsCodeEditorStrip {
    * not a size anybody chose.
    */
   private async _keepCompany(): Promise<void> {
-    if (this._arranging || !this._aloneInTheArea()) {
+    if (!this._aloneInTheArea()) {
       return;
     }
 
-    this._arranging = true;
-    try {
-      for (let round = 1; round <= REPAIR_ROUNDS; round += 1) {
-        // Nothing before the first round: the trap is already there, and the
-        // waiting is for the rounds that follow a refusal.
-        const wait = (round - 1) * REPAIR_WAIT_MS;
-        if (wait > 0) {
-          await new Promise((resolve) => setTimeout(resolve, wait));
-        }
-        if (!this._aloneInTheArea()) {
-          // The person opened something, or the editor brought a group back.
-          // Either way the trap this repairs is not there any more.
-          return;
-        }
-        if ((await this._splitOff(NEW_GROUP_ABOVE)) !== null) {
-          await this._settleAbove();
-          return;
-        }
-        this._logger.info('the editor would not make a group above the terminals, and is being given a moment', {
-          column: this._column,
-          waited: wait,
-        });
+    for (let round = 1; round <= REPAIR_ROUNDS; round += 1) {
+      // Nothing before the first round: the trap is already there, and the
+      // waiting is for the rounds that follow a refusal.
+      const wait = (round - 1) * REPAIR_WAIT_MS;
+      if (wait > 0) {
+        await new Promise((resolve) => setTimeout(resolve, wait));
       }
-      /*
-       * Every ask refused, and this is the one state where giving up costs the
-       * person the window they set up: a strip alone in the editor area is
-       * locked, so the next file they open has nowhere to go but BESIDE it, and
-       * from then on there are two groups -- which is not the state this rule
-       * watches for, so nothing here ever asks again. The waits above exist for
-       * exactly that: the editor's refusal was measured to be transient, and
-       * the alternative to waiting it out is leaving somebody in a layout they
-       * cannot get out of.
-       */
-      this._logger.warn('the editor would not make a group above the terminals, which are alone in the editor area', {
+      if (!this._aloneInTheArea()) {
+        // The person opened something, or the editor brought a group back.
+        // Either way the trap this repairs is not there any more.
+        return;
+      }
+      if ((await this._splitOff(NEW_GROUP_ABOVE)) !== null) {
+        await this._settleAbove();
+        return;
+      }
+      this._logger.info('the editor would not make a group above the terminals, and is being given a moment', {
         column: this._column,
-        asked: REPAIR_ROUNDS,
+        waited: wait,
       });
-    } finally {
-      this._arranging = false;
     }
+    /*
+     * Every ask refused, and this is the one state where giving up costs the
+     * person the window they set up: a strip alone in the editor area is
+     * locked, so the next file they open has nowhere to go but BESIDE it, and
+     * from then on there are two groups -- which is not the state this rule
+     * watches for, so nothing here ever asks again. The waits above exist for
+     * exactly that: the editor's refusal was measured to be transient, and
+     * the alternative to waiting it out is leaving somebody in a layout they
+     * cannot get out of.
+     */
+    this._logger.warn('the editor would not make a group above the terminals, which are alone in the editor area', {
+      column: this._column,
+      asked: REPAIR_ROUNDS,
+    });
   }
 
   /**
@@ -797,6 +1210,8 @@ export class VsCodeEditorStrip {
       return false;
     }
     this._column = only.viewColumn;
+    // Recognised BY its terminals, so there is nothing left to wait for.
+    this._awaitingTheFirstTerminal = false;
     return true;
   }
 
@@ -809,6 +1224,8 @@ export class VsCodeEditorStrip {
       group.tabs.some((tab) => tab.input instanceof vscode.TabInputTerminal)
     );
     this._column = strip?.viewColumn ?? null;
+    // Found BY its terminals, so there is nothing left to wait for.
+    this._awaitingTheFirstTerminal = false;
     if (this._column !== null) {
       this._owed = (await this._askForAThird(this._column)) === 'unlaid';
     }
@@ -901,6 +1318,75 @@ export class VsCodeEditorStrip {
    * into it past the lock, which makes it their group as much as ours; a
    * terminal joining it then would be us insisting on a place we no longer own.
    */
+  /**
+   * The same question as `_kept()`, asked where an EMPTY strip is a legitimate
+   * answer -- and asked WITHOUT letting go of the number.
+   *
+   * **Measured on the stand, 2026-08-25, and this method is that measurement.**
+   * `_kept()` forgets the column when the group at it holds nothing, on the
+   * reasoning that an empty group at a remembered number is not evidence of
+   * anything. True where the caller is about to put a terminal SOMEWHERE, which
+   * is what `column()` does. False everywhere else, and moving the size debt to
+   * the end of a burst put it everywhere else: the strip is made BEFORE the
+   * terminal that goes into it, in sitting 1 by thirty-three seconds, and the
+   * first quiet moment inside that gap found an empty group at our number and
+   * forgot the strip. The second terminal then found nothing remembered, split
+   * the area again, and the sitting ended with terminals in columns 1 and 2 --
+   * two strips, point 2 of the stand, red in three runs out of three.
+   *
+   * So between the group being taken and its terminal arriving, the identity is
+   * the number and nothing else -- which is exactly what the plan says: at the
+   * first `column()` there is no terminal yet, so the queue holds the identity
+   * and no search can. What can still be checked is checked: a number that
+   * names nothing, or names a group with somebody else's editor in it, is not
+   * ours whatever this remembers.
+   */
+  private _ours(): vscode.ViewColumn | null {
+    this._noteATerminalArrived();
+    const column = this._column;
+    if (column === null) {
+      return null;
+    }
+    const group = vscode.window.tabGroups.all.find((one) => one.viewColumn === column);
+    if (group === undefined || group.tabs.some((tab) => !(tab.input instanceof vscode.TabInputTerminal))) {
+      return null;
+    }
+    if (group.tabs.length > 0 || this._awaitingTheFirstTerminal) {
+      return column;
+    }
+    /*
+     * A group that HELD our terminals and holds nothing now is not ours any
+     * more: the editor closes a group when its last editor goes, so the number
+     * names whatever took its place. Held on to, it made this object say `the
+     * strip would have been left alone in the editor area` about windows with
+     * no strip in them -- see `_awaitingTheFirstTerminal`.
+     */
+    this._column = null;
+    return null;
+  }
+
+  /**
+   * The end of the wait for the terminal the strip was taken for.
+   *
+   * Called from the tab and group events as well as from `_ours`, because the
+   * arrival is an event and the reading of it must not depend on somebody
+   * happening to ask afterwards: a terminal that comes and goes between two
+   * questions would otherwise leave the exemption standing for ever.
+   */
+  private _noteATerminalArrived(): void {
+    if (!this._awaitingTheFirstTerminal) {
+      return;
+    }
+    const column = this._column;
+    if (column === null) {
+      return;
+    }
+    const group = vscode.window.tabGroups.all.find((one) => one.viewColumn === column);
+    if (group?.tabs.some((tab) => tab.input instanceof vscode.TabInputTerminal) === true) {
+      this._awaitingTheFirstTerminal = false;
+    }
+  }
+
   private _kept(): vscode.ViewColumn | null {
     const column = this._column;
     if (column === null) {
