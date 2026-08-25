@@ -62,7 +62,48 @@ pnpm test           # builds, then unit tests
 pnpm test:integration   # downloads a real VS Code and runs inside it, twice: once per engine
 pnpm test:vsix      # packages, installs the archive into a profile of its own, runs it
 pnpm test:stand     # opens and closes a real editor four times over one folder, and judges the layout
+
+pnpm gate           # types, lint, unit, the live suites, the stand. Not everything -- it says what it skips
+pnpm gate:fast      # types, lint, unit only -- ~50 s, no editor. What the pre-push hook runs
 ```
+
+`pnpm gate` runs types, lint, the unit suites with their coverage thresholds,
+the live suites and the two-sitting stand, in that order, stopping at the first
+failure. It is the one run here that may be called "checked", and it is **not**
+everything: mutation testing, the live suites under Cursor, and
+`test:acceptance` / `test:vsix` (which spend real turns on the owner's account)
+are outside it. It prints that list by name on every run, whatever colour it
+ends in, and leaves a receipt in `.gate/` naming the revision it checked.
+
+Five points of the stand are admitted red today — four of them in every run
+measured, and a fifth that comes and goes — each by name, with a ceiling and an
+expiry date, in [`gate/allowed-red.json`](gate/allowed-red.json). **Those
+admissions are the Ш6 orchestrator's own decision (2026-08-25); the owner has
+not seen them and has ratified none of them**, which is what `ratifiedBy: null`
+on every line means, and the full gate prints it whenever it gets as far as the
+stand's budget, so a green cannot be read as agreement. The gate is red if a point outside that file goes red, if an
+admitted point gets **worse** than its ceiling, or if an admitted point comes
+back **green** — a permission that outlives its defect is a permission nobody
+chose. Every line stops working on its date, only five may live at once, an
+unratified line may have that date moved **once** before it needs a name in
+`ratifiedBy`, and a ratification has to cite a day and a place it was said.
+`npx jest tests/stand/allowance.test.ts` asserts all of it against the real
+file, and goes red on the morning a line comes due, with no editor involved.
+None of it is a boundary — whoever edits the file edits the test — and the file
+says so; it buys that a false sentence has to be written on purpose.
+
+The `pre-push` hook is **per-machine and not tracked**, so a fresh clone has
+none. To install it, and to take it off again:
+
+```bash
+printf '#!/bin/sh\nexec "$(git rev-parse --show-toplevel)/tools/pre-push.sh" "$@"\n' > .git/hooks/pre-push
+chmod +x .git/hooks/pre-push
+rm .git/hooks/pre-push        # to remove it
+```
+
+It runs `pnpm gate:fast` and refuses a push whose commits no full gate has ever
+passed over. `git push --no-verify` skips it entirely, and nothing in this
+repository can see that it did.
 
 `pnpm test:stand` is the one run here that cannot be done inside a single
 window: it asks whether the window a person comes back to is the window they

@@ -30,6 +30,22 @@ export interface Finding {
   readonly answer: Answer;
   /** Why that answer, with the numbers that produced it. */
   readonly because: string;
+  /**
+   * How many named things went wrong at this point: nought when green, one or
+   * more when red, and nothing at all when the recording could not say.
+   *
+   * It exists so that a budget can admit a point AT A NUMBER rather than admit
+   * it outright (`gate/allowed-red.json`). `because` carries the magnitudes a
+   * person needs -- 0.906 of a family, 5 831 ms -- and nothing can compare two
+   * of those; this is the same fact as an integer that a machine can.
+   *
+   * **What it does not promise.** It is not a magnitude and it is not a score:
+   * two different points' numbers mean different things and do not compare with
+   * each other. It moves when a defect spreads to another sitting or leaves
+   * one, and it does NOT move when the same sitting gets worse -- a strip at
+   * 0.906 and a strip at 0.400 are both `1` here.
+   */
+  readonly violations: number | null;
 }
 
 export interface Verdict {
@@ -114,8 +130,11 @@ function theSameFolder(recording: StandRecording): Finding {
   }
   const all = [...new Set(seen.flatMap((one) => one.keys))];
   if (all.length !== 1) {
+    const wanted = seen[0]?.keys ?? [];
+    const elsewhere = seen.filter((one) => JSON.stringify(one.keys) !== JSON.stringify(wanted));
     return finding(0, 'the workspace storage key is the one sitting 1 had', 'red',
-      `the sittings did not sit on one folder: ${seen.map((one) => `${String(one.sitting)} -> ${one.keys.join('/')}`).join(', ')}`);
+      `the sittings did not sit on one folder: ${seen.map((one) => `${String(one.sitting)} -> ${one.keys.join('/')}`).join(', ')}`,
+      elsewhere.length);
   }
   return finding(0, 'the workspace storage key is the one sitting 1 had', 'green',
     `every sitting opened the folder the editor knows as ${all.join('')}`);
@@ -139,13 +158,15 @@ function groupsDoNotAccumulate(recording: StandRecording, budget: Budget): Findi
   const says = 'the groups after sitting N are no more than after N-1';
   if (recording.sittings.length < budget.sittings) {
     return finding(1, says, 'red',
-      `this recording holds ${String(recording.sittings.length)} sitting(s), and the accumulation does not show in fewer than ${String(budget.sittings)} -- sitting 2 of the measured staircase was clean`);
+      `this recording holds ${String(recording.sittings.length)} sitting(s), and the accumulation does not show in fewer than ${String(budget.sittings)} -- sitting 2 of the measured staircase was clean`,
+      1);
   }
 
   const late = recording.sittings.filter((one) => earliestOf(one)?.productAlreadyActive === true);
   if (late.length > 0) {
     return finding(1, says, 'red',
-      `the observer did not get there in time in sitting${late.length === 1 ? '' : 's'} ${late.map((one) => String(one.sitting)).join(', ')}: the product had already activated when its first line ran, so the earliest sighting is of a window somebody had already tidied`);
+      `the observer did not get there in time in sitting${late.length === 1 ? '' : 's'} ${late.map((one) => String(one.sitting)).join(', ')}: the product had already activated when its first line ran, so the earliest sighting is of a window somebody had already tidied`,
+      late.length);
   }
   const blind = recording.sittings.filter((one) => earliestOf(one)?.productAlreadyActive == null);
   if (blind.length > 0) {
@@ -157,7 +178,8 @@ function groupsDoNotAccumulate(recording: StandRecording, budget: Budget): Findi
   const unsettled = counts.filter((one) => one.settled === null);
   if (unsettled.length > 0) {
     return finding(1, says, 'red',
-      `sitting${unsettled.length === 1 ? '' : 's'} ${unsettled.map((one) => String(one.sitting)).join(', ')} never settled -- no sighting of ${JSON.stringify(SETTLED)} was written, so there is no moment to count the groups at`);
+      `sitting${unsettled.length === 1 ? '' : 's'} ${unsettled.map((one) => String(one.sitting)).join(', ')} never settled -- no sighting of ${JSON.stringify(SETTLED)} was written, so there is no moment to count the groups at`,
+      unsettled.length);
   }
 
   const groups = counts.map((one) => one.settled?.groups.length ?? 0);
@@ -178,7 +200,7 @@ function groupsDoNotAccumulate(recording: StandRecording, budget: Budget): Findi
   });
   return grew.length === 0
     ? finding(1, says, 'green', `the groups went ${staircase} and never grew${aside}`)
-    : finding(1, says, 'red', `the groups went ${staircase}, and grew at sitting ${grew.join(', ')}${aside}`);
+    : finding(1, says, 'red', `the groups went ${staircase}, and grew at sitting ${grew.join(', ')}${aside}`, grew.length);
 }
 
 // --- 2 ----------------------------------------------------------------------
@@ -195,7 +217,8 @@ function oneStripOfOurs(recording: StandRecording): Finding {
     return finding(2, says, 'red',
       wrong.map((one) => one.strip.kind === 'many'
         ? `sitting ${String(one.sitting)} settled with terminals in columns ${one.strip.columns.map((column) => String(column)).join(' and ')}`
-        : `sitting ${String(one.sitting)} settled with no terminal of ours anywhere`).join('; '));
+        : `sitting ${String(one.sitting)} settled with no terminal of ours anywhere`).join('; '),
+      wrong.length);
   }
   return finding(2, says, 'green',
     `every sitting settled with one strip: ${seen.map((one) => `${String(one.sitting)} -> column ${String(one.strip.kind === 'one' ? one.strip.group.column : 0)}`).join(', ')}`);
@@ -257,7 +280,7 @@ function theStripIsAThirdAndUnderTheEditors(recording: StandRecording, budget: B
 
   return reasons.length === 0
     ? finding(3, says, 'green', `the strip was under the editors every time, at ${shares.join(', ')} of what it shares`)
-    : finding(3, says, 'red', reasons.join('; '));
+    : finding(3, says, 'red', reasons.join('; '), reasons.length);
 }
 
 // --- 4 ----------------------------------------------------------------------
@@ -320,7 +343,7 @@ function theFileSatAbove(recording: StandRecording, budget: Budget): Finding {
 
   return reasons.length === 0
     ? finding(4, says, 'green', `the file went above the strip and left its height alone in sitting ${opened.map((one) => String(one.sitting)).join(', ')}`)
-    : finding(4, says, 'red', reasons.join('; '));
+    : finding(4, says, 'red', reasons.join('; '), reasons.length);
 }
 
 // --- 5 ----------------------------------------------------------------------
@@ -342,7 +365,8 @@ function theStripIsNeverAlone(recording: StandRecording): Finding {
   const alone = all.filter((one) => one.strip.kind === 'one' && one.snapshot.groups.length < 2);
   if (alone.length > 0) {
     return finding(5, says, 'red',
-      `the strip stood alone in ${String(alone.length)} sighting(s): ${alone.slice(0, 3).map((one) => `sitting ${String(one.sitting)}, ${JSON.stringify(one.snapshot.what)}`).join('; ')}`);
+      `the strip stood alone in ${String(alone.length)} sighting(s): ${alone.slice(0, 3).map((one) => `sitting ${String(one.sitting)}, ${JSON.stringify(one.snapshot.what)}`).join('; ')}`,
+      alone.length);
   }
   const withStrip = all.filter((one) => one.strip.kind === 'one').length;
   return finding(5, says, 'green', `the strip shared the area in every one of the ${String(withStrip)} sightings that had one`);
@@ -392,7 +416,7 @@ function everythingCameBackAndOneResumed(recording: StandRecording): Finding {
 
   return reasons.length === 0
     ? finding(6, says, 'green', `every one of the ${String(wanted.length)} records came back in every later sitting, ${String(resumed)} start(s) through resume and ${String(launched)} through launch`)
-    : finding(6, says, 'red', reasons.join('; '));
+    : finding(6, says, 'red', reasons.join('; '), reasons.length);
 }
 
 // --- 7 ----------------------------------------------------------------------
@@ -449,7 +473,7 @@ function theSameOrder(recording: StandRecording): Finding {
   }
 
   if (reasons.length > 0) {
-    return finding(7, says, 'red', reasons.join('; '));
+    return finding(7, says, 'red', reasons.join('; '), reasons.length);
   }
   return unknown.length > 0
     ? finding(7, says, 'unmeasured', unknown.join('; '))
@@ -480,13 +504,23 @@ function withinTheBudget(recording: StandRecording, budget: Budget): Finding {
   const all = times.map((one) => `${String(one.sitting)} -> ${String(one.ms)} ms`).join(', ');
   return over.length === 0
     ? finding(8, says, 'green', `everything was back in ${all}, inside the ${String(budget.restoredMs)} ms budget`)
-    : finding(8, says, 'red', `over the ${String(budget.restoredMs)} ms budget: ${over.map((one) => `sitting ${String(one.sitting)} took ${String(one.ms)} ms`).join(', ')} (all of them: ${all})`);
+    : finding(8, says, 'red', `over the ${String(budget.restoredMs)} ms budget: ${over.map((one) => `sitting ${String(one.sitting)} took ${String(one.ms)} ms`).join(', ')} (all of them: ${all})`, over.length);
 }
 
 // --- reading a sitting ------------------------------------------------------
 
-function finding(point: number, says: string, answer: Answer, because: string): Finding {
-  return { point, says, answer, because };
+/**
+ * One finding, with the number a budget reads.
+ *
+ * Overloaded rather than given an optional argument, so that the type checker
+ * asks for the count at every red answer and refuses it at the two answers
+ * where counting is meaningless. A default would have let a new red branch ship
+ * with a number nobody chose.
+ */
+function finding(point: number, says: string, answer: 'green' | 'unmeasured', because: string): Finding;
+function finding(point: number, says: string, answer: 'red', because: string, violations: number): Finding;
+function finding(point: number, says: string, answer: Answer, because: string, violations?: number): Finding {
+  return { point, says, answer, because, violations: answer === 'green' ? 0 : violations ?? null };
 }
 
 function isText(value: string | null): value is string {

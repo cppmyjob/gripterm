@@ -437,3 +437,48 @@ describe('what a verdict refuses to be read from', () => {
     expect(saidAbout(verdict, 3)).toMatch(/Canceled/u);
   });
 });
+
+/**
+ * The number a budget can be held to.
+ *
+ * `because` carries the numbers for a reader; nothing can compare two of them.
+ * `violations` is the same fact as an integer -- how many named things went
+ * wrong at that point -- and it exists so that `gate/allowed-red.json` can admit
+ * a point UP TO A NUMBER rather than admit it outright. Its contract is small
+ * and is stated here rather than inferred: green is nought, red is one or more,
+ * unmeasured is nothing at all, and two different points' numbers are not
+ * comparable with each other.
+ */
+describe('the number beside each answer', () => {
+  test('is nought wherever the answer is green', () => {
+    const verdict = judge(fixture('healthy-substituted'), BUDGET);
+    expect(verdict.findings.map((one) => one.answer)).not.toContain('red');
+    expect(verdict.findings.map((one) => one.violations)).toStrictEqual([0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  });
+
+  test('is nothing at all where the recording could not say', () => {
+    const verdict = judge(fixture('staircase-2026-08-23'), BUDGET);
+    const unmeasured = verdict.findings.filter((one) => one.answer === 'unmeasured');
+    expect(unmeasured.length).toBeGreaterThan(0);
+    expect(unmeasured.map((one) => one.violations)).toStrictEqual(unmeasured.map(() => null));
+  });
+
+  test('counts the sittings a red point failed in, rather than repeating that it failed', () => {
+    // Six of the seven sittings of the staircase came back with no resume in
+    // them; the first is the one nothing came back in. A number that said `1`
+    // here would let a budget written for one broken sitting admit six.
+    const verdict = judge(fixture('staircase-2026-08-23'), BUDGET);
+    expect(answerTo(verdict, 6)).toBe('red');
+    expect(verdict.findings.find((one) => one.point === 6)?.violations).toBe(6);
+  });
+
+  test('is one where a red answer names a single thing rather than a list', () => {
+    const tooShort: StandRecording = {
+      ...fixture('healthy-substituted'),
+      sittings: fixture('healthy-substituted').sittings.slice(0, 1),
+    };
+    const verdict = judge(tooShort, BUDGET);
+    expect(answerTo(verdict, 1)).toBe('red');
+    expect(verdict.findings.find((one) => one.point === 1)?.violations).toBe(1);
+  });
+});

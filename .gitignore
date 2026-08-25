@@ -16,3 +16,7 @@ spikes/*/media/vendor/
 # build -- this line stands BEFORE the copy does, because a `git add -A` on a
 # clean tree would otherwise commit them into the published repository.
 packages/extension/assets/node-pty/
+# Gate receipts. Which revision was put through `pnpm run gate` and what came
+# back -- a fact about one machine's runs, not about the code, and the hook that
+# reads them (`tools/pre-push.sh`) is per-machine too.
+.gate/

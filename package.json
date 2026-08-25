@@ -23,7 +23,9 @@
     "test:vsix": "tsc -p tsconfig.vsix.json && node tests/vsix/run.mjs",
     "test:acceptance": "pnpm run build && pnpm run build:extension && tsc -p tsconfig.acceptance.json && node tests/acceptance/run.mjs",
     "build:stand": "tsc -p tsconfig.stand.json",
-    "test:stand": "pnpm run build && pnpm run build:extension && pnpm run build:stand && node tests/stand/run.mjs"
+    "test:stand": "pnpm run build && pnpm run build:extension && pnpm run build:stand && node tests/stand/run.mjs",
+    "gate": "node tools/gate.mjs",
+    "gate:fast": "node tools/gate.mjs --fast"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

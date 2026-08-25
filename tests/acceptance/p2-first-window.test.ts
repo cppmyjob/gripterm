@@ -16,12 +16,17 @@ import type { GriptermApi } from '../../packages/extension/src/extension';
  * own, and this suite refuses to run if that did not take effect.
  *
  * The second sitting is a separate process on purpose -- "closes the editor
- * completely" cannot be simulated inside one host -- and comes in two forms,
- * because a test host is forbidden to restore anything (`bringTerminalsBack`):
+ * completely" cannot be simulated inside one host -- and it is NOT a suite. A
+ * test host is forbidden to restore anything (`bringTerminalsBack`), so
+ * `tests/acceptance/run.mjs` starts a real editor in development mode and lets
+ * ACTIVATION do it, with nobody typing anything at all. That is the whole of П2:
+ * a suite that drove the restore explicitly would be asking for the one thing
+ * the complaint is that nobody should have to ask for.
  *
- *   * `p2-second-window.test.ts`, which drives the restore explicitly, and
- *   * a development-mode editor started by the runner, where ACTIVATION does it
- *     and nobody types anything at all.
+ * This paragraph used to name a second suite that drives the restore by hand.
+ * It was never written, and nothing said so until `tests/named-tests-exist.test.ts`
+ * was made to ask the question (2026-08-25). If such a suite is ever wanted, the
+ * name is free.
  */
 
 const SETTLES_WITHIN_MS = 90_000;

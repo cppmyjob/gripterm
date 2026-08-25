@@ -49,6 +49,17 @@ const PROJECT = join(BASE, `${LABEL}-project`);
 const PRODUCT = join(REPO, 'packages', 'extension');
 const OBSERVER = join(REPO, 'tests', 'stand', 'observer');
 const RECORDING = join(OUTPUT, 'recording.ndjson');
+/**
+ * The verdict, as JSON, for whoever has to do arithmetic on it.
+ *
+ * An exit code says red or green and nothing else, and `tools/gate.mjs` has to
+ * ask a harder question: which points were red, by how much, and is that exactly
+ * what `gate/allowed-red.json` admits. It is written HERE rather than recomputed
+ * there, so that the gate judges the run that happened -- and it lands inside
+ * `OUTPUT`, which `prepare()` deletes at the start of every run, so a gate
+ * cannot read yesterday's answer as today's.
+ */
+const VERDICT = join(OUTPUT, 'verdict.json');
 
 /**
  * How many times the stand sits down, and how many terminals the first sitting
@@ -433,6 +444,8 @@ async function main() {
     console.log(`     ${finding.because}`);
   }
   console.log(`\n${verdict.red ? 'RED' : 'GREEN'} -- the recording is at ${RECORDING}`);
+  writeFileSync(VERDICT, `${JSON.stringify(verdict, null, 2)}\n`, 'utf8');
+  console.log(`the verdict, for a machine, is at ${VERDICT}`);
   process.exitCode = verdict.red ? 1 : 0;
 }
 
