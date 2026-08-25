@@ -156,13 +156,29 @@ export class FileTerminalRepository implements TerminalRepository {
    * codebase: it lives in the CLI's own store, and deleting our record of a
    * terminal is not a decision about anybody's conversation (M2.7).
    *
-   * **The observed half goes first and the record last**, which is the same
-   * order `_store` writes them in and for the same reason: a crash in the middle
-   * leaves a record whose snapshot is missing, which the codec absorbs, rather
-   * than a snapshot whose record is missing, which is indistinguishable from
-   * rubbish. A snapshot that cannot be moved at all does not stop the deletion:
-   * it is a cache, its loss costs nothing, and refusing to delete a record over
-   * it would leave the person with a row they asked twice to be rid of.
+   * **The record goes FIRST and the snapshot last, which is the opposite of the
+   * order `_store` writes them in -- and the same reasoning, run in the
+   * direction this method actually moves (Ш7б, defect 8).** In both methods the
+   * record is the commit point, because it is the half nothing can rebuild.
+   * Writing, that means the record LAST: it is what makes the new state real.
+   * Removing, it means the record FIRST: taking it away is what makes the
+   * removal real, and everything after that is tidying a cache.
+   *
+   * Until 2026-08-25 this method borrowed `_store`'s order instead of its
+   * reasoning, and that inverted it. A machine stopping between the two renames
+   * then left `record.json` here with no `observed.json` beside it -- which the
+   * codec does not merely absorb: it INVENTS a snapshot for it, `degraded`,
+   * stamped with the record's own creation time, and hands it back looking like
+   * something we saw. So a record a person asked to delete came back as a row,
+   * wearing an observation nobody made, and the restore planner read that
+   * invented timestamp as evidence that its conversation was from a previous
+   * life and started it again. Stopping in the middle now leaves the
+   * irreplaceable half safe in the trash and a directory holding no record,
+   * which `_read` passes over in silence and `StorageCleaner.strays` collects.
+   *
+   * A snapshot that cannot be moved at all does not stop the deletion: it is a
+   * cache, its loss costs nothing, and refusing to delete a record over it would
+   * leave the person with a row they asked twice to be rid of.
    *
    * One consequence, named rather than discovered: a record that cannot be READ
    * cannot be removed here either, because `_require` cannot find it. Such a
@@ -181,8 +197,8 @@ export class FileTerminalRepository implements TerminalRepository {
       recursive: true,
       mode: STORAGE_DIRECTORY_MODE,
     });
-    await this._discardObserved(at, id);
     await moveAtomic(layout.recordFile(id), layout.discardedRecordFile(at, id));
+    await this._discardObserved(at, id);
 
     // Forgotten here as well, or a record written again under the same id and
     // the same content -- which is what restoring one looks like -- would be

@@ -3,6 +3,26 @@ import type { ContextWindowSnapshot } from './context-window-snapshot';
 import type { CostSnapshot } from './cost-snapshot';
 import type { PersistedTerminalState } from './terminal-state';
 
+/**
+ * Whether this snapshot is something that was observed, or something the store
+ * stood up in place of one it could not read.
+ *
+ * A name and not a flag, and for the reason Ш7а gave: the stand-in is
+ * `degraded` with no pid and `lastEventAt` set to the record's own creation
+ * time, which is the only honest stamp available and is not a sign of life at
+ * all. Every watch, reconciler and planner downstream reads that field as
+ * evidence -- so a snapshot nobody saw, arriving indistinguishable from one
+ * somebody did, is a claim standing in for the absence of one.
+ *
+ * It is carried rather than derived because nothing downstream can tell the two
+ * apart by looking: a `degraded` record with no pid is an ordinary sight.
+ */
+export type SnapshotProvenance =
+  /** Built out of events that reached us. */
+  | 'observed'
+  /** Invented by the store, because the file holding the real one was gone. */
+  | 'recovered';
+
 export interface ObservedStateParams {
   readonly state: PersistedTerminalState;
   readonly lastEventAt: Date;
@@ -19,6 +39,16 @@ export interface ObservedStateParams {
    * thing this build ever knew before -- that `Stop` settles the record.
    */
   readonly running?: readonly string[];
+  /**
+   * Where this snapshot came from, defaulting to the answer every producer of
+   * one has: it was observed.
+   *
+   * Optional so that the fifty-odd callers that build a state out of events say
+   * nothing rather than repeating themselves, and so that the ONE caller that
+   * has something else to say -- the codec, standing a snapshot up in place of
+   * a file it could not read -- has to say it on purpose.
+   */
+  readonly provenance?: SnapshotProvenance;
 }
 
 /**
@@ -54,6 +84,8 @@ export class ObservedState {
    * hook that this build read as "idle".
    */
   public readonly running: readonly string[];
+  /** See `SnapshotProvenance`: `observed` unless the store had to invent this. */
+  public readonly provenance: SnapshotProvenance;
 
   private readonly _lastEventAtMs: number;
 
@@ -66,6 +98,7 @@ export class ObservedState {
     this.contextWindow = params.contextWindow;
     this.pid = params.pid;
     this.running = Object.freeze([...params.running ?? []]);
+    this.provenance = params.provenance ?? 'observed';
     Object.freeze(this);
   }
 
@@ -104,6 +137,10 @@ export class ObservedState {
       contextWindow: this.contextWindow,
       pid,
       running: this.running,
+      // Carried, not cleared. The editor naming a process is not an observation
+      // of the state, so a snapshot the store invented is still one it invented
+      // after a pid is written on it.
+      provenance: this.provenance,
     });
   }
 }

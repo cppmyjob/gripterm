@@ -607,6 +607,42 @@ describe('removing', () => {
     expect(logger.lines).toContain('info: a discarded record left its observed snapshot behind');
   });
 
+  /*
+   * **The ORDER of the two moves, written as the failure it prevents (defect 8).**
+   *
+   * `remove` renames two files and a machine can stop between them. One of the
+   * two holds the task, the notes and the tags, which nothing can rebuild; the
+   * other is a cache whose loss costs nothing. So the record moves FIRST:
+   * stopping after it leaves the irreplaceable half safe in the trash and a
+   * directory the store reads as holding no record, which it passes over in
+   * silence.
+   *
+   * The other way round is not merely untidy. Stopping after the SNAPSHOT moved
+   * leaves `record.json` in the store with no `observed.json` beside it, and the
+   * codec then stands a snapshot up for it -- `degraded`, stamped with the
+   * record's own creation time. The row comes back looking observed, out of a
+   * record a person asked to delete, and the restore planner reads that invented
+   * timestamp as evidence about a process.
+   *
+   * A destination the record cannot land on stands in for the stop: what the
+   * failure leaves behind is what a crash at that point leaves behind.
+   */
+  it('never leaves the store a record whose snapshot it would have to invent', async () => {
+    const entry = entryOwnedBy(MINE);
+    await repositoryFor(MINE).write(entry);
+    const home = layout.discardedTerminalDir(DISCARDED_AT, entry.terminalId);
+    await mkdir(layout.discardedRecordFile(DISCARDED_AT, entry.terminalId), { recursive: true });
+
+    await expect(repositoryFor(MINE).remove(entry.terminalId)).rejects.toThrow();
+
+    // Whatever else is true, no record is left here wearing a snapshot nobody
+    // observed -- and the trash has not been handed the half that is worthless
+    // without the record it belongs to.
+    expect((await repositoryFor(MINE).readAll()).map((one) => one.observed.state))
+      .toStrictEqual([entry.observed.state]);
+    expect(await readdir(home)).not.toContain('observed.json');
+  });
+
   it('touches nothing but the two files of the record it was asked about', async () => {
     // The acceptance criterion of M2.7 read as a file-system fact: deleting a
     // row does not delete the conversation. The decoys stand for the two things

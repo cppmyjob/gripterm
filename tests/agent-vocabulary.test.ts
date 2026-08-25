@@ -114,6 +114,11 @@ const HUMAN_TEXTS: readonly HumanText[] = [
   },
   {
     file: 'packages/core/src/domain/services/restore-planner.ts',
+    text: 'Claude Code still has the process it was running as, under a conversation this record does not name',
+    why: 'the answer to "why is my terminal not back", read by a person',
+  },
+  {
+    file: 'packages/core/src/domain/services/restore-planner.ts',
     text: 'Claude Code could not be asked what it is running, and nothing starts on a guess',
     why: 'the answer to "why is my terminal not back", read by a person',
   },

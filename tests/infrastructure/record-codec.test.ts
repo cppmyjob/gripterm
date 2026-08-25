@@ -274,6 +274,34 @@ describe('the observed half, which is allowed to be lost', () => {
     expect(decode.kind === 'ok' ? decode.entry.observed.state : null).toBe('degraded');
   });
 
+  it('carries the mark saying a snapshot was invented, so writing it back cannot launder it', () => {
+    // `_store` writes both halves on every write, so a stand-in that went to
+    // disk unmarked would come back next time as an observation -- and it is a
+    // `degraded` snapshot stamped with the record's own creation time, which the
+    // restore planner reads as a sign that the conversation is from a previous
+    // life. The mark has to survive the round trip or it is not a mark.
+    const invented = loaded(record, undefined);
+    if (invented.kind !== 'ok') {
+      throw new Error('a record with no observed.json is recovered, never broken');
+    }
+
+    const decode = loaded(record, encodeObserved(invented.entry.observed));
+
+    expect(decode.kind === 'ok' ? decode.entry.observed.provenance : null).toBe('recovered');
+  });
+
+  it('reads a snapshot written before the mark existed as one somebody observed', () => {
+    // Every `observed.json` on disk today has no such key, and all of them hold
+    // states this build produced from events. Reading their silence as
+    // `recovered` would refuse every record on the machine once.
+    const decode = loaded(record, {
+      state: 'working',
+      lastEventAt: OBSERVED_AT.getTime(),
+    });
+
+    expect(decode.kind === 'ok' ? decode.entry.observed.provenance : null).toBe('observed');
+  });
+
   it('keeps a snapshot that is merely sparse', () => {
     expect(
       provenance({ state: 'working', lastEventAt: OBSERVED_AT.getTime(), currentTool: 'Bash' })

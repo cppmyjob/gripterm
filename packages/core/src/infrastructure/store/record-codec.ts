@@ -3,7 +3,7 @@ import { CostSnapshot } from '../../domain/entities/cost-snapshot';
 import { HumanMetadata } from '../../domain/entities/human-metadata';
 import { LaunchRecipe } from '../../domain/entities/launch-recipe';
 import { Note } from '../../domain/entities/note';
-import { ObservedState } from '../../domain/entities/observed-state';
+import { ObservedState, type SnapshotProvenance } from '../../domain/entities/observed-state';
 import { OwnerId } from '../../domain/entities/owner-id';
 import { OwnerRef, isEditorKind, isOwnerKind } from '../../domain/entities/owner-ref';
 import { SessionId } from '../../domain/entities/session-id';
@@ -104,6 +104,21 @@ export interface ObservedDocument {
    * the record whatever else is running.
    */
   readonly running: readonly string[];
+  /**
+   * `recovered` when this file holds a snapshot the store stood up rather than
+   * one it observed, and absent on every file written before 2026-08-25.
+   *
+   * Absent reads as `observed`, which is what every one of those files holds
+   * and what this build assumed about all of them until the mark existed. It is
+   * stored rather than recomputed at each read because a stand-in that is
+   * written back -- `_store` writes both halves on every write -- would
+   * otherwise come back next time as an observation, and the one thing this
+   * mark exists to prevent is exactly that laundering.
+   *
+   * It clears itself: the next real event builds a state out of what arrived,
+   * and that state says `observed` without anybody remembering to reset this.
+   */
+  readonly provenance?: string;
 }
 
 /**
@@ -177,6 +192,11 @@ export function encodeObserved(state: ObservedState): ObservedDocument {
       state.contextWindow === null ? null : { usedPercentage: state.contextWindow.usedPercentage },
     pid: state.pid,
     running: state.running,
+    // Written only when there is something to say. Absent is `observed`, which
+    // is what every file written before this mark existed holds and what almost
+    // every file written after it will hold -- so the exceptional case is the
+    // one that costs a key, and no snapshot on disk changes shape for it.
+    ...(state.provenance === 'recovered' ? { provenance: 'recovered' } : {}),
   };
 }
 
@@ -267,6 +287,11 @@ function recovered(reason: string): ObservedProvenance {
 
 function lostObserved(createdAt: Date): ObservedState {
   return ObservedState.create({
+    // Said on the snapshot itself and not only in the report beside it. The
+    // report reaches the log; this reaches the rules that decide whether a
+    // second `claude --resume` may be started on the conversation, and the
+    // stamp below is the record's creation time rather than a sign of life.
+    provenance: 'recovered',
     state: 'degraded',
     lastEventAt: createdAt,
     currentTool: null,
@@ -312,7 +337,24 @@ function decodeObserved(raw: unknown): ObservedState {
           ),
     pid: nullableNumber(document.pid, 'observed.pid'),
     running: names(document.running),
+    provenance: readProvenance(document.provenance),
   });
+}
+
+/**
+ * The mark, or the answer every file without one carries.
+ *
+ * Nothing is refused here and nothing throws, which is the opposite of the rule
+ * the fields above follow -- and the asymmetry is the direction of the mistake.
+ * A field this build cannot read means it cannot tell an invented snapshot from
+ * an observed one, and the answer to not being able to tell is to say
+ * `recovered`, which only ever keeps a record OUT of a restore. Refusing the
+ * whole snapshot instead would throw the record onto `lostObserved`, which says
+ * `recovered` too -- by a longer road and with a warning about a file that is
+ * not broken.
+ */
+function readProvenance(value: unknown): SnapshotProvenance {
+  return value === 'observed' || value === undefined ? 'observed' : 'recovered';
 }
 
 /**

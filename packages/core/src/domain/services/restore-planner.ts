@@ -46,6 +46,32 @@ export type RestoreRefusal =
   | 'session-unknown'
   /** The CLI names its conversation among the ones it is running. */
   | 'session-listed'
+  /**
+   * The CLI names the PROCESS this record was running as, under a conversation
+   * we do not recognise.
+   *
+   * The second witness, and a refusal of its own rather than a wording of
+   * `session-listed`, because the two are tied by different threads and one of
+   * them can be true while the other is false. `session-listed` is our
+   * conversation on the CLI's list. This is our PID on it -- while the id
+   * beside it is one this record has never claimed.
+   *
+   * **Why that is not the same question, and why it is asked before a witnessed
+   * end is believed.** `witnessed-end` is first-hand and it is also PAST: an
+   * event arrived once, or the editor destroyed a terminal object once. The
+   * listing is about NOW. So the two do not contradict each other, and the
+   * reading that fits both is the dangerous one: the conversation rotated its
+   * id, or the CLI printed a session file with no id at all (measured, A24 --
+   * those lines are counted in `skipped` and can be matched against nothing of
+   * ours). Under either reading a live process is on that transcript, and
+   * `--resume` puts a second one there.
+   *
+   * A pid handed out again to a stranger's `claude` would refuse a record that
+   * could have come back. That is the cheap side of the trade, by design: this
+   * whole function fails towards refusal, and the listing is a second opinion
+   * that may only ever ADD prohibitions.
+   */
+  | 'process-listed'
   /** The CLI could not be asked what is running, so nothing may be started. */
   | 'agents-unavailable'
   /** The transcripts could not be listed, so nothing is known to be resumable. */
@@ -175,8 +201,9 @@ export interface RestoreInputs {
  *      restore is not: after a machine restart EVERY owner is dead, and without
  *      this line the first window to activate adopts and starts another
  *      project's terminals while the window that owns them opens empty.
- *   4. Then liveness of the conversation, OUR evidence first and the CLI's
- *      second -- see below.
+ *   4. Then liveness of the conversation, in the order of what each source can
+ *      be about: the machine's list of what is running NOW, then our own
+ *      evidence of what happened -- see below.
  *   5. Then the transcript, LAST of the per-record rules, so that a running
  *      conversation is never reported as "nothing was ever said here". That
  *      reason becomes an offer to start over (M2.13), and offering to start over
@@ -184,19 +211,29 @@ export interface RestoreInputs {
  *      prevent.
  *   6. Then, across the survivors, the duplicate check.
  *
- * WHY OUR OWN EVIDENCE COMES FIRST (measured, A24 + A22 §1). `claude agents
- * --json` is a projection of `~/.claude/sessions/<pid>.json`, and an interactive
- * session that is up but idle was measured NOT to appear there at all for a full
- * minute. So an empty listing is not permission: it is compatible with a live
- * conversation. The first source of liveness is therefore our own `observed`
- * state -- the pid the CLI told us (A16) and the moment we last heard from it --
- * and the CLI's list is a second opinion that can only ADD prohibitions. A
- * listing that could not be read at all stops the plan entirely rather than
- * emptying it, because "we did not ask" and "nothing is running" are the same
- * value only in code that is about to be wrong.
+ * WHY SILENCE FROM THE CLI IS NOT PERMISSION (measured, A24 + A22 §1). `claude
+ * agents --json` is a projection of `~/.claude/sessions/<pid>.json`, and an
+ * interactive session that is up but idle was measured NOT to appear there at
+ * all for a full minute. So an empty listing is compatible with a live
+ * conversation, and our own `observed` state -- the pid the CLI told us (A16)
+ * and the moment we last heard from it -- has to carry the case where the list
+ * says nothing. A listing that could not be read at all stops the plan entirely
+ * rather than emptying it, because "we did not ask" and "nothing is running"
+ * are the same value only in code that is about to be wrong.
+ *
+ * WHAT THE LIST SAYS WHEN IT DOES SPEAK, HOWEVER, OUTRANKS ALL OF IT (Ш7б).
+ * The two directions are not symmetrical and never were: absence from the list
+ * is not evidence, PRESENCE on it is -- the CLI has already filtered its
+ * answer by process liveness and start time. So the list is still a second
+ * opinion that can only ADD prohibitions, and it is asked first for exactly
+ * that reason: every rule after it can only let a record through, and none of
+ * them is about now. `witnessed-end` says an end HAPPENED; it does not say that
+ * nothing is on that conversation at this moment, and believing it over a
+ * process the machine says it is running is how one transcript gets two
+ * `claude` writing into it.
  */
 export function planRestore(inputs: RestoreInputs): RestorePlan {
-  const listed = listedSessions(inputs.agents);
+  const running = runningNow(inputs.agents);
   const demanded = inputs.demanded ?? null;
 
   // Counted over every record that could still be resumed BY ANYBODY, not over
@@ -223,7 +260,7 @@ export function planRestore(inputs: RestoreInputs): RestorePlan {
   const steps: RestoreStep[] = [];
   const skipped: RestoreSkip[] = [];
   for (const entry of considered) {
-    const reason = refusalFor(entry, inputs, listed, demanded !== null);
+    const reason = refusalFor(entry, inputs, running, demanded !== null);
     const contested = (claims.get(entry.sessionId.value) ?? 0) > 1;
     // `no-transcript` is the one refusal that became an ANSWER instead (owner's
     // decision 2026-08-21): there is nothing to resume, so the record comes back
@@ -269,6 +306,8 @@ const REFUSAL_WORDS: Readonly<Record<RestoreRefusal, string>> = {
   'session-unknown':
     'we never learned which process was running it, so nothing here says whether one still is',
   'session-listed': 'Claude Code names its conversation among the ones it is running',
+  'process-listed':
+    'Claude Code still has the process it was running as, under a conversation this record does not name',
   'agents-unavailable':
     'Claude Code could not be asked what it is running, and nothing starts on a guess',
   'transcripts-unavailable':
@@ -302,29 +341,50 @@ export function refusalAnywhere(
   entry: TerminalEntry,
   inputs: RestoreInputs
 ): RestoreRefusal | null {
-  return refusalFor(entry, inputs, listedSessions(inputs.agents), true);
+  return refusalFor(entry, inputs, runningNow(inputs.agents), true);
 }
 
 /**
- * The conversations the CLI says it is running, or `null` when it could not be
- * asked.
+ * What the machine says it is running, in the two shapes these rules ask about
+ * -- or `null` when it could not be asked.
  *
- * The records' own `pid` field is deliberately not consulted. The CLI has
- * already filtered its list by process liveness and start time (measured, A24),
- * so re-checking here could only ever DISAGREE by permitting -- and permitting
- * is the direction a second opinion is never allowed to move.
+ * **Both shapes, because a record and a running session are tied by two
+ * different threads and either can be the only one there.** The conversation is
+ * the obvious one. The process is the one that was in this value all along and
+ * that nothing read: `AgentRecord.pid` has been carried since the listing was
+ * first parsed, and the planner reduced the whole list to session ids and threw
+ * the processes away. That is the gap the register of open questions has called
+ * "the risk of a double `--resume` from `isWitnessedEnd`" since 2026-08-23.
+ *
+ * Neither set is ever checked against the CLI's own judgement of liveness,
+ * because it has already made it: the list is filtered by process liveness and
+ * start time (measured, A24). A pid on it is a `claude` that is up.
+ *
+ * Both sets can only ever ADD prohibitions, and that is the only direction a
+ * second opinion is allowed to move.
  */
-function listedSessions(agents: AgentListing): ReadonlySet<string> | null {
+interface RunningNow {
+  readonly sessions: ReadonlySet<string>;
+  readonly pids: ReadonlySet<number>;
+}
+
+function runningNow(agents: AgentListing): RunningNow | null {
   if (agents.kind === 'unavailable') {
     return null;
   }
-  return new Set(agents.agents.map((agent) => agent.sessionId.value));
+  const pids = new Set<number>();
+  for (const agent of agents.agents) {
+    if (agent.pid !== null) {
+      pids.add(agent.pid);
+    }
+  }
+  return { sessions: new Set(agents.agents.map((agent) => agent.sessionId.value)), pids };
 }
 
 function refusalFor(
   entry: TerminalEntry,
   inputs: RestoreInputs,
-  listed: ReadonlySet<string> | null,
+  running: RunningNow | null,
   demanded: boolean
 ): RestoreRefusal | null {
   if (!entry.isRestorable()) {
@@ -343,7 +403,7 @@ function refusalFor(
   if (!demanded && !belongsHere(entry.owner.workspaceFolder, inputs.windowFolders)) {
     return 'foreign-folder';
   }
-  return conversationRefusal(entry, inputs, listed);
+  return conversationRefusal(entry, inputs, running);
 }
 
 /**
@@ -360,19 +420,19 @@ function refusalFor(
 function conversationRefusal(
   entry: TerminalEntry,
   inputs: RestoreInputs,
-  listed: ReadonlySet<string> | null
+  running: RunningNow | null
 ): RestoreRefusal | null {
   // The rule that answered arrives here BY NAME, so this decision -- and the
   // line the orchestrator logs, which counts refusals -- says why the
   // conversation was left alone and not merely that it was.
-  const liveness = REFUSAL_FOR_LIVENESS[livenessRule(entry, inputs)];
+  const liveness = REFUSAL_FOR_LIVENESS[livenessRule(entry, inputs, running)];
   if (liveness !== null) {
     return liveness;
   }
-  if (listed === null) {
+  if (running === null) {
     return 'agents-unavailable';
   }
-  if (entry.claimsAnyOf(listed)) {
+  if (entry.claimsAnyOf(running.sessions)) {
     return 'session-listed';
   }
   if (inputs.transcripts.kind === 'unavailable') {
@@ -420,7 +480,7 @@ function conversationRefusal(
  * back when asked for. One rule, asked twice, must not give two answers.
  */
 export function resumeIntent(entry: TerminalEntry, inputs: RestoreInputs): ResumeDecision {
-  const refusal = conversationRefusal(entry, inputs, listedSessions(inputs.agents));
+  const refusal = conversationRefusal(entry, inputs, runningNow(inputs.agents));
   // The same reading `planRestore` makes of the same refusal (owner's decision
   // 2026-08-21): nothing was ever said, so there is nothing to resume -- and the
   // answer to that is a new conversation in the same record, not a closed door.
@@ -453,11 +513,30 @@ export function resumeIntent(entry: TerminalEntry, inputs: RestoreInputs): Resum
  * for.
  *
  * The rules are in the order they are asked, and the order is the design:
- * first-hand evidence of an end outranks the clock, the clock outranks the pid.
+ * evidence of life NOW outranks every reading of the past, first-hand evidence
+ * of an end outranks the clock, and the clock outranks the pid.
  */
 type LivenessRule =
+  /**
+   * The machine lists a live agent process bearing the pid this record names.
+   *
+   * First because it is the only rule here about the present. Every other one
+   * reads something that happened -- an event that arrived, a stamp, a probe --
+   * and answers a question about now out of it.
+   */
+  | 'pid-listed-running'
   /** `SessionEnd` arrived, or the editor destroyed the terminal. First-hand, and it settles it. */
   | 'witnessed-end'
+  /**
+   * The snapshot is one the store INVENTED, so none of it is evidence of
+   * anything.
+   *
+   * Before the clock rule, and that is the whole of it: the stand-in's
+   * `lastEventAt` is the record's own creation time (`ObservedState.provenance`),
+   * so a terminal made three days ago and busy five minutes ago comes back as
+   * "older than the boot" on the strength of a timestamp nobody measured.
+   */
+  | 'snapshot-recovered'
   /** Its last sign of life predates this boot, so it describes a previous life. */
   | 'older-than-the-boot'
   /** The pid it names was ESTABLISHED to be gone. */
@@ -483,6 +562,12 @@ type LivenessRule =
  * about it", which is exactly what nobody could tell on 2026-08-23.
  */
 const REFUSAL_FOR_LIVENESS: Readonly<Record<LivenessRule, RestoreRefusal | null>> = {
+  'pid-listed-running': 'process-listed',
+  // The same refusal `no-pid` gets, and deliberately the same one: both are the
+  // absence of a claim rather than a claim, and the escape out of both is the
+  // same door -- a first-hand end reaching the record, or any real event at all,
+  // either of which replaces the invented snapshot with an observed one.
+  'snapshot-recovered': 'session-unknown',
   'witnessed-end': null,
   'older-than-the-boot': null,
   'pid-established-gone': null,
@@ -505,8 +590,33 @@ const REFUSAL_FOR_LIVENESS: Readonly<Record<LivenessRule, RestoreRefusal | null>
  * under another rule's name: `no-pid` comes back as itself, and the caller then
  * says out loud that nothing was established rather than that something was.
  */
-function livenessRule(entry: TerminalEntry, inputs: RestoreInputs): LivenessRule {
+function livenessRule(
+  entry: TerminalEntry,
+  inputs: RestoreInputs,
+  running: RunningNow | null
+): LivenessRule {
   const { observed } = entry;
+  /*
+   * **The second witness, asked before anything else is believed (Ш7б).**
+   *
+   * Every other rule below reads the past. This one reads the present: the CLI
+   * has filtered its list by process liveness and start time already (measured,
+   * A24), so a pid on it is a `claude` that is up right now -- and if it is the
+   * pid this record was running as, something is on that conversation whatever
+   * our own history of it says.
+   *
+   * It goes first for that reason and not for tidiness. `witnessed-end` is
+   * first-hand evidence that an end HAPPENED; it is not evidence about now, and
+   * believing it over a live process is how one transcript gets two `claude`
+   * writing into it. The rules below it can only ever pass a record on, so
+   * asking this one first can only ever take cases away from them.
+   *
+   * A record with no pid reaches nothing here, because there is no thread to
+   * follow: `null` is not compared against the set, it simply is not in it.
+   */
+  if (observed.pid !== null && running?.pids.has(observed.pid) === true) {
+    return 'pid-listed-running';
+  }
   /*
    * A witnessed end IS the evidence this predicate is asking for, and leaving it
    * out cost the owner every conversation they had.
@@ -532,6 +642,23 @@ function livenessRule(entry: TerminalEntry, inputs: RestoreInputs): LivenessRule
    */
   if (isWitnessedEnd(observed.state)) {
     return 'witnessed-end';
+  }
+  /*
+   * **A snapshot nobody observed, kept out of the clock's way (defect 8).**
+   *
+   * When `observed.json` is gone the codec stands one up so that the record is
+   * not lost with its cache, and it stamps it with the record's creation time
+   * because that is the only honest stamp there is. The boot rule then reads a
+   * creation time from before this boot exactly as it reads a real last event --
+   * "it describes a previous life" -- and lets the record through.
+   *
+   * The two are indistinguishable by looking, which is why the codec now says
+   * which it is. `remove()` used to manufacture this very shape out of a record
+   * a person had asked to delete, by moving the snapshot to the trash before the
+   * record; it moves the record first now, for this reason.
+   */
+  if (observed.provenance === 'recovered') {
+    return 'snapshot-recovered';
   }
   if (precedesBoot(observed.lastEventAt.getTime(), inputs.nowMs, inputs.uptimeSeconds)) {
     return 'older-than-the-boot';

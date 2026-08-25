@@ -1,10 +1,13 @@
 import {
   ObservedState,
+  PERSISTED_TERMINAL_STATES,
   type PersistedTerminalState,
   OwnerId,
   OwnerRef,
   SessionId,
   TerminalId,
+  decodeEntry,
+  encodeRecord,
   explainRefusal,
   planRestore,
   refusalAnywhere,
@@ -98,6 +101,45 @@ function listing(...ids: readonly string[]): AgentListing {
     })),
     skipped: 0,
   };
+}
+
+/**
+ * The CLI's list with the process spelled out, for the cases where the pid is
+ * the only thread between a record and something that is running: the session
+ * id on the line is one this record does not claim.
+ */
+function listedAs(sessionId: string, pid: number): AgentListing {
+  return {
+    kind: 'listed',
+    agents: [
+      {
+        sessionId: SessionId.fromString(sessionId),
+        pid,
+        cwd: FOLDER,
+        kind: 'interactive',
+        startedAt: NOW - MINUTE_MS,
+        name: null,
+        status: null,
+      },
+    ],
+    skipped: 0,
+  };
+}
+
+/**
+ * The record as the store hands it back when its `observed.json` is gone: the
+ * snapshot is the codec's stand-in, and nobody observed any of it.
+ *
+ * Built by the real codec rather than assembled here, because the shape of the
+ * stand-in is the codec's decision -- a copy of it in this file would agree
+ * with it exactly until somebody changed one of the two.
+ */
+function afterTheCacheWasLost(entry: TerminalEntry): TerminalEntry {
+  const decoded = decodeEntry(encodeRecord(entry), undefined);
+  if (decoded.kind !== 'ok') {
+    throw new Error(`the fixture did not survive its own codec: ${decoded.reason}`);
+  }
+  return decoded.entry;
 }
 
 /** A world in which the one entry below is restorable, so a test can spoil one thing. */
@@ -358,6 +400,256 @@ describe('establishing that the conversation is not running', () => {
 });
 
 /*
+ * **The second witness, and why `witnessed-end` needed one (Ш7б).**
+ *
+ * `witnessed-end` is first-hand and it is also PAST: `SessionEnd` arrived once,
+ * or the editor destroyed a terminal object once. Nothing in it is a statement
+ * about now. The machine's own list of what it is running IS about now, it has
+ * been in `RestoreInputs` since the beginning, and the pid on every line of it
+ * was read by nobody -- the planner reduced the listing to a set of session ids
+ * and threw the processes away.
+ *
+ * That gap has a name in the register of open questions since 2026-08-23: the
+ * risk of a double `--resume` from `isWitnessedEnd`. These are the cases where
+ * the session id cannot close it, because the ids do not match and the pid is
+ * the only thread between the record and the process that is up.
+ */
+describe('the second witness: what the machine says it is running NOW', () => {
+  it('does not resume a witnessed end whose process the CLI still has up', () => {
+    // The record's own evidence is an end, and it is honest evidence. But the
+    // CLI names a live `claude` at the very pid this record was running as,
+    // under an id we do not recognise -- a conversation that rotated its id, or
+    // a session file we cannot match. Either reading says something is on that
+    // process, and `--resume` here is the second one.
+    const entry = sketch({ state: 'ended' });
+    const world = inputsFor([entry], { agents: listedAs(SESSION_B, CLAUDE_PID) });
+
+    const plan = planRestore(world);
+
+    expect(plan.steps).toStrictEqual([]);
+    expect(refusals(plan)).toStrictEqual(['process-listed']);
+  });
+
+  it('says it again next window, and lets go the moment the process does', () => {
+    // The cycle, before the table states it: refusing starts nothing, so the
+    // world the next window reads is this one. What lifts it is the process
+    // leaving the CLI's list, which nobody has to resume anything to bring
+    // about.
+    const entry = sketch({ state: 'ended' });
+    const listed = inputsFor([entry], { agents: listedAs(SESSION_B, CLAUDE_PID) });
+
+    expect(refusals(planRestore(listed))).toStrictEqual(['process-listed']);
+    expect(refusals(planRestore(listed))).toStrictEqual(['process-listed']);
+    expect(planRestore(inputsFor([entry], { agents: listing() })).steps).toHaveLength(1);
+  });
+
+  it('is not troubled by a process that is nothing to do with this record', () => {
+    const entry = sketch({ state: 'ended' });
+
+    expect(planRestore(inputsFor([entry], { agents: listedAs(SESSION_B, 31_337) })).steps)
+      .toHaveLength(1);
+  });
+
+  it('has nothing to say about a record that never named a process', () => {
+    // The pid is the whole of the link. A record with none cannot be tied to
+    // any line of the listing, and what it is refused for -- or not refused for
+    // -- is settled elsewhere.
+    const entry = sketch({ state: 'ended', pid: null });
+
+    expect(refusals(planRestore(inputsFor([entry], { agents: listedAs(SESSION_B, CLAUDE_PID) }))))
+      .toStrictEqual([]);
+  });
+});
+
+/*
+ * **A snapshot nobody observed, read as a sign of life (defect 8).**
+ *
+ * When `observed.json` is gone the codec stands one up so the record is not
+ * lost with its cache: `degraded`, no pid, and `lastEventAt` set to the
+ * record's own creation time -- which is the only honest stamp available and is
+ * not a sign of life at all. Downstream reads that field as evidence, and the
+ * boot rule reads a creation time from before this boot as "it describes a
+ * previous life" and lets the record through.
+ *
+ * So a terminal made three days ago, busy five minutes ago, whose cache we lost
+ * is resumed on the strength of a timestamp we invented. `remove()` manufactures
+ * exactly this shape out of a record a person asked to delete.
+ */
+describe('a snapshot the store invented after losing its cache', () => {
+  it('is not read as a sign of life, however old the record it was made from', () => {
+    const invented = afterTheCacheWasLost(sketch());
+
+    // What the codec stands up, spelled out so that the case below is about
+    // this shape and not about a state a test happened to choose.
+    expect(invented.observed.state).toBe('degraded');
+    expect(invented.observed.pid).toBeNull();
+    expect(invented.observed.lastEventAt.getTime()).toBeLessThan(NOW - HOUR_SECONDS * 1000);
+
+    const plan = planRestore(inputsFor([invented]));
+
+    expect(plan.steps).toStrictEqual([]);
+    expect(refusals(plan)).toStrictEqual(['session-unknown']);
+  });
+
+  it('leaves a snapshot somebody did observe exactly where it was', () => {
+    // The boot rule is untouched: a record whose OWN last event predates this
+    // boot still comes back, which is the common case after a restart and the
+    // reason that rule exists.
+    const observed = sketch({ lastEventAt: BEFORE_BOOT, pid: 31_337 });
+
+    expect(planRestore(inputsFor([observed], { deadPids: new Set() })).steps).toHaveLength(1);
+  });
+});
+
+/*
+ * **The promise this step was made under, as something a machine checks.**
+ *
+ * Ш7б was allowed into the irreversible zone on one undertaking: no edit in it
+ * gives `--resume` MORE cases than it had, only fewer or the same. That is a
+ * statement about every world at once, so a handful of examples cannot carry
+ * it and an argument in a comment carries it even less.
+ *
+ * It is checkable because the step added exactly TWO signals to what the
+ * planner reads, and both are new: the pid on each line of the CLI's listing,
+ * and the mark on a snapshot that says the store invented it rather than
+ * observed it. Strike those two out of a world and what is left is precisely
+ * the world the planner of Ш7а saw -- verified by reading that version: the
+ * only `pid` it touched was `observed.pid`, and `provenance` did not exist.
+ *
+ * So: over a space built by turning every knob that reaches these rules, every
+ * start this planner makes must also be a start the blinded one makes. Fewer
+ * or the same, per world, never more.
+ */
+describe('the second witness may only ever forbid', () => {
+  /** The same record with its snapshot presented as one somebody observed. */
+  function seenRatherThanInvented(entry: TerminalEntry): TerminalEntry {
+    return makeEntry({
+      terminalId: entry.terminalId,
+      sessionId: entry.sessionId,
+      sessionIdHistory: entry.sessionIdHistory,
+      owner: entry.owner,
+      metadata: entry.metadata,
+      launch: entry.launch,
+      observed: ObservedState.create({
+        state: entry.observed.state,
+        lastEventAt: entry.observed.lastEventAt,
+        currentTool: entry.observed.currentTool,
+        lastAssistantMessage: entry.observed.lastAssistantMessage,
+        cost: entry.observed.cost,
+        contextWindow: entry.observed.contextWindow,
+        pid: entry.observed.pid,
+        running: entry.observed.running,
+      }),
+      engine: entry.engine,
+      order: entry.order,
+      createdAt: entry.createdAt,
+      closedAt: entry.closedAt,
+      closedBy: entry.closedBy,
+      revision: entry.revision,
+    });
+  }
+
+  /** The world with both new signals taken out of it, and nothing else moved. */
+  function blinded(world: RestoreInputs): RestoreInputs {
+    return {
+      ...world,
+      entries: world.entries.map(seenRatherThanInvented),
+      agents:
+        world.agents.kind === 'listed'
+          ? { ...world.agents, agents: world.agents.agents.map((one) => ({ ...one, pid: null })) }
+          : world.agents,
+    };
+  }
+
+  /** What came back as a start, as something two plans can be compared by. */
+  function started(plan: RestorePlan): readonly string[] {
+    return plan.steps.map((step) => `${step.entry.terminalId.value}:${step.intent}`);
+  }
+
+  const PIDS: readonly (number | null)[] = [null, CLAUDE_PID, 31_337];
+  const LISTINGS: readonly AgentListing[] = [
+    listing(),
+    listing(SESSION_A),
+    listedAs(SESSION_B, CLAUDE_PID),
+    listedAs(SESSION_A, CLAUDE_PID),
+    listedAs(SESSION_B, 31_337),
+    { kind: 'unavailable', reason: 'spawn claude ENOENT' },
+  ];
+
+  /*
+   * Every state this build can write, so a state added later joins the check
+   * without anybody remembering to add it; both sides of the boot; a pid held
+   * dead and a pid held by nothing; a conversation with a transcript and
+   * without; the automatic plan and the one a person asked for by name; and the
+   * record as the store hands it back both when its cache survived and when it
+   * did not.
+   */
+  const WORLDS: readonly RestoreInputs[] = PERSISTED_TERMINAL_STATES.flatMap((state) =>
+    PIDS.flatMap((pid) =>
+      [SINCE_BOOT, BEFORE_BOOT].flatMap((lastEventAt) =>
+        [new Set<number>(), new Set([CLAUDE_PID])].flatMap((deadPids) =>
+          LISTINGS.flatMap((agents) =>
+            [transcriptsFor(SESSION_A), transcriptsFor()].flatMap((transcripts) =>
+              [false, true].flatMap((cacheLost) =>
+                [null, TerminalId.fromString(TERMINAL_A)].map((demanded) => {
+                  const record = sketch({ state, pid, lastEventAt });
+                  return inputsFor([cacheLost ? afterTheCacheWasLost(record) : record], {
+                    deadPids,
+                    agents,
+                    transcripts,
+                    demanded,
+                  });
+                })
+              )
+            )
+          )
+        )
+      )
+    )
+  );
+
+  it('starts nothing the same world would not start with those two signals struck out', () => {
+    const widened = WORLDS.filter((world) => {
+      const now = started(planRestore(world));
+      const before = new Set(started(planRestore(blinded(world))));
+      return now.some((step) => !before.has(step));
+    });
+
+    expect(widened).toStrictEqual([]);
+  });
+
+  it('says start about no record the same world blinded would refuse', () => {
+    // The row's own green button (M2.23) reads the same rules, so the promise
+    // has to hold on that path too or it holds on neither.
+    const widened = WORLDS.filter((world) => {
+      const [entry] = world.entries;
+      if (entry === undefined) {
+        return false;
+      }
+      const [blindEntry] = blinded(world).entries;
+      return (
+        resumeIntent(entry, world).kind === 'start' &&
+        blindEntry !== undefined &&
+        resumeIntent(blindEntry, blinded(world)).kind !== 'start'
+      );
+    });
+
+    expect(widened).toStrictEqual([]);
+  });
+
+  it('is checked over a space that reaches the new rules at all', () => {
+    // A subset claim is true of a change that does nothing, so the space has to
+    // be shown to contain worlds the two answer differently -- otherwise this
+    // whole describe is a green light for an untested rule.
+    const narrowed = WORLDS.filter(
+      (world) => started(planRestore(world)).length < started(planRestore(blinded(world))).length
+    );
+
+    expect(narrowed.length).toBeGreaterThan(0);
+  });
+});
+
+/*
  * **The trap of this step, executed rather than described.**
  *
  * A refusal is not a fault. Every one of them is an ordinary state of the world
@@ -527,6 +819,13 @@ describe('every refusal, and what has to change before the record comes back', (
       world: inputsFor([sketch()], { agents: listing(SESSION_A) }),
       escape: 'the CLI stops naming that conversation among the ones it is running',
       escaped: inputsFor([sketch()], { agents: listing() }),
+      escapeComesFrom: 'the world',
+    },
+    'process-listed': {
+      asked: everyWindow,
+      world: inputsFor([sketch({ state: 'ended' })], { agents: listedAs(SESSION_B, CLAUDE_PID) }),
+      escape: 'the process the record was running as leaves the list of what the CLI has up, which happens when it exits',
+      escaped: inputsFor([sketch({ state: 'ended' })], { agents: listedAs(SESSION_B, 31_337) }),
       escapeComesFrom: 'the world',
     },
     'agents-unavailable': {
@@ -808,6 +1107,7 @@ describe('explaining a refusal to the person who asked', () => {
     'session-running': true,
     'session-unknown': true,
     'session-listed': true,
+    'process-listed': true,
     'agents-unavailable': true,
     'transcripts-unavailable': true,
     'no-transcript': true,
@@ -874,6 +1174,16 @@ describe('a record its own window asks to resume', () => {
     const entry = sketch({ pid: 4242 });
 
     expect(refusedBecause(resumeIntent(entry, inputsFor([entry])))).toBe<RestoreRefusal>('session-running');
+  });
+
+  it('refuses while the CLI has its PROCESS up under a conversation we do not know', () => {
+    // One rule asked twice must not give two answers (M2.23). The plan refuses
+    // this record because the machine names a live `claude` at the pid it was
+    // running as, and the row's own green button asks the very same question.
+    const entry = sketch({ state: 'ended' });
+    const world = inputsFor([entry], { agents: listedAs(SESSION_B, CLAUDE_PID) });
+
+    expect(refusedBecause(resumeIntent(entry, world))).toBe('process-listed');
   });
 
   it('refuses while the CLI names its conversation among the running ones', () => {

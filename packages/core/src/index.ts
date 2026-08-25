@@ -396,7 +396,11 @@ export {
 export { LaunchRecipe, type LaunchRecipeParams } from './domain/entities/launch-recipe';
 export { CostSnapshot } from './domain/entities/cost-snapshot';
 export { ContextWindowSnapshot } from './domain/entities/context-window-snapshot';
-export { ObservedState, type ObservedStateParams } from './domain/entities/observed-state';
+export {
+  ObservedState,
+  type ObservedStateParams,
+  type SnapshotProvenance,
+} from './domain/entities/observed-state';
 export {
   PERSISTED_TERMINAL_STATES,
   isPersistedTerminalState,
