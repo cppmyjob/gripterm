@@ -31,10 +31,18 @@ export function runStore(label) {
  * assertion, which is why the store is moved rather than the behaviour
  * suppressed, and why the extension now refuses a store it was not pointed at.
  *
- * The store is created and never emptied. Emptying it would put a recursive
- * delete into the very files this change exists to keep away from a person's
- * directories, and dirt is something the suites already tolerate: until today
- * they ran against a store with months of the owner's own batches in it.
+ * The store is created here and NOT emptied here, which is a smaller claim than
+ * the one this comment used to make. It said the store was "never emptied",
+ * because a recursive delete would then have stood in front of the very files
+ * this exists to keep away from a person's directories; and `tests/stand/run.mjs`
+ * has emptied it on every run since, with `rmSync(STORE, { recursive: true })`.
+ * The danger was answered another way, and this comment went on asserting a
+ * decision nobody was keeping. The other way is a REFUSAL in front of the
+ * delete: `prepare()` there, and `under()` in `tests/stand/keepsake.ts`, both
+ * stop a run whose store is not beneath `.vscode-test`, so the recursion cannot
+ * reach a directory of anybody's. Dirt is separately tolerable -- until the day
+ * the store moved here, the suites ran against one with months of the owner's
+ * own batches in it -- but it is not what keeps the delete safe.
  *
  * @param {string} label distinguishes one run's directories from another's
  * @param {Record<string, unknown>} [settings] anything else the window must read

@@ -42,6 +42,17 @@ const require = createRequire(import.meta.url);
 const REPO = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const LABEL = 'stand';
 
+/**
+ * When this run started, and therefore the name its trace is kept under if it
+ * turns out to be one worth keeping.
+ *
+ * Read once, at the top, rather than when the trace is written: a run that died
+ * has to be named by when it BEGAN, like every other, or two runs sort in the
+ * wrong order the day one of them takes twelve minutes and the next one three
+ * seconds.
+ */
+const STARTED_AT = new Date();
+
 // CommonJS, and required rather than imported, because three module systems
 // need this one function: this file and `.vscode-test.mjs` are ESM, and its own
 // suite is Jest. See the head of `tools/fork-build.js`.
@@ -51,6 +62,31 @@ const STORE = runStore(LABEL);
 const EXTENSIONS = join(BASE, `extensions-${LABEL}`);
 const OUTPUT = join(BASE, `${LABEL}-output`);
 const PROJECT = join(BASE, `${LABEL}-project`);
+const USER_DATA = join(BASE, `user-data-${LABEL}`);
+/** Where the trace of a run that was not green is kept, and where `prepare()` deliberately does not reach. */
+const KEEPSAKES = join(BASE, `${LABEL}-red`);
+
+/**
+ * The directories one run works in, as one object.
+ *
+ * Handed to `tests/stand/keepsake.ts` whole, so that the emptying and the
+ * keeping cannot disagree about a path: what a run deletes before it starts and
+ * what it copies aside when it ends are two readings of THIS.
+ */
+const PLACES = { base: BASE, userData: USER_DATA, store: STORE, output: OUTPUT, keepsakes: KEEPSAKES };
+
+/*
+ * Compiled TypeScript, and required rather than imported for the same reason the
+ * judge is (see the verdict, at the end of this file).
+ *
+ * Required HERE and not down there because `prepare()` needs half of it before
+ * the first window opens: the list of directories a run empties is stated in
+ * that module, so that `keepsake.test.ts` can check "a kept trace survives the
+ * next run" by deleting the list the next run really deletes, rather than its
+ * own copy of it.
+ */
+const { KEPT_TRACES, LOUD_ABOVE_BYTES, keepRun, runDirectories } =
+  require(join(REPO, 'out', 'tests', 'stand', 'keepsake.js'));
 const PRODUCT = join(REPO, 'packages', 'extension');
 const OBSERVER = join(REPO, 'tests', 'stand', 'observer');
 const RECORDING = join(OUTPUT, 'recording.ndjson');
@@ -218,6 +254,15 @@ function theEditor() {
 }
 
 /**
+ * Whether what is on disk under `.vscode-test` belongs to THIS run yet.
+ *
+ * It decides one thing and it is not a detail: a run that dies before this is
+ * true died over the FILES OF THE RUN BEFORE IT, and keeping those under this
+ * run's name would be a trace that lies about whose they are. See `keep`.
+ */
+let ownDirectoriesMade = false;
+
+/**
  * The directories, and the one refusal that stands in front of the whole run.
  *
  * The store is emptied and the project folder is NOT. Both halves matter and
@@ -241,9 +286,13 @@ function prepare() {
     );
   }
 
-  rmSync(join(BASE, `user-data-${LABEL}`), { recursive: true, force: true });
-  rmSync(STORE, { recursive: true, force: true });
-  rmSync(OUTPUT, { recursive: true, force: true });
+  // The three, by the same list the trace of a red run is checked against, and
+  // each of them refused by `under()` in exactly the way the store is refused
+  // above. `${LABEL}-red` is deliberately not among them: what was kept of a run
+  // that went red is the one thing here the next run does not take away.
+  for (const directory of runDirectories(PLACES)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
   mkdirSync(OUTPUT, { recursive: true });
   mkdirSync(EXTENSIONS, { recursive: true });
 
@@ -260,7 +309,7 @@ function prepare() {
     }
   }
 
-  return hostUserData(LABEL, {
+  const userData = hostUserData(LABEL, {
     'security.workspace.trust.enabled': false,
     'telemetry.telemetryLevel': 'off',
     'update.mode': 'none',
@@ -269,6 +318,50 @@ function prepare() {
     // has nothing to do with the grid coming back when a folder is open, and a
     // stand that set it would be measuring its own setting.
   });
+  ownDirectoriesMade = true;
+  return userData;
+}
+
+/**
+ * The trace of this run: kept if it was not green, and said out loud either way.
+ *
+ * The colour is known only here, which is why nothing about keeping happens in
+ * `prepare()`: at the start of a run there is no verdict for anyone to read.
+ * `died` is passed for a run that stopped before there was a verdict, and it is
+ * kept exactly as a red one is -- "no verdict" must never end up looking like
+ * "green".
+ */
+function keep(outcome) {
+  let kept;
+  try {
+    kept = keepRun(PLACES, outcome, STARTED_AT);
+  } catch (failed) {
+    // Keeping the trace of a failure must never replace the failure. If the
+    // copying cannot be done, it says so and the run reports what it came to
+    // report.
+    console.log(`\nthe trace of this run could not be kept: ${failed.message}`);
+    return;
+  }
+  if (kept === null) {
+    console.log(`\ngreen -- nothing of this run kept, and nothing taken out of ${KEEPSAKES}`);
+    return;
+  }
+  const nothingFor = kept.missing.length === 0 ? '' : `   (nothing to copy for: ${kept.missing.join(', ')})`;
+  const tookAway = kept.removed.length === 0 ? '' : `, after taking away ${kept.removed.join(', ')}`;
+  console.log(`\nthis run is kept at ${kept.at}`);
+  console.log(`  copied   : ${kept.copied.join(', ')}${nothingFor}`);
+  console.log(`  kept now : ${String(kept.traces)} run(s), ${megabytes(kept.keptBytes)}${tookAway}`);
+  if (kept.keptBytes > LOUD_ABOVE_BYTES) {
+    console.log(
+      `  READ THIS: ${String(KEPT_TRACES)} traces now come to ${megabytes(kept.keptBytes)}, past the ` +
+        `${megabytes(LOUD_ABOVE_BYTES)} that number was chosen under. A bound on COUNT stops bounding bytes ` +
+        'the day one trace grows -- see KEPT_TRACES in tests/stand/keepsake.ts and pick again.'
+    );
+  }
+}
+
+function megabytes(bytes) {
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 // --- one sitting ------------------------------------------------------------
@@ -471,6 +564,22 @@ async function main() {
   writeFileSync(VERDICT, `${JSON.stringify(verdict, null, 2)}\n`, 'utf8');
   console.log(`the verdict, for a machine, is at ${VERDICT}`);
   process.exitCode = verdict.red ? 1 : 0;
+  keep(verdict.red ? 'red' : 'green');
 }
 
-await main();
+/*
+ * The keeping wraps the whole run and not just the verdict, because a run that
+ * DIED is the one a person most wants to read and the one that leaves no verdict
+ * to say so. The failure is re-thrown untouched: this catch exists to copy, not
+ * to decide, and a stand that swallowed its own death would report green.
+ */
+try {
+  await main();
+} catch (died) {
+  if (ownDirectoriesMade) {
+    keep('died');
+  } else {
+    console.log('\nnothing of this run to keep: it stopped before it had directories of its own');
+  }
+  throw died;
+}
