@@ -502,10 +502,11 @@ export class TerminalLifecycleService implements Disposable {
    * Writes down which process the editor started for this terminal.
    *
    * The pid is the only evidence any window has that a conversation has stopped
-   * running -- `mayBeRunning` reads its absence as "it may still be going" and
-   * refuses to restore -- so the record without one is the record that never
+   * running -- `livenessRule` answers `no-pid` for a record without one, and
+   * the plan refuses it -- so the record without one is the record that never
    * comes back. Measured in the acceptance run of M2.16: with no producer at
-   * all, every restore was refused with `session-running`.
+   * all, every restore was refused, under the name `session-running` that the
+   * reason carried until Ш7а gave the other case one of its own.
    *
    * The entry is re-read here rather than closed over. Between the start and
    * this answer a hook can arrive, a person can rename the terminal or delete
@@ -535,7 +536,7 @@ export class TerminalLifecycleService implements Disposable {
        *
        * Silence here and silence on success were the same silence, and this
        * method's own doc says why that could not stand: a record with no pid is
-       * a record `mayBeRunning` refuses to restore for ever. So "the editor
+       * a record the restore planner refuses for ever (`no-pid`). So "the editor
        * never named a process" and "it named one and we had already let the
        * record go" have to be different things to read afterwards.
        */
@@ -547,7 +548,7 @@ export class TerminalLifecycleService implements Disposable {
     }
     this._options.registry.amend(current.withObserved(current.observed.withPid(pid)));
     // Once per terminal, at its start. This is the value every later restore of
-    // that record is decided on (`mayBeRunning`), so whether it ever landed is
+    // that record is decided on (`livenessRule`), so whether it ever landed is
     // the first thing anybody reading a "it did not come back" log needs.
     this._options.logger.info('the process the editor named was written onto the record', {
       terminalId: terminalId.value,

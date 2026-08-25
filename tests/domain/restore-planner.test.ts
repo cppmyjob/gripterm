@@ -7,6 +7,7 @@ import {
   TerminalId,
   explainRefusal,
   planRestore,
+  refusalAnywhere,
   restoreNotice,
   resumeIntent,
 } from '../../packages/core/src/index';
@@ -261,13 +262,6 @@ describe('establishing that the conversation is not running', () => {
     expect(refusals(plan)).toStrictEqual(['session-running']);
   });
 
-  it('refuses a record whose pid we never learned', () => {
-    // No evidence either way, and the expensive mistake is one-sided.
-    const plan = planRestore(inputsFor([sketch({ pid: null })]));
-
-    expect(refusals(plan)).toStrictEqual(['session-running']);
-  });
-
   /*
    * **The owner, 2026-08-23, and it cost them every conversation they had.**
    * Two records with real conversations behind them would not come back after a
@@ -297,13 +291,14 @@ describe('establishing that the conversation is not running', () => {
     expect(refusals(plan)).toStrictEqual([]);
   });
 
-  it('still refuses a record that only LOOKS finished, because that is a guess of ours', () => {
-    // `orphaned` is this build's own inference from a pid lookup, and `degraded`
-    // from a timeout. Neither is first-hand, so neither may outrank the pid.
+  it('still refuses a record that only LOOKS finished, and says which refusal that is', () => {
+    // `orphaned` is this build's own inference from a pid lookup and `degraded`
+    // from a timeout. Neither is first-hand, so neither may outrank the pid --
+    // and the answer now says whether there was a pid there to outrank.
     expect(refusals(planRestore(inputsFor([sketch({ state: 'orphaned' })], { deadPids: new Set() }))))
       .toStrictEqual(['session-running']);
     expect(refusals(planRestore(inputsFor([sketch({ state: 'degraded', pid: null })]))))
-      .toStrictEqual(['session-running']);
+      .toStrictEqual(['session-unknown']);
   });
 
   it('lets the boot outrank the pid, because pids are handed out again', () => {
@@ -359,6 +354,238 @@ describe('establishing that the conversation is not running', () => {
     );
 
     expect(refusals(plan)).toStrictEqual(['session-running']);
+  });
+});
+
+/*
+ * **The trap of this step, executed rather than described.**
+ *
+ * A refusal is not a fault. Every one of them is an ordinary state of the world
+ * that can change, and the plan carries one per record precisely so that a
+ * person asking "why is my terminal not back" gets a sentence. What turns one
+ * into a TRAP is a refusal whose only way out is the very start it forbids:
+ * refuse, nobody starts it, nothing is learned, refuse again -- and that shape
+ * cannot be seen in a table of refusals, because every row of such a table
+ * reads perfectly reasonably on its own.
+ *
+ * **Measured against the owner's own store, 2026-08-23, and it cost them every
+ * conversation they had.** Two records with real conversations behind them
+ * would not come back after a restart. Run offline over that store, this
+ * planner answered `session-running` for both -- a sentence that claims
+ * something about a process -- while what it held was NOTHING: their pid was
+ * `null`, and writing a pid is what starting them would have done. The only way
+ * out was a reboot.
+ */
+describe('the loop a refusal can leave a record in', () => {
+  /** Nothing is known about it: no pid was ever written down, and no end was witnessed. */
+  function stranded(): TerminalEntry {
+    return sketch({ pid: null, state: 'idle' });
+  }
+
+  it('does not answer "a pid we hold" and "no pid at all" with one word', () => {
+    // The FORM of the defect and not an instance of it. A predicate that
+    // answers yes or no cannot separate "there is evidence a process may still
+    // be there" from "there is no evidence at all", so it reports the second as
+    // the first -- and the first is a claim about a process nobody established.
+    const holdingAPid = refusals(planRestore(inputsFor([sketch()], { deadPids: new Set() })));
+    const holdingNothing = refusals(planRestore(inputsFor([stranded()])));
+
+    expect(holdingAPid).toStrictEqual(['session-running']);
+    expect(holdingNothing).not.toStrictEqual(holdingAPid);
+  });
+
+  it('refuses for want of evidence, says which it is, and says it again next window', () => {
+    const world = inputsFor([stranded()]);
+
+    // Window 1 opens, plans and refuses. Refusing starts nothing, so nothing
+    // writes a pid and nothing changes the record -- the world window 2 reads
+    // is this one, and so is the world window 3 reads. That is the loop, and it
+    // is not a defect by itself: what the reason has to do is say that nothing
+    // was established, so a reader can tell it from a process still going.
+    const first = planRestore(world);
+    const second = planRestore(world);
+    const third = planRestore(world);
+
+    expect(first.steps).toStrictEqual([]);
+    expect(refusals(first)).toStrictEqual(['session-unknown']);
+    expect(refusals(second)).toStrictEqual(refusals(first));
+    expect(refusals(third)).toStrictEqual(refusals(first));
+  });
+
+  it('leaves it a way out that nobody has to start it to take', () => {
+    // The escape has to be able to ARRIVE: `SessionEnd`, or the editor
+    // destroying the terminal object, both of which reach the record without
+    // anybody resuming its conversation first.
+    const witnessed = sketch({ pid: null, state: 'ended' });
+
+    expect(planRestore(inputsFor([witnessed])).steps).toHaveLength(1);
+  });
+});
+
+/** Who or what can bring a refusal's escape about while the record is still refused. */
+type EscapeComesFrom =
+  /** The editor, the CLI or the machine. It arrives without anybody asking for it. */
+  | 'the world'
+  /** The person in front of the row: reopen it, open its project, ask for it by name. */
+  | 'a person'
+  /**
+   * Nothing but the start this very refusal forbids. That is a LOOP, and this
+   * value exists so that the case has a name -- a row in that state reads
+   * exactly like the others, which is how one lived here unnoticed.
+   */
+  | 'only the start it refuses';
+
+interface RefusalCase {
+  /** Which question this row answers: this window's, or the one every window would give (M2.15). */
+  readonly asked: (situation: RestoreInputs) => RestoreRefusal | null;
+  /** A world whose record gets exactly this refusal. */
+  readonly world: RestoreInputs;
+  /** What has to become true out there before the record can come back. */
+  readonly escape: string;
+  /** `world` with `escape` true and nothing else moved. */
+  readonly escaped: RestoreInputs;
+  readonly escapeComesFrom: EscapeComesFrom;
+}
+
+/*
+ * **Every refusal, the change that lifts it, and the loop run over each row.**
+ *
+ * Keyed by the union, so a refusal added tomorrow cannot arrive without an
+ * answer to "what has to change before this record comes back". That question is
+ * the oracle: a refusal with no answer to it is not a refusal but a wall.
+ *
+ * **`escapeComesFrom` is a declaration and not a measurement**, and saying so is
+ * the point of writing it down. Nothing here can compute who brings a change
+ * about; what the column does is make whoever adds a refusal answer the question
+ * where a reader sees it, and `only the start it refuses` is then refused out
+ * loud instead of going unnoticed. The measured half is the loop beside it.
+ */
+describe('every refusal, and what has to change before the record comes back', () => {
+  /** What THIS window answers about the first record: its refusal, or nothing to say. */
+  function thisWindow(situation: RestoreInputs): RestoreRefusal | null {
+    return planRestore(situation).skipped.at(0)?.reason ?? null;
+  }
+
+  /** What NOBODY could do with it: the same rules with "which window is asking" taken out (M2.15). */
+  function everyWindow(situation: RestoreInputs): RestoreRefusal | null {
+    const [entry] = situation.entries;
+    if (entry === undefined) {
+      throw new Error('a refusal is an answer about a record, and this world has none');
+    }
+    return refusalAnywhere(entry, situation);
+  }
+
+  const A_MINUTE_AGO = new Date(NOW - MINUTE_MS);
+  const ELSEWHERE = 'D:/Projects/elsewhere';
+  const TWIN = sketch({ terminalId: TERMINAL_B });
+
+  const TABLE: Readonly<Record<RestoreRefusal, RefusalCase>> = {
+    'closed': {
+      asked: everyWindow,
+      world: inputsFor([sketch({ closedAt: A_MINUTE_AGO })]),
+      escape: 'the person who closed it takes that back, in front of a dialog naming what they are reversing',
+      escaped: inputsFor([sketch({ closedAt: null })]),
+      escapeComesFrom: 'a person',
+    },
+    'owner-live': {
+      asked: everyWindow,
+      world: inputsFor([sketch()], { ownerLiveness: new Map([[GONE_OWNER, 'live' as const]]) }),
+      escape: 'the window holding it goes away, by its goodbye or by a heartbeat that stops',
+      escaped: inputsFor([sketch()], { ownerLiveness: new Map([[GONE_OWNER, 'dead' as const]]) }),
+      escapeComesFrom: 'the world',
+    },
+    'owner-unknown': {
+      asked: thisWindow,
+      world: inputsFor([sketch()], { ownerLiveness: new Map([['another-window', 'dead' as const]]) }),
+      escape: 'that window is established to be gone -- or a person asks for this record by name, which is what force means',
+      escaped: inputsFor([sketch()], { ownerLiveness: new Map([[GONE_OWNER, 'dead' as const]]) }),
+      escapeComesFrom: 'the world',
+    },
+    'foreign-folder': {
+      asked: thisWindow,
+      world: inputsFor([sketch({ folder: ELSEWHERE })]),
+      escape: 'this window opens that project -- or a person asks for the record by name',
+      escaped: inputsFor([sketch({ folder: ELSEWHERE })], { windowFolders: [ELSEWHERE] }),
+      escapeComesFrom: 'a person',
+    },
+    'session-running': {
+      asked: everyWindow,
+      world: inputsFor([sketch()], { deadPids: new Set() }),
+      escape: 'the pid the record names is established to be gone',
+      escaped: inputsFor([sketch()], { deadPids: new Set([CLAUDE_PID]) }),
+      escapeComesFrom: 'the world',
+    },
+    'session-unknown': {
+      asked: everyWindow,
+      world: inputsFor([sketch({ pid: null })]),
+      escape: 'a first-hand end reaches the record: SessionEnd, or the editor destroying its terminal',
+      escaped: inputsFor([sketch({ pid: null, state: 'ended' })]),
+      escapeComesFrom: 'the world',
+    },
+    'session-listed': {
+      asked: everyWindow,
+      world: inputsFor([sketch()], { agents: listing(SESSION_A) }),
+      escape: 'the CLI stops naming that conversation among the ones it is running',
+      escaped: inputsFor([sketch()], { agents: listing() }),
+      escapeComesFrom: 'the world',
+    },
+    'agents-unavailable': {
+      asked: everyWindow,
+      world: inputsFor([sketch()], { agents: { kind: 'unavailable', reason: 'spawn claude ENOENT' } }),
+      escape: 'the CLI can be asked what it is running again',
+      escaped: inputsFor([sketch()], { agents: listing() }),
+      escapeComesFrom: 'the world',
+    },
+    'transcripts-unavailable': {
+      asked: everyWindow,
+      world: inputsFor([sketch()], {
+        transcripts: { kind: 'unavailable', reason: 'EPERM: operation not permitted, scandir' },
+      }),
+      escape: 'the conversations on disk can be listed again',
+      escaped: inputsFor([sketch()], { transcripts: transcriptsFor(SESSION_A) }),
+      escapeComesFrom: 'the world',
+    },
+    'no-transcript': {
+      asked: everyWindow,
+      world: inputsFor([sketch()], { transcripts: transcriptsFor() }),
+      escape: 'anything at all is said in its conversation -- and this window opens the record with a NEW one rather than refusing it, so there is somewhere to say it (owner, 2026-08-21)',
+      escaped: inputsFor([sketch()], { transcripts: transcriptsFor(SESSION_A) }),
+      escapeComesFrom: 'a person',
+    },
+    'duplicate-session': {
+      asked: thisWindow,
+      world: inputsFor([sketch(), TWIN]),
+      escape: 'one of the two records is deleted, so that a single record names that conversation',
+      escaped: inputsFor([sketch()]),
+      escapeComesFrom: 'a person',
+    },
+  };
+
+  const ROWS = Object.keys(TABLE) as RestoreRefusal[];
+
+  it('answers each refusal with a change of its own', () => {
+    // A row copied from the one above it is a refusal nobody thought about, and
+    // the escape is the sentence where that would show.
+    expect(new Set(ROWS.map((reason) => TABLE[reason].escape)).size).toBe(ROWS.length);
+  });
+
+  it.each(ROWS)('%s is what the world it names answers', (reason) => {
+    expect(TABLE[reason].asked(TABLE[reason].world)).toBe(reason);
+  });
+
+  it.each(ROWS)('%s: refused, nobody starts it, nothing is learned, refused again -- and then lifted', (reason) => {
+    const row = TABLE[reason];
+
+    // The loop, run. Window 1 refuses; refusing starts nothing and writes
+    // nothing, so window 2 reads the same world and answers the same thing.
+    expect(row.asked(row.world)).toBe(reason);
+    expect(row.asked(row.world)).toBe(reason);
+
+    // Which is harmless only because the loop has a door somebody else can
+    // open. A refusal whose escape is the start it forbids is the trap this
+    // table exists to make visible, and it is refused here rather than noted.
+    expect(row.escapeComesFrom).not.toBe<EscapeComesFrom>('only the start it refuses');
+    expect(row.asked(row.escaped)).not.toBe(reason);
   });
 });
 
@@ -579,6 +806,7 @@ describe('explaining a refusal to the person who asked', () => {
     'owner-unknown': true,
     'foreign-folder': true,
     'session-running': true,
+    'session-unknown': true,
     'session-listed': true,
     'agents-unavailable': true,
     'transcripts-unavailable': true,

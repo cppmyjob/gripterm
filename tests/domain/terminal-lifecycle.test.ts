@@ -451,12 +451,12 @@ describe('the pid of the process the editor started', () => {
   /**
    * П2 rests on this, and until 2026-08-13 nothing produced it.
    *
-   * `mayBeRunning` (the restore predicate) reads a record with no pid as one
-   * whose `claude` may still be running, and refuses to bring it back --
-   * correctly, because "we have no evidence" is not "it is gone". The
-   * consequence went unnoticed for the whole of M2: EVERY record had a null pid,
-   * so every automatic restore was refused with `session-running`, and the
-   * acceptance run of M2.16 is what found it.
+   * `livenessRule` (the restore predicate) answers `no-pid` for a record with
+   * no pid, and the plan refuses to bring it back -- correctly, because "we
+   * have no evidence" is not "it is gone". The consequence went unnoticed for
+   * the whole of M2: EVERY record had a null pid, so every automatic restore
+   * was refused -- with `session-running`, the name that case carried until
+   * Ш7а -- and the acceptance run of M2.16 is what found it.
    *
    * The source is the editor itself, which knows the process it spawned. The
    * hook environment carries the CLI's own pid too (A16), but only a command
@@ -502,7 +502,7 @@ describe('the pid of the process the editor started', () => {
    * The two ways this method finished without a word (Ш3).
    *
    * Its own doc says it: "the record without one is the record that never comes
-   * back" -- `mayBeRunning` reads a missing pid as "it may still be going" and
+   * back" -- `livenessRule` answers `no-pid` for a missing pid, and the plan
    * refuses every restore. So a pid that was dropped on the floor and a pid that
    * landed have to be different things to read in a log, and until now they were
    * the same thing: nothing.

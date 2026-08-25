@@ -27,6 +27,23 @@ export type RestoreRefusal =
   | 'foreign-folder'
   /** Our own evidence does not establish that its `claude` has stopped. */
   | 'session-running'
+  /**
+   * Nothing we hold says whether its `claude` is running or gone: the record
+   * names no process at all.
+   *
+   * A refusal of its own rather than a wording of the one above, and the
+   * difference is the whole of Ш7а. Both keep the record out of the plan --
+   * the cost is one-sided and that does not change -- but `session-running` is
+   * a CLAIM about a process and this is the absence of one, and until this
+   * refusal existed they were one answer.
+   *
+   * **What that cost, measured against the owner's own store 2026-08-23:**
+   * every conversation they had. A record with no pid was reported as one whose
+   * process might still be there, and the only thing that would ever have
+   * written a pid was the start being refused. A refusal a reader cannot tell
+   * from a measurement is a refusal nobody can audit.
+   */
+  | 'session-unknown'
   /** The CLI names its conversation among the ones it is running. */
   | 'session-listed'
   /** The CLI could not be asked what is running, so nothing may be started. */
@@ -249,6 +266,8 @@ const REFUSAL_WORDS: Readonly<Record<RestoreRefusal, string>> = {
   'owner-unknown': 'the window that opened it has not been heard from, so it may still be there',
   'foreign-folder': 'it belongs to a project this window does not have open',
   'session-running': 'its Claude Code process has not been established to have stopped',
+  'session-unknown':
+    'we never learned which process was running it, so nothing here says whether one still is',
   'session-listed': 'Claude Code names its conversation among the ones it is running',
   'agents-unavailable':
     'Claude Code could not be asked what it is running, and nothing starts on a guess',
@@ -343,8 +362,12 @@ function conversationRefusal(
   inputs: RestoreInputs,
   listed: ReadonlySet<string> | null
 ): RestoreRefusal | null {
-  if (mayBeRunning(entry, inputs)) {
-    return 'session-running';
+  // The rule that answered arrives here BY NAME, so this decision -- and the
+  // line the orchestrator logs, which counts refusals -- says why the
+  // conversation was left alone and not merely that it was.
+  const liveness = REFUSAL_FOR_LIVENESS[livenessRule(entry, inputs)];
+  if (liveness !== null) {
+    return liveness;
   }
   if (listed === null) {
     return 'agents-unavailable';
@@ -418,7 +441,57 @@ export function resumeIntent(entry: TerminalEntry, inputs: RestoreInputs): Resum
 }
 
 /**
- * Whether our own evidence leaves the conversation possibly running.
+ * WHICH rule answered "may its conversation still be running", and therefore
+ * what the answer rests on.
+ *
+ * A name and not a boolean, and that is the whole of Ш7а. `true` can carry a
+ * verdict and nothing else, so "it names a pid and nothing established that pid
+ * to be gone" and "it names no process at all" arrived at the caller as one
+ * value -- and the second was then reported, to a person and to the log, in the
+ * words of the first. That is not a wording defect. It is a claim standing in
+ * for the absence of one, and it is what `session-unknown` above was written
+ * for.
+ *
+ * The rules are in the order they are asked, and the order is the design:
+ * first-hand evidence of an end outranks the clock, the clock outranks the pid.
+ */
+type LivenessRule =
+  /** `SessionEnd` arrived, or the editor destroyed the terminal. First-hand, and it settles it. */
+  | 'witnessed-end'
+  /** Its last sign of life predates this boot, so it describes a previous life. */
+  | 'older-than-the-boot'
+  /** The pid it names was ESTABLISHED to be gone. */
+  | 'pid-established-gone'
+  /** It names a pid, and nothing established that pid to be gone. */
+  | 'pid-not-established-gone'
+  /** It names no process at all. Evidence of nothing, in either direction. */
+  | 'no-pid';
+
+/**
+ * What the plan does about each rule, in one place a reader can count.
+ *
+ * `null` is "this rule settles that nothing is running there, so the next
+ * question may be asked". A total record, so a rule added above cannot be
+ * answered by accident: the compiler asks what it means before it can fire.
+ *
+ * **The last two lines are the point.** Both refuse -- the cost is one-sided
+ * and that has not changed -- but they refuse with DIFFERENT words, because one
+ * of them is a measurement and the other is the absence of one. The
+ * orchestrator counts refusals by name (`records this window did not bring
+ * back, by reason`), so this is also the line that decides whether a person
+ * reading their own log can tell "its process answers" from "we know nothing
+ * about it", which is exactly what nobody could tell on 2026-08-23.
+ */
+const REFUSAL_FOR_LIVENESS: Readonly<Record<LivenessRule, RestoreRefusal | null>> = {
+  'witnessed-end': null,
+  'older-than-the-boot': null,
+  'pid-established-gone': null,
+  'pid-not-established-gone': 'session-running',
+  'no-pid': 'session-unknown',
+};
+
+/**
+ * Our own evidence about the conversation, as the rule that spoke for it.
  *
  * The boot rule outranks the pid, and it carries the common case: after a
  * machine restart every stored pid is a number from a previous life, and Windows
@@ -427,13 +500,12 @@ export function resumeIntent(entry: TerminalEntry, inputs: RestoreInputs): Resum
  * quietly never come back. An observed state older than the boot cannot be
  * describing a process alive now, whatever the pid says today.
  *
- * A record with no pid at all is treated as possibly running. It is the honest
- * reading -- we have no evidence either way -- and the cheap one: such a record
- * either never started, in which case the transcript rule would refuse it
- * anyway, or its hooks never reached us, in which case it is exactly the record
- * we know least about.
+ * A record with no pid at all is still kept out of the plan, because the
+ * expensive mistake is one-sided. What changed is that it is no longer kept out
+ * under another rule's name: `no-pid` comes back as itself, and the caller then
+ * says out loud that nothing was established rather than that something was.
  */
-function mayBeRunning(entry: TerminalEntry, inputs: RestoreInputs): boolean {
+function livenessRule(entry: TerminalEntry, inputs: RestoreInputs): LivenessRule {
   const { observed } = entry;
   /*
    * A witnessed end IS the evidence this predicate is asking for, and leaving it
@@ -443,11 +515,14 @@ function mayBeRunning(entry: TerminalEntry, inputs: RestoreInputs): boolean {
    * conversations behind them would not come back after a restart; the planner,
    * run offline over the store on disk, answered `session-running` for both.
    * Their state was `ended` -- the editor had destroyed the terminal and said so
-   * -- and their pid was `null`, so the rule below read "no pid, therefore it
-   * may be running" and refused. Nothing then started them, so nothing ever
+   * -- and their pid was `null`, so the pid rule below read "no pid, therefore
+   * it may be running" and refused. Nothing then started them, so nothing ever
    * wrote a pid, so the next window refused them again. A loop with no way out
    * of it but a reboot, which is what `precedesBoot` was quietly doing for
    * everybody until a machine stayed up.
+   *
+   * That reading is gone: `no-pid` is now an answer of its own, and it is the
+   * reason the two halves of this defect could be told apart at all.
    *
    * `isWitnessedEnd` is first-hand and nothing else is let in: `ended` and
    * `resume_failed` are `SessionEnd` arriving or the editor destroying the
@@ -456,15 +531,34 @@ function mayBeRunning(entry: TerminalEntry, inputs: RestoreInputs): boolean {
    * exactly as suspicious as they were.
    */
   if (isWitnessedEnd(observed.state)) {
-    return false;
+    return 'witnessed-end';
   }
   if (precedesBoot(observed.lastEventAt.getTime(), inputs.nowMs, inputs.uptimeSeconds)) {
-    return false;
+    return 'older-than-the-boot';
   }
+  /*
+   * **The line the plan of 2026-08-24 said to DELETE as equivalent, kept -- and
+   * the acceptance it came from is what is out of date.**
+   *
+   * The mutation run of that day found both mutants on this line surviving, and
+   * the plan diagnosed them correctly: while this function answered a boolean,
+   * removing the line changed nothing, because `deadPids` is a
+   * `ReadonlySet<number>`, `Set.prototype.has(null)` is `false` at run time, and
+   * `!false` is the `true` this line returned. The same value by another road,
+   * so no test could ever have told the two programs apart.
+   *
+   * That equivalence was a fact about the RETURN TYPE and it died with it.
+   * `no-pid` and `pid-not-established-gone` are different names now, the map
+   * above turns them into different refusals, and the log counts them apart --
+   * so falling through to the pid comparison would answer a question about a
+   * pid that does not exist, and would lose precisely the distinction this step
+   * exists to create. The mutants are killable here for the first time, by
+   * `session-unknown` in the table of refusals.
+   */
   if (observed.pid === null) {
-    return true;
+    return 'no-pid';
   }
-  return !inputs.deadPids.has(observed.pid);
+  return inputs.deadPids.has(observed.pid) ? 'pid-established-gone' : 'pid-not-established-gone';
 }
 
 /**

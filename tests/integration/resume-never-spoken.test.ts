@@ -52,11 +52,11 @@ const ABSENT_SESSION = '4c5d6e7f-8a9b-4c0d-9e1f-2a3b4c5d6e7f';
  * Long before this machine last booted, which is how the record says its
  * process is not running.
  *
- * The rule that reads it (`mayBeRunning`) treats a record with no pid as
- * possibly alive -- the honest reading when there is no evidence -- and only an
- * event older than the boot settles it. A date in the past is that evidence,
- * and it is the one this test needs: without it the button would refuse with
- * `session-running` and the suite would be measuring the wrong refusal.
+ * The rule that reads it (`livenessRule`) answers `no-pid` for a record with no
+ * pid -- the honest reading when there is no evidence -- and only an event
+ * older than the boot settles it. A date in the past is that evidence, and it
+ * is the one this test needs: without it the button would refuse with
+ * `session-unknown` and the suite would be measuring the wrong refusal.
  */
 const BEFORE_THIS_BOOT = new Date('2020-01-01T00:00:00.000Z');
 

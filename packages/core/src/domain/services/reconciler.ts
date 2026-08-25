@@ -340,7 +340,7 @@ export class Reconciler implements Disposable {
    *
    * **It runs before the machine is surveyed for a restore, not merely before
    * the restore.** `deadPids` is gathered once, and a process ended after that
-   * gathering does not change the answer `mayBeRunning` gives in the same
+   * gathering does not change the answer `livenessRule` gives in the same
    * activation: the records of the window that died would be refused while their
    * processes were already gone. That is why the wait below exists as well --
    * `TerminateProcess` is asynchronous, and both gates of the restore read the
