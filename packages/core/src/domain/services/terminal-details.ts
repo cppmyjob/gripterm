@@ -347,7 +347,7 @@ function wordsFor(event: TerminalEvent | null): string {
       return 'the terminal was closed';
     case 'LaunchExitedNonZero':
       return `the start exited with ${String(event.exitCode)}`;
-    case 'ResumeExitedNonZero':
+    case 'ResumeExited':
       return `the restore exited with ${String(event.exitCode)}`;
   }
 }

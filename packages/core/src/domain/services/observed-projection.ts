@@ -38,7 +38,7 @@ const TOOL_RULES: Readonly<Record<TerminalEvent['kind'], 'clear' | 'keep' | 'nam
   ProcessGone: 'clear',
   TerminalClosed: 'clear',
   LaunchExitedNonZero: 'clear',
-  ResumeExitedNonZero: 'clear',
+  ResumeExited: 'clear',
 };
 
 /**
@@ -84,7 +84,7 @@ export function runningAfter(
     case 'ProcessGone':
     case 'TerminalClosed':
     case 'LaunchExitedNonZero':
-    case 'ResumeExitedNonZero':
+    case 'ResumeExited':
       return [];
 
     case 'PromptSubmitted':

@@ -830,7 +830,7 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
     expect(await closing(1, 'resume', 'process')).toMatchObject({
       state: 'resume_failed',
       signals: ['resume_failed'],
-      event: 'ResumeExitedNonZero',
+      event: 'ResumeExited',
     });
   });
 
@@ -869,7 +869,7 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
     gateway.handleFor(restored.terminalId).close(1, 'process');
 
     expect(registry.get(restored.terminalId)?.observed.state).toBe('resume_failed');
-    expect(closeEvents(logger).at(-1)).toBe('ResumeExitedNonZero');
+    expect(closeEvents(logger).at(-1)).toBe('ResumeExited');
   });
 
   it('calls a clean exit an ordinary end', async () => {
@@ -878,6 +878,32 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
       state: 'ended',
       signals: ['ended'],
       event: 'TerminalClosed',
+    });
+  });
+
+  it('calls a restore that ended before it began a failed restore, whatever code it carried', async () => {
+    // The cell the pair above leaves open, and it is not symmetric with them.
+    // Under `launch`, code 0 while still `launching` is a person opening a
+    // terminal and typing `/exit`: nothing of theirs was lost, so `ended` is the
+    // truth. Under `resume` the person asked for a conversation they already
+    // had, and a process that ended before that conversation ever announced
+    // itself did not bring it back -- which is `resume_failed` whatever number
+    // came out, because the number was never what the state depended on. The
+    // state machine says so in its own words: `resume_failed` is for "a restore
+    // that never reached `ConversationStarted`".
+    //
+    // Measured, and this is why it is not a theoretical cell. Over 34 runs of
+    // `tests/integration/resume-failed.test.ts` under the EDITOR engine, the
+    // editor reported `exitStatus.code` as 0 once for a `claude` that exits 1 --
+    // 2026-08-25T11:22:08.674Z, `.vscode-test/store-integration/logs/6113a98c`.
+    // The same 74 launches under our own engine, which reads the code off the
+    // child itself, reported 1 every time. The record went to `ended`, the
+    // person got no offer to start the conversation over, and the only thing
+    // that had gone wrong was a number we do not own.
+    expect(await closing(0, 'resume', 'process')).toMatchObject({
+      state: 'resume_failed',
+      signals: ['resume_failed'],
+      event: 'ResumeExited',
     });
   });
 

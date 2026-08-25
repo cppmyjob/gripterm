@@ -13,7 +13,7 @@ import {
   TerminalStateMachine,
   isAttentionSignal,
   launchExitedNonZero,
-  resumeExitedNonZero,
+  resumeExited,
   terminalClosed,
   type AttentionPresenter,
   type AttentionRequest,
@@ -217,7 +217,7 @@ describe('AttentionNotifier offers a button that does something', () => {
     // start over sits on that record (M2.13).
     const { registry, presenter } = stand('launching');
 
-    registry.ingest(TERMINAL, resumeExitedNonZero(1));
+    registry.ingest(TERMINAL, resumeExited(1));
 
     expect(presenter.shown[0]?.signal).toBe('resume_failed');
     expect(presenter.shown[0]?.actions).toStrictEqual([

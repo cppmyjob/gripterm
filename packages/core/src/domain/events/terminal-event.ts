@@ -49,7 +49,7 @@ export type SyntheticEvent =
   | ProcessGoneEvent
   | TerminalClosedEvent
   | LaunchExitedNonZeroEvent
-  | ResumeExitedNonZeroEvent;
+  | ResumeExitedEvent;
 
 /**
  * `'other'` is ours, not the CLI's: an unrecognised value collapses into it
@@ -238,8 +238,18 @@ export interface LaunchExitedNonZeroEvent {
   readonly exitCode: number;
 }
 
-export interface ResumeExitedNonZeroEvent {
-  readonly kind: 'ResumeExitedNonZero';
+/**
+ * A restored terminal's agent process exited before the conversation began.
+ *
+ * The only one of the three death events that does NOT ask what the code was.
+ * Under `launch` the code is the whole question -- zero is a person typing
+ * `/exit` and nothing was lost. Under `resume` the person asked for a
+ * conversation they already had, so a process that ended before that
+ * conversation ever announced itself did not bring it back, and the number it
+ * ended with does not change that.
+ */
+export interface ResumeExitedEvent {
+  readonly kind: 'ResumeExited';
   readonly exitCode: number;
 }
 
@@ -298,9 +308,26 @@ export function launchExitedNonZero(exitCode: number): LaunchExitedNonZeroEvent 
   return Object.freeze({ kind: 'LaunchExitedNonZero', exitCode: assertNonZeroExit(exitCode) });
 }
 
-/** As `launchExitedNonZero`, for a restore. */
-export function resumeExitedNonZero(exitCode: number): ResumeExitedNonZeroEvent {
-  return Object.freeze({ kind: 'ResumeExitedNonZero', exitCode: assertNonZeroExit(exitCode) });
+/**
+ * As `launchExitedNonZero`, for a restore -- and it accepts a zero, which is
+ * the one asymmetry between the pair.
+ *
+ * Measured 2026-08-25: over 34 live runs of the resume-refusal scenario under
+ * the EDITOR engine, `vscode.Terminal.exitStatus.code` came back 0 once for a
+ * `claude` that exits 1, while the same process under our own engine -- which
+ * reads the code off the child itself -- reported 1 on all 40 runs. So the code
+ * on this path is a number another program hands us, and a rule that turns on
+ * it turns on something we do not own. The state does not need it: what makes
+ * this a failed restore is that the process ended while the record was still
+ * `launching`, and the caller establishes that before calling.
+ */
+export function resumeExited(exitCode: number): ResumeExitedEvent {
+  if (!Number.isInteger(exitCode)) {
+    throw new ValidationError('an exit event needs an integer exit code', {
+      details: { exitCode },
+    });
+  }
+  return Object.freeze({ kind: 'ResumeExited', exitCode });
 }
 
 /** An event named "exited non-zero" that carries a zero is a lie, so it is refused at the door. */

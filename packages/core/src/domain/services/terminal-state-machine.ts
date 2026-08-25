@@ -250,8 +250,10 @@ export class TerminalStateMachine {
       // The one place where the target depends on the from-state: a restore that
       // never reached `ConversationStarted` leaves a record worth offering to
       // start over (`resume_failed`); one that got going and died later is just
-      // over.
-      case 'ResumeExitedNonZero':
+      // over. The event carries an exit code and this rule does not read it --
+      // the from-state is the whole question, and `TerminalLifecycleService`
+      // says why the code is not fit to be part of it.
+      case 'ResumeExited':
         return current === 'launching'
           ? death(current, 'resume_failed', 'resume_failed')
           : death(current, 'ended', 'ended');

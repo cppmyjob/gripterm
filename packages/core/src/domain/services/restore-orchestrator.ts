@@ -21,7 +21,7 @@ import type { TerminalRepository } from '../repositories/terminal-repository';
  *
  * It is NOT the timeout for a restore that FAILS. `claude --resume` on a
  * conversation that is not there prints its refusal and exits with code 1 in
- * milliseconds [measured], and that arrives as `ResumeExitedNonZero` rather than
+ * milliseconds [measured], and that arrives as `ResumeExited` rather than
  * as silence. This number covers a start that hangs, which is a different animal
  * and gets a different state: `degraded` says "running, phase unknown", and a
  * late event takes it back.

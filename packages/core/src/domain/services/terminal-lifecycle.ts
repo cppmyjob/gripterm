@@ -5,7 +5,7 @@ import { ObservedState } from '../entities/observed-state';
 import { SessionId } from '../entities/session-id';
 import { TerminalEntry } from '../entities/terminal-entry';
 import { TerminalId } from '../entities/terminal-id';
-import { launchExitedNonZero, resumeExitedNonZero, terminalClosed } from '../events/terminal-event';
+import { launchExitedNonZero, resumeExited, terminalClosed } from '../events/terminal-event';
 import { observedAtStart } from './observed-projection';
 import type { AgentCommandFactory } from '../ports/agent-command-factory';
 import type { Clock } from '../ports/clock';
@@ -696,9 +696,14 @@ export class TerminalLifecycleService implements Disposable {
 
     this._noteDeliberateClose(terminalId, exit);
     const event = deathEvent(this._options.registry.stateOf(terminalId), intent, exit);
+    // `reason` travels with the code because the code alone could not settle the
+    // one failure this line was read for: on 2026-08-25 a run that reported
+    // `exitCode: 0` for a process that exits 1 left nothing to say WHO ended the
+    // terminal, and the editor's own word on that is the only other witness.
     this._options.logger.info('a terminal closed', {
       terminalId: terminalId.value,
       exitCode: exit.code ?? null,
+      reason: exit.reason,
       intent,
       event: event.kind,
     });
@@ -709,24 +714,48 @@ export class TerminalLifecycleService implements Disposable {
 /**
  * Which death this was.
  *
- * Three inputs and one rule: a process that exited non-zero while the record was
- * still `launching` never got going, and that is a failure worth interrupting
- * somebody for. Everything else -- a clean exit, a person closing the window, a
- * process that ran for an hour and then died -- is an ordinary end.
+ * Three inputs and one rule: a process that ENDED while the record was still
+ * `launching` never got going, and that is a failure worth interrupting somebody
+ * for. Everything else -- a person closing the window, a process that ran for an
+ * hour and then died -- is an ordinary end.
  *
  * The `launch` / `resume` split is not cosmetic. The two produce different
  * states (`ended` with signal `launch_failed` against `resume_failed`), they are
  * indistinguishable at the moment they happen, and the state machine has nothing
  * in the pair (state, event) to choose with. The distinguisher exists here and
  * only here, because it was known before the process started.
+ *
+ * It is also the split that decides whether the exit CODE is asked about at all,
+ * and the asymmetry is deliberate. A fresh launch that exits 0 before saying
+ * anything is a person opening a terminal and typing `/exit`: nothing of theirs
+ * was lost, so it is an ordinary end. A RESTORE that does the same did not bring
+ * back the conversation the person asked for, whatever number came out of it --
+ * and the number is the one input here we do not own. Measured 2026-08-25 over
+ * 34 live runs of the resume-refusal scenario: the editor reported
+ * `exitStatus.code` as 0 once for a `claude` that exits 1, against 40 runs under
+ * our own engine that reported 1 every time. Read strictly, that one number cost
+ * the person the offer to start their conversation over (M2.13).
+ *
+ * THE PRICE, said out loud: on a machine with no `SessionStart` forwarder (H1,
+ * no `node` on PATH) a restored conversation reports nothing, so it sits in
+ * `launching` and a person who leaves it inside the first twenty seconds is told
+ * the restore failed when it did not. Bounded by exactly that clock:
+ * `ResumeTimedOut` moves the record to `degraded` at 20 s
+ * (`RestoreOrchestrator`), and from there this rule no longer applies. The cost
+ * of being wrong that way is one row and one toast about a record that is still
+ * whole; the cost of the other way is a conversation the person is never offered
+ * back.
  */
 function deathEvent(
   state: PersistedTerminalState | null,
   intent: LaunchIntent,
   exit: TerminalExit
 ): TerminalEvent {
-  if (state !== 'launching' || exit.code === undefined || exit.code === 0) {
+  if (state !== 'launching' || exit.code === undefined) {
     return terminalClosed();
   }
-  return intent === 'launch' ? launchExitedNonZero(exit.code) : resumeExitedNonZero(exit.code);
+  if (intent === 'resume') {
+    return resumeExited(exit.code);
+  }
+  return exit.code === 0 ? terminalClosed() : launchExitedNonZero(exit.code);
 }

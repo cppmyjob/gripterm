@@ -312,7 +312,7 @@ describe('the history is shown as what it is, holes included', () => {
       { kind: 'ProcessGone', pid: 4242 },
       { kind: 'TerminalClosed' },
       { kind: 'LaunchExitedNonZero', exitCode: 1 },
-      { kind: 'ResumeExitedNonZero', exitCode: 2 },
+      { kind: 'ResumeExited', exitCode: 2 },
     ];
 
     // The list claims to be every kind, so the compiler is asked to agree. It

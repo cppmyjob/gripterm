@@ -4,7 +4,7 @@ import {
   isAgentEvent,
   launchExitedNonZero,
   processGone,
-  resumeExitedNonZero,
+  resumeExited,
   resumeTimedOut,
   terminalClosed,
   type TerminalEvent,
@@ -21,7 +21,7 @@ describe('the synthetic half of the union', () => {
       processGone(21344),
       terminalClosed(),
       launchExitedNonZero(1),
-      resumeExitedNonZero(1),
+      resumeExited(1),
     ];
 
     expect(events.map((event) => event.kind)).toStrictEqual([
@@ -29,7 +29,7 @@ describe('the synthetic half of the union', () => {
       'ProcessGone',
       'TerminalClosed',
       'LaunchExitedNonZero',
-      'ResumeExitedNonZero',
+      'ResumeExited',
     ]);
     expect(events.every((event) => Object.isFrozen(event))).toBe(true);
   });
@@ -39,18 +39,32 @@ describe('the synthetic half of the union', () => {
     // launch_failed signal against `resume_failed`. One event name would map to
     // two mutually exclusive outcomes with nothing in (state, event) to choose
     // between them, so the producer names the event from its LaunchIntent.
-    expect(launchExitedNonZero(1).kind).not.toBe(resumeExitedNonZero(1).kind);
+    expect(launchExitedNonZero(1).kind).not.toBe(resumeExited(1).kind);
     expect(launchExitedNonZero(127).exitCode).toBe(127);
-    expect(resumeExitedNonZero(1).exitCode).toBe(1);
+    expect(resumeExited(1).exitCode).toBe(1);
   });
 
   it.each([
-    ['zero, which means the person closed the terminal', 0],
     ['fractional', 1.5],
     ['not a number', Number.NaN],
   ])('refuses an exit code that is %s', (_label, exitCode) => {
     expect(() => launchExitedNonZero(exitCode)).toThrow(ValidationError);
-    expect(() => resumeExitedNonZero(exitCode)).toThrow(ValidationError);
+    expect(() => resumeExited(exitCode)).toThrow(ValidationError);
+  });
+
+  it('refuses a zero for a launch and accepts one for a resume', () => {
+    // This pair used to be symmetric, and the asymmetry is the point of the
+    // change that broke the symmetry (2026-08-25). A launch that exits 0 is a
+    // person typing `/exit` into a terminal they had just opened, so an event
+    // named "the launch failed" carrying a zero would be a lie. A RESTORE that
+    // exits 0 before its conversation ever announced itself did not bring that
+    // conversation back, and the code is not what says so -- the record still
+    // being `launching` is, which `TerminalLifecycleService` establishes before
+    // it builds the event. It has to accept a zero because it is handed one:
+    // measured over 34 live runs, the editor reported `exitStatus.code` as 0
+    // once for a `claude` that exits 1.
+    expect(() => launchExitedNonZero(0)).toThrow(ValidationError);
+    expect(resumeExited(0).exitCode).toBe(0);
   });
 
   it('accepts a missing pid on ProcessGone, and refuses an impossible one', () => {

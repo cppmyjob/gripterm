@@ -10,7 +10,7 @@
  * startup, silently and always.
  *
  * The same distinction names the death event: closing in `launching` yields
- * `LaunchExitedNonZero` under `launch` and `ResumeExitedNonZero` under `resume`
+ * `LaunchExitedNonZero` under `launch` and `ResumeExited` under `resume`
  * (M1.12, M2.11), which is why this type lives in the neutral domain rather
  * than beside one agent's flags.
  *

@@ -4,7 +4,7 @@ import {
   ValidationError,
   launchExitedNonZero,
   processGone,
-  resumeExitedNonZero,
+  resumeExited,
   resumeTimedOut,
   terminalClosed,
   wentQuiet,
@@ -68,7 +68,7 @@ const EVENT_CASES = {
   ProcessGone: processGone(4242),
   TerminalClosed: terminalClosed(),
   LaunchExitedNonZero: launchExitedNonZero(1),
-  ResumeExitedNonZero: resumeExitedNonZero(1),
+  ResumeExited: resumeExited(1),
 } as const satisfies Record<string, TerminalEvent>;
 
 type ColumnName = keyof typeof EVENT_CASES;
@@ -97,7 +97,7 @@ const EVENT_KINDS: Record<TerminalEvent['kind'], true> = {
   ProcessGone: true,
   TerminalClosed: true,
   LaunchExitedNonZero: true,
-  ResumeExitedNonZero: true,
+  ResumeExited: true,
 };
 
 /**
@@ -163,7 +163,7 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     ProcessGone: 'orphaned',
     TerminalClosed: 'ended',
     LaunchExitedNonZero: 'ended',
-    ResumeExitedNonZero: 'resume_failed',
+    ResumeExited: 'resume_failed',
   },
   idle: {
     ConversationStarted: 'idle',
@@ -187,7 +187,7 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     ProcessGone: 'orphaned',
     TerminalClosed: 'ended',
     LaunchExitedNonZero: 'ended',
-    ResumeExitedNonZero: 'ended',
+    ResumeExited: 'ended',
   },
   working: {
     ConversationStarted: 'idle',
@@ -211,7 +211,7 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     ProcessGone: 'orphaned',
     TerminalClosed: 'ended',
     LaunchExitedNonZero: 'ended',
-    ResumeExitedNonZero: 'ended',
+    ResumeExited: 'ended',
   },
   // The row round 10 was missing. Every tool event leaves; `TurnFinished` is not the
   // only exit, and M1.11a's `waiting_permission -> working -> waiting_permission`
@@ -238,7 +238,7 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     ProcessGone: 'orphaned',
     TerminalClosed: 'ended',
     LaunchExitedNonZero: 'ended',
-    ResumeExitedNonZero: 'ended',
+    ResumeExited: 'ended',
   },
   waiting_input: {
     ConversationStarted: 'idle',
@@ -262,7 +262,7 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     ProcessGone: 'orphaned',
     TerminalClosed: 'ended',
     LaunchExitedNonZero: 'ended',
-    ResumeExitedNonZero: 'ended',
+    ResumeExited: 'ended',
   },
   turn_failed: {
     ConversationStarted: 'idle',
@@ -286,7 +286,7 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     ProcessGone: 'orphaned',
     TerminalClosed: 'ended',
     LaunchExitedNonZero: 'ended',
-    ResumeExitedNonZero: 'ended',
+    ResumeExited: 'ended',
   },
   // A witnessed end. The single live cell is `ConversationStarted`, which is how a
   // terminal gets back out of the `ConversationEnded(clear)` that `/clear` sends
@@ -313,7 +313,7 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     ProcessGone: NOT_APPLIED,
     TerminalClosed: NOT_APPLIED,
     LaunchExitedNonZero: NOT_APPLIED,
-    ResumeExitedNonZero: NOT_APPLIED,
+    ResumeExited: NOT_APPLIED,
   },
   // An inference, not a witness: reconciliation failed to find a process. Any
   // hook disproves it, and the two hooks that carry no phase leave us knowing
@@ -340,7 +340,7 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     ProcessGone: 'orphaned',
     TerminalClosed: 'ended',
     LaunchExitedNonZero: 'ended',
-    ResumeExitedNonZero: 'ended',
+    ResumeExited: 'ended',
   },
   degraded: {
     ConversationStarted: 'idle',
@@ -364,7 +364,7 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     ProcessGone: 'orphaned',
     TerminalClosed: 'ended',
     LaunchExitedNonZero: 'ended',
-    ResumeExitedNonZero: 'ended',
+    ResumeExited: 'ended',
   },
   resume_failed: {
     ConversationStarted: 'idle',
@@ -388,7 +388,7 @@ const TABLE: Record<PersistedTerminalState, Row> = {
     ProcessGone: NOT_APPLIED,
     TerminalClosed: NOT_APPLIED,
     LaunchExitedNonZero: NOT_APPLIED,
-    ResumeExitedNonZero: NOT_APPLIED,
+    ResumeExited: NOT_APPLIED,
   },
 };
 
@@ -674,7 +674,7 @@ describe('the edges that were wrong before', () => {
 
   it('keeps a failed launch and a failed restore apart from the same state', () => {
     const launch = machine.apply('launching', EVENT_CASES.LaunchExitedNonZero);
-    const resume = machine.apply('launching', EVENT_CASES.ResumeExitedNonZero);
+    const resume = machine.apply('launching', EVENT_CASES.ResumeExited);
 
     expect(cellOf(launch)).toBe('ended');
     expect(cellOf(resume)).toBe('resume_failed');
