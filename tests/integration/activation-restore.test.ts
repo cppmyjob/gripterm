@@ -1,5 +1,5 @@
 import * as assert from 'node:assert/strict';
-import { readFile, rm } from 'node:fs/promises';
+import { readFile, readdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
@@ -55,6 +55,13 @@ const SEEDER = 'tools/seed-restorable-record.mjs';
 const TRACE_APPEARS_WITHIN_MS = 10_000;
 /** The terminal is destroyed, not waited out: this is tidying, not a measurement. */
 const TERMINAL_GOES_WITHIN_MS = 15_000;
+/**
+ * Long enough for the writer to finish the write it was making and then the
+ * deletion behind it -- measured at about 20 ms on an idle machine. Ten seconds
+ * is not a guess at the cost, it is a bound on how long a WEDGED store is
+ * allowed to look like a slow one before this says so.
+ */
+const STORE_CATCHES_UP_WITHIN_MS = 10_000;
 const POLL_MS = 100;
 
 /**
@@ -98,6 +105,50 @@ async function until(what: () => boolean, deadlineMs: number): Promise<boolean> 
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
   }
   return what();
+}
+
+/**
+ * Waits for the deletion this hook asked for to reach the disk, and answers with
+ * whatever the store still had not taken away.
+ *
+ * **Why waiting is not optional.** `lifecycle.discard` is SYNCHRONOUS and does
+ * not write anything: it forgets the record, and `BaseWriter` -- one write in
+ * flight, one queued state per record -- carries the removal to the disk after
+ * whatever it was already writing. Between the two, `record.json` and
+ * `observed.json` are still in the directory and the writer is still working
+ * inside it.
+ *
+ * **What deleting the directory in that window did.** `fs.rm` recursive lists a
+ * directory, unlinks what the listing named, and then `rmdir`s it -- so a write
+ * that lands between the listing and the `rmdir` makes the `rmdir` fail with
+ * `ENOTEMPTY`, and this hook's failure fails all four tests below. That is the
+ * `ENOTEMPTY ... rmdir 'terminals/<uuid>'` open since 2026-08-21 and red in the
+ * gate of 2026-08-25.
+ *
+ * Measured rather than reasoned, 1500 collisions per arm: a write landing while
+ * the directory goes -- which is what `BaseWriter` is doing here -- produced 365
+ * of them, and what it left behind was `observed.json`, the file the store
+ * writes LAST. The removal's own two renames produced 0, in EITHER order, so the
+ * order `e886dee` swapped is not what this was.
+ *
+ * **Why the wait is enough.** Once both files have gone, the registry has
+ * forgotten the record, so nothing can queue another write for it; what stays --
+ * `settings.json`, `starts.jsonl` and the journal -- `remove` leaves on purpose
+ * and nothing appends to once the conversation is over.
+ *
+ * @returns the names still there, empty when the store has caught up
+ */
+async function storeCaughtUp(directory: string): Promise<readonly string[]> {
+  const deadline = Date.now() + STORE_CATCHES_UP_WITHIN_MS;
+  for (;;) {
+    const left = (await readdir(directory).catch(() => [])).filter(
+      (name) => name === 'record.json' || name === 'observed.json'
+    );
+    if (left.length === 0 || Date.now() >= deadline) {
+      return left;
+    }
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+  }
 }
 
 function captured(): AtActivation {
@@ -155,6 +206,14 @@ suiteSetup(async function () {
         TERMINAL_GOES_WITHIN_MS
       );
       lifecycle.discard(held.terminalId);
+      // And then WAIT for it, which is the whole of the fix for a run that went
+      // red four times on one machine. See `storeCaughtUp`.
+      const left = await storeCaughtUp(directory);
+      assert.deepEqual(
+        left,
+        [],
+        `the store had not caught up with the deletion when the directory was taken away: [${left.join(' ')}]`
+      );
     }
     // The store goes back to what it was, so that the run after this one meets
     // the seed and nothing else. Reversible by construction: everything here was
