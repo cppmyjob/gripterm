@@ -31,20 +31,30 @@ const CURSOR_PROJECT = join(here, '.vscode-test', 'cursor-project');
  * The labels that run in Cursor -- none, when there is no Cursor here.
  *
  * **What this label is and is not.** It is NOT the live suites in Cursor, and
- * that is not a choice. Measured 2026-08-25 over three launches and two
- * launchers, polling for thirty seconds each: Cursor's extension test host --
- * any window carrying `--extensionTestsPath` -- registers no third-party
- * extension at all, developed or installed, while the same arguments against VS
- * Code 1.134.0 register ours at once. Every suite under `tests/integration`
- * opens by asserting the extension is there, so in Cursor every one of them
- * fails in its first hook. What runs here instead is the fork's WORKBENCH,
- * which needs no extension of ours and is where all four of the customer's
- * defects live.
+ * until 2026-08-25 that was recorded here as "not a choice". It is a choice.
+ * The three launches this comment used to cite measured Cursor's extension test
+ * host registering no third-party extension at all; 33 launches the same day,
+ * driving `Cursor.exe` directly, put that where it belongs: a GLASS window
+ * refuses them (48 entries in `vscode.extensions.all`, ours absent, 5 launches
+ * of 5), and the same host outside glass registers ours -- 113 entries, 12
+ * launches of 12 under `--classic`, 6 of 6 with no flag but a folder to open, 3
+ * of 3 under `--glass --classic`. In a glass window the rest still follows:
+ * every suite under `tests/integration` opens by asserting the extension is
+ * there, so every one of them fails in its first hook. What runs here instead is
+ * the fork's WORKBENCH, which needs no extension of ours and is where all four
+ * of the customer's defects live -- and what it costs to run the live suites
+ * here as well, plus the question of which window this stage ought to open, is
+ * in the `cursor-live` entry of `tools/gate.mjs`.
  *
- * **Its exit code is not read by anything.** Measured the same day: this host
- * exits 0 on a failing run. The stage's answer is the file at `CURSOR_OUT`,
- * judged by `tools/gate.mjs` against `gate/allowed-red.json`, and a run that
- * died before writing it is red for that reason. The gate DELETES that file
+ * **Its exit code is not read by anything.** Measured the same day: this host's
+ * exit code FLICKERS -- 5 launches of 12 under `--classic` exited 1, 0 of 6
+ * with no flag, and four identical consecutive launches gave 1, 0, 0, 1. That
+ * is a stronger reason than the stable 0 recorded here before, not a weaker
+ * one: a host that is always 0 can be worked around by a rule, and one that
+ * answers differently to the same command cannot be caught at all. The stage's
+ * answer is the file at `CURSOR_OUT`, judged by `tools/gate.mjs` against
+ * `gate/allowed-red.json`, and a run that died before writing it is red for
+ * that reason. The gate DELETES that file
  * before it runs the stage -- here would be the wrong place, since this module
  * is loaded by every label including the two that run in VS Code, and clearing
  * a Cursor verdict on the way into a VS Code run is how a verdict goes missing
@@ -56,12 +66,33 @@ function inCursor() {
   if (!existsSync(CURSOR)) {
     return [];
   }
-  // A folder, and it is load-bearing. Measured 2026-08-25 on Cursor 3.17.19:
-  // in a window with NO folder open, `workbench.action.newGroupBelow` threw
-  // `Invalid editor group provided!` on 10 attempts out of 10, and with a
-  // folder open it made a group on 10 out of 10 -- in the same host, the same
-  // build, the same minute. A probe without a folder would measure a shell no
-  // customer sits in and report a defect that is not there.
+  // A folder, and it is load-bearing TWICE -- once for the reason it was added
+  // and once for a reason nobody wrote down until 2026-08-25.
+  //
+  // The reason it was added, measured that day on Cursor 3.17.19: in a window
+  // with no folder open, `workbench.action.newGroupBelow` threw `Invalid editor
+  // group provided!` on 10 attempts out of 10, and with a folder open it made a
+  // group on 10 out of 10 -- same host, same build, same minute. A probe
+  // without a folder would measure a shell no customer sits in.
+  //
+  // The condition that comment NAMED was wrong, and 33 launches the same day
+  // say so: the variable is not the folder, it is GLASS. A glass window throws
+  // 10 of 10 (5 launches of 5); a window that is not glass throws 0 of 10 --
+  // including `--classic` with NO folder, measured twice. The folder switched
+  // glass off as a side effect: a path to open on the command line makes the
+  // fork's `hasExplicitFirstWindowIntent` true, no decision about the first
+  // window is taken, and on a fresh profile that decision is the only thing
+  // that turns glass on.
+  //
+  // So the layout of this window is decided today by an argument that is here
+  // for something else, and that is FRAGILE: drop the folder, or let the fork
+  // change how it reads the command line, and this stage measures a different
+  // window without a word. `--classic` would say the same thing on purpose --
+  // it beats even an explicit `--glass`, 3 launches of 3. It is deliberately
+  // NOT added here: what the `cursor` stage should measure -- a glass window, a
+  // classic one, or both -- decides what this gate covers, and that question is
+  // the owner's and was open on 2026-08-25. This comment is the proposal; the
+  // arguments are unchanged.
   if (!existsSync(CURSOR_PROJECT)) {
     mkdirSync(CURSOR_PROJECT, { recursive: true });
     writeFileSync(

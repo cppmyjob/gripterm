@@ -30,13 +30,17 @@ import { fileURLToPath } from 'node:url';
  * another 4 min 30 s onto a gate already at 7 to 9 minutes against a ten-minute
  * ceiling, which would have forced a `gate:full` nobody would run, or Cursor
  * INSTEAD of VS Code, which would have traded one editor's coverage for the
- * other's. Neither trade had to be made, because the expensive option turned out
- * not to exist: measured 2026-08-25, Cursor's extension test host registers no
- * third-party extension at all, so the live suites cannot run there however long
- * anybody is willing to wait (see the `cursor-live` entry below). What CAN run
- * in Cursor is the fork's workbench, and that costs 17 seconds. A level invented
- * for a cost that is not there would be a level whose only effect is to give
- * people a shorter gate to run instead of this one.
+ * other's. This paragraph used to say that neither trade had to be made because
+ * the expensive option turned out not to exist -- Cursor's test host registering
+ * no third-party extension at all -- and that is REFUTED. Measured 2026-08-25
+ * over 33 launches: it is the fork's GLASS window that registers none (48
+ * entries, ours absent, 5 launches of 5), and the same host outside glass
+ * registers ours in 12 launches of 12 under `--classic`, at 113 entries. The
+ * expensive option exists and costs what it always did. So the third level is
+ * held off by its PRICE and by nothing else, which is a weaker reason than the
+ * one that stood here, and it is left weaker on purpose (see the `cursor-live`
+ * entry below). What runs in Cursor for 17 seconds instead is the fork's
+ * workbench.
  *
  * The split is not about taste. `pre-push` runs the fast level, and the rule for
  * what belongs in a hook is: a stage whose failure means "this must not leave
@@ -68,10 +72,16 @@ const VERDICT = join(REPO, '.vscode-test', 'stand-output', 'verdict.json');
  * What the Cursor strip leaves behind, and the ONLY thing that stage's colour
  * may be read from.
  *
- * Not its exit code, and that is measured rather than assumed: on 2026-08-25 a
- * Cursor test host running a deliberately failing mocha file printed `1 failing`
- * and exited 0, where VS Code 1.134.0 exited 1 on the same file. A stage whose
- * exit code is always 0 is worse than no stage -- it manufactures green.
+ * Not its exit code, and that is measured rather than assumed. The first
+ * measurement, 2026-08-25, was a Cursor test host that printed `1 failing` and
+ * exited 0 where VS Code 1.134.0 exited 1 on the same file. Thirty-three
+ * launches later the same day, that turned out to be the mild reading of the
+ * defect: the exit code FLICKERS. 5 launches out of 12 under `--classic` exited
+ * 1, 1 of 4 under `--glass`, 0 of 6 with no flag, and four identical
+ * consecutive launches gave 1, 0, 0, 1. A host that always exits 0 manufactures
+ * green and can at least be worked around by a rule; a host that answers
+ * differently to the same command can be neither trusted nor caught. So reading
+ * the FILE is not a workaround here -- it is the only reading there is.
  */
 const CURSOR_RATE = join(REPO, '.vscode-test', 'cursor-output', 'rate.json');
 
@@ -280,25 +290,38 @@ const MISSING = [
     name: 'cursor-live',
     why:
       'The LIVE SUITES in Cursor, and this entry names WHY they are not here rather than only that they ' +
-      'are not. MEASURED 2026-08-25, three launches, two launchers (@vscode/test-cli and a bare spawn), ' +
-      'polling thirty seconds each: Cursor`s extension TEST host -- any window carrying ' +
-      '`--extensionTestsPath` -- registers NO third-party extension at all. Not one loaded from ' +
-      '`--extensionDevelopmentPath`, not one installed into `--extensions-dir`. ' +
-      '`vscode.extensions.all` answers 48 entries, every one of them Cursor`s own; the same arguments ' +
-      'against VS Code 1.134.0 answer 100, ours among them, at once. Every suite under ' +
-      '`tests/integration` opens by asserting `getExtension("gripterm-placeholder.gripterm")` is there, ' +
-      'so in Cursor every one of them fails in its first hook. There is no configuration for this: it ' +
-      'is what that host does. SECOND, INDEPENDENT REASON: the same host exits 0 on a failing run ' +
-      '(measured on a deliberately failing file; VS Code exited 1 on it), so even a suite that could ' +
-      'run there could not be believed by an exit code. ' +
+      'are not. WHAT IT USED TO SAY WAS REFUTED: until 2026-08-25 this record read "There is no ' +
+      'configuration for this: it is what that host does", and that is withdrawn. It stood here through a ' +
+      'day of green gates after the measurement that broke it. ' +
+      'MEASURED 2026-08-25 over 33 launches of the two editors, driving `Cursor.exe` directly: the refusal ' +
+      'to register a third-party extension belongs to the fork`s GLASS window and NOT to its test host. A ' +
+      'glass window answers 48 entries in `vscode.extensions.all`, every one of them Cursor`s own, ours ' +
+      'absent -- 5 launches out of 5. The same host in a window that is not glass answers 113 with ours ' +
+      'among them: 12 launches out of 12 under `--classic`, 6 out of 6 with no flag but a folder to open, ' +
+      '3 out of 3 under `--glass --classic`. So there IS a configuration for it. It is `--classic`, a ' +
+      'documented flag of the fork`s own binary ("Disable glass mode and force classic windows"), and it ' +
+      'beats an explicitly requested `--glass`. What is true of a glass window and was written here as ' +
+      'true of the host: every suite under `tests/integration` opens by asserting ' +
+      '`getExtension("gripterm-placeholder.gripterm")` is there, so in a GLASS window every one of them ' +
+      'fails in its first hook. ' +
+      'WHAT THAT LEAVES: the live suites in Cursor are UNRUN, not impossible. Between them and this gate ' +
+      'stand a cost and a question, neither of them the fork`s doing -- 4 min 30 s onto a full gate ' +
+      'measured at 7.7 to 9.3 against a ceiling of ten, and what the `cursor` stage should measure once ' +
+      'its window can be chosen on purpose. The second is the owner`s to answer and was open on ' +
+      '2026-08-25. ' +
+      'SECOND, INDEPENDENT REASON, and this one got WORSE rather than better: the exit code of a Cursor ' +
+      'test host FLICKERS. Measured the same day on one build with one probe: 5 launches out of 12 under ' +
+      '`--classic` exited 1, 1 of 4 under `--glass`, 0 of 6 with no flag, and four identical consecutive ' +
+      'launches gave 1, 0, 0, 1. VS Code 1.134.0 exited 1 in 5 out of 5. A flicker is worse than a stable ' +
+      'falsehood: a host that always exits 0 can be worked around by a rule, and one that answers ' +
+      'differently to the same command can be neither trusted nor caught. ' +
       'WHAT IS HERE INSTEAD, and it is not nothing: the `cursor` stage runs the fork`s WORKBENCH in ' +
       'Cursor -- the part that needs no extension of ours, and the part all four of the customer`s ' +
       'defects live in -- and the `stand` stage runs the PRODUCT in Cursor through a DEV host, where ' +
       'the extension does load. Between them, what is uncovered is narrower than "Cursor": it is the ' +
-      'product`s behaviour under a Cursor test host, which no Cursor test host can show anybody. ' +
-      'What would close it: the fork loading development extensions in that host, or a driver of our ' +
-      'own in a dev host with an observer extension, as `tests/stand/run.mjs` does -- at the price of ' +
-      'reimplementing mocha`s reporting and the window discipline the stand already carries.',
+      'product`s behaviour under a Cursor test host, which nothing here has yet shown anybody. ' +
+      'What would close it: paying those minutes with the stage`s window chosen by name -- not, as this ' +
+      'entry used to say, a change in the fork.',
   },
   {
     name: 'eyes',
@@ -453,9 +476,10 @@ function standAgainstTheBudgetOrThrow(ran) {
  * What the Cursor strip measured, against the ceilings in the budget.
  *
  * The whole of this stage's colour, because there is nothing else to read: the
- * host it ran in exits 0 whatever happened inside it. A file that is not there
- * is therefore RED and is never silence -- a probe that died before writing is
- * the one outcome an exit code of 0 and a clean pass look identical from.
+ * exit code of the host it ran in is a coin (measured 2026-08-25, four identical
+ * consecutive launches: 1, 0, 0, 1). A file that is not there is therefore RED
+ * and is never silence -- a probe that died before writing is the one outcome a
+ * clean pass is indistinguishable from once the exit code says nothing.
  */
 function cursorAgainstTheBudget(ran) {
   try {
@@ -476,7 +500,8 @@ function cursorAgainstTheBudgetOrThrow(ran) {
       because:
         `the Cursor strip left no numbers at ${CURSOR_RATE}, so there is nothing to hold the budget against. ` +
         'It died before it measured, and its own output above says where -- its exit code cannot tell you, ' +
-        'because that host exits 0 either way.',
+        'because that host answers 1 or 0 to the same command (measured 2026-08-25: 1, 0, 0, 1 over four ' +
+        'identical launches).',
     };
   }
 

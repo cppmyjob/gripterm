@@ -587,9 +587,12 @@ export function standingAllowances(document: AllowanceDocument, today: string): 
  *
  * An empty list is the only thing the gate may call green about that stage --
  * and unlike every other stage, the exit code is not even a second opinion.
- * Measured 2026-08-25: a Cursor test host that ran a failing suite exited 0,
- * where VS Code 1.134.0 exited 1 on the same file. So the number a probe WROTE
- * DOWN is the whole of the evidence, and this is what reads it.
+ * Measured 2026-08-25 and then measured again: the first reading was a Cursor
+ * test host that ran a failing suite and exited 0 where VS Code 1.134.0 exited 1
+ * on the same file; over 33 launches that day the exit code turned out to
+ * FLICKER, 1, 0, 0, 1 across four identical consecutive runs. Either way the
+ * number a probe WROTE DOWN is the whole of the evidence, and this is what reads
+ * it -- a flickering code is not a second opinion, it is a coin.
  *
  * **Both directions, and the second is the one that rots quietly.** A check
  * nothing admits is refused, because a probe measuring something the budget

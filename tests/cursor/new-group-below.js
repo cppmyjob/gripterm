@@ -8,17 +8,23 @@ const vscode = require('vscode');
 /**
  * The Cursor strip: what the FORK'S WORKBENCH does, measured in the fork.
  *
- * **Why this is not an integration suite, and cannot be.** Measured 2026-08-25,
- * three launches, two launchers, thirty-second polls: Cursor's extension TEST
- * host -- any window carrying `--extensionTestsPath` -- registers no
- * third-party extension at all. Not one loaded from
- * `--extensionDevelopmentPath` and not one installed into `--extensions-dir`;
- * `vscode.extensions.all` comes back with 48 entries, every one of them
- * Cursor's own, while the same arguments against VS Code 1.134.0 come back with
- * 100 including ours. So `vscode.extensions.getExtension('gripterm-placeholder.gripterm')`
- * is `undefined` here and every suite under `tests/integration` begins by
- * asserting it is not. Those suites run in a downloaded VS Code, and in Cursor
- * they cannot run at all.
+ * **Why this is not an integration suite.** This heading ended "and cannot be"
+ * until 2026-08-25, on the strength of three launches: Cursor's extension TEST
+ * host -- any window carrying `--extensionTestsPath` -- registering no
+ * third-party extension at all, 48 entries in `vscode.extensions.all` and ours
+ * absent. As a statement about the TEST HOST, that is REFUTED. Measured the same
+ * day over 33 launches driving `Cursor.exe` directly: the refusal belongs to the
+ * fork's GLASS window and to nothing else. A glass window answers 48 with ours
+ * absent, 5 launches out of 5. The same host outside glass answers 113 with ours
+ * among them -- 12 launches of 12 under `--classic`, 6 of 6 with no flag but a
+ * folder to open, 3 of 3 under `--glass --classic`. So the live suites in Cursor
+ * are UNRUN rather than impossible; what keeps them out is a price (4 min 30 s
+ * onto a gate near its ceiling) and an unanswered question about which window
+ * this stage should open, both recorded in the `cursor-live` entry of
+ * `tools/gate.mjs`. In a glass window the old sentence still holds:
+ * `vscode.extensions.getExtension('gripterm-placeholder.gripterm')` is
+ * `undefined` there, and every suite under `tests/integration` begins by
+ * asserting it is not.
  *
  * **What is left, and why it is worth a stage anyway.** All four of the
  * customer's defects are layout, and every one of them is the fork's workbench
@@ -29,16 +35,28 @@ const vscode = require('vscode');
  *
  * **What this stage therefore does NOT cover, said here as well as in the
  * gate's own list:** the product, in Cursor, under a test host. Nothing here
- * loads Gripterm. What covers the product in Cursor is `pnpm run test:stand`,
- * which uses a DEV host -- no `--extensionTestsPath` -- where the extension
- * does load, measured the same day.
+ * EXERCISES Gripterm -- and since 2026-08-25 that is no longer the same sentence
+ * as "nothing here loads it". Measured from the gate's own logs that day, the
+ * window this label opens is not a glass one (its log directory is `window1`,
+ * not `window1_wb0`, and holds no `"layout":"glass"` line), and a window that is
+ * not glass registers our extension. Whether THIS window has it in
+ * `extensions.all` has never been asked, because nothing here asks. What covers
+ * the product in Cursor is `pnpm run test:stand`, which uses a DEV host -- no
+ * `--extensionTestsPath` -- where the extension does load, measured the same day.
  *
- * **The exit code of this run means nothing.** Measured 2026-08-25: a Cursor
- * test host running a deliberately failing mocha file printed `1 failing` and
- * exited 0, where VS Code exited 1 on the same file. So this writes its numbers
- * to `GRIPTERM_CURSOR_OUT` and `tools/gate.mjs` judges the FILE. The assertion
- * at the end of each check is for a person running it by hand; it is not what
- * the gate reads.
+ * **The exit code of this run means nothing, and the reason got stronger.** It
+ * was written down on 2026-08-25 as a stable rule: a Cursor test host running a
+ * deliberately failing mocha file printed `1 failing` and exited 0, where VS
+ * Code exited 1 on the same file. Over 33 launches the same day it turned out to
+ * FLICKER: 5 launches of 12 under `--classic` exited 1, 1 of 4 under `--glass`,
+ * 0 of 6 with no flag, and four identical consecutive launches gave 1, 0, 0, 1.
+ * A host that always exits 0 can be worked around by a rule -- never believe its
+ * exit code -- while a flicker cannot even be caught, because a run that exits 1
+ * for a reason of its own is indistinguishable from a run that failed. So this
+ * writes its numbers to `GRIPTERM_CURSOR_OUT` and `tools/gate.mjs` judges the
+ * FILE: the same conclusion as before, now standing on the stronger reason. The
+ * assertion at the end of each check is for a person running it by hand; it is
+ * not what the gate reads.
  */
 
 /** Where the numbers go, for a machine to do arithmetic on. */
@@ -148,9 +166,11 @@ suite('the fork`s workbench', () => {
           apiVersion: vscode.version,
           recordedAt: new Date().toISOString(),
           notMeasured: [
-            'the product: Cursor`s extension test host registers no third-party extension at all, ' +
-              'measured 2026-08-25 over three launches and two launchers. What covers the product in ' +
-              'Cursor is `pnpm run test:stand`, which uses a dev host.',
+            'the product: nothing in this file exercises Gripterm, and that is a choice rather than the ' +
+              'fork`s doing. Measured 2026-08-25 over 33 launches: only a GLASS window of Cursor refuses ' +
+              'third-party extensions (48 entries in `vscode.extensions.all` against 113 outside glass), ' +
+              'and the window this stage opens is not a glass one. What covers the product in Cursor is ' +
+              '`pnpm run test:stand`, which uses a dev host.',
           ],
           checks: measured,
         },
