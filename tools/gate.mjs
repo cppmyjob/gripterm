@@ -75,6 +75,9 @@ const VERDICT = join(REPO, '.vscode-test', 'stand-output', 'verdict.json');
  */
 const CURSOR_RATE = join(REPO, '.vscode-test', 'cursor-output', 'rate.json');
 
+/** Where the eyes leave what they saw, for the same reason the Cursor strip does. */
+const EYES_VERDICT = join(REPO, '.vscode-test', 'eyes-output', 'verdict.json');
+
 /**
  * The stages, in the order a person wants them to fail in: cheapest first, so
  * that a typo is a six-second answer and not a seven-minute one.
@@ -162,6 +165,110 @@ function inCursor() {
 }
 
 /**
+ * The eyes, which are a LEVEL of their own and not a stage of the full gate.
+ *
+ * **Why they are not in the full run, decided rather than drifted into.** The
+ * full gate is 7.7 to 9.3 minutes against a ceiling of ten, and one pass of the
+ * eyes is another two: putting them in would put the gate over the ceiling, and
+ * a gate nobody can afford to run is a gate nobody runs. The plan asked for
+ * "a mark of its own whose failure does not stop the other gates", and a level
+ * of its own is the strongest form of that -- not merely a stage that fails
+ * quietly, but one that cannot delay or redden anything else, ever.
+ *
+ * The price, said plainly: nothing runs the eyes unless a person asks. That is
+ * why they have an entry in `MISSING` as well, printed on every gate green or
+ * red, rather than being remembered by whoever wrote them.
+ *
+ * `pnpm run gate:eyes` is `--only eyes`, and the receipt it leaves says
+ * `only:eyes`, which `tools/gate-receipt.mjs` refuses as "checked".
+ *
+ * @returns {object[]} the eyes stage, or an empty list where there is no editor
+ */
+function theEyes() {
+  const cursor = join(process.env.LOCALAPPDATA ?? '', 'Programs', 'cursor', 'Cursor.exe');
+  const code = join(process.env.LOCALAPPDATA ?? '', 'Programs', 'Microsoft VS Code', 'Code.exe');
+  if (!existsSync(cursor) && !existsSync(code)) {
+    return [];
+  }
+  return [
+    {
+      name: 'eyes',
+      fast: false,
+      // Kept out of the full and fast levels, and reachable only by name.
+      onItsOwn: true,
+      what: 'pnpm run test:eyes  (one window, looked at over the DevTools protocol; measured 2 min)',
+      command: ['pnpm', 'run', 'test:eyes'],
+      before: () => { rmSync(dirname(EYES_VERDICT), { recursive: true, force: true }); },
+      judgedBy: eyesAgainstWhatTheySaw,
+    },
+  ];
+}
+
+/**
+ * What the eyes saw, which is the whole of this stage's colour.
+ *
+ * The exit code is not consulted, and for a reason this repository has already
+ * paid for once: a driver that died before it looked also exits non-zero, and
+ * "the button is missing" and "the window never came up" must never be the same
+ * answer. The verdict file separates them -- REFUSED is what a look nobody got
+ * comes to -- and a missing file is red on its own, because a run that died
+ * before writing one is the single outcome an exit code cannot describe.
+ */
+function eyesAgainstWhatTheySaw(ran) {
+  try {
+    return eyesAgainstWhatTheySawOrThrow(ran);
+  } catch (failed) {
+    return { ...ran, ok: false, because: `the eyes could not be judged: ${failed.message}` };
+  }
+}
+
+function eyesAgainstWhatTheySawOrThrow(ran) {
+  if (!existsSync(EYES_VERDICT)) {
+    return {
+      ...ran,
+      ok: false,
+      because:
+        `the eyes left no verdict at ${EYES_VERDICT}, so there is nothing to read. They died before they ` +
+        'looked, and their own output above says where.',
+    };
+  }
+
+  const verdict = JSON.parse(readFileSync(EYES_VERDICT, 'utf8'));
+  const build = verdict.build;
+
+  say('');
+  say(
+    `--- what the eyes saw, in ${build === null || build === undefined ? 'an editor whose build went unrecorded' : `${build.editor} ${build.version}`}` +
+    `${build === null || build === undefined ? '' : ` (commit ${String(build.commit).slice(0, 8)}, built ${String(build.built).slice(0, 10)})`}`
+  );
+  for (const finding of verdict.findings) {
+    say(`  ${String(finding.point)}. ${finding.answer.toUpperCase().padEnd(8)}${finding.scenario.padEnd(5)}${finding.says}`);
+  }
+  if (verdict.refused > 0) {
+    // Printed apart from the reds and never counted with them: a refusal is the
+    // eyes saying they did not get a look, and reading it as a clean bill of
+    // health is the one way this stage could report more than it knows (I.1).
+    say(
+      `  ${String(verdict.refused)} sighting(s) REFUSED -- the eyes did not get a look at those parts of the ` +
+      'window. That is not a green: nothing is known about them either way.'
+    );
+  }
+
+  return {
+    ...ran,
+    ok: verdict.red === 0,
+    because: verdict.red === 0 ? undefined : `${String(verdict.red)} sighting(s) red`,
+    eyes: {
+      build,
+      green: verdict.green,
+      red: verdict.red,
+      refused: verdict.refused,
+      findings: verdict.findings.map(({ point, scenario, answer }) => ({ point, scenario, answer })),
+    },
+  };
+}
+
+/**
  * What this gate does NOT cover, printed on every run, green or red.
  *
  * Adding one of these is moving its entry into `STAGES`, which is the line this
@@ -192,6 +299,26 @@ const MISSING = [
       'What would close it: the fork loading development extensions in that host, or a driver of our ' +
       'own in a dev host with an observer extension, as `tests/stand/run.mjs` does -- at the price of ' +
       'reimplementing mocha`s reporting and the window discipline the stand already carries.',
+  },
+  {
+    name: 'eyes',
+    why:
+      'THE EYES -- `pnpm run gate:eyes`, which is `--only eyes`. They open a real editor, attach to its ' +
+      'workbench over the DevTools protocol and ask the DOM what it is DRAWING: whether the maximise button ' +
+      'is there and has a box, and whether a terminal`s tab is coloured the way its own row is. They are a ' +
+      'LEVEL of their own and this gate never runs them, on purpose: the full gate is 7.7-9.3 minutes ' +
+      'against a ceiling of ten and one pass of the eyes is another two, so including them would put the ' +
+      'gate over the ceiling -- and the plan asked for a mark whose failure does not stop the other gates. ' +
+      'WHAT THAT COSTS: nothing runs them unless a person asks, so a button that stops being drawn between ' +
+      'two people asking goes unnoticed for as long as that. WHAT THEY FOUND, measured 2026-08-25 with ' +
+      'the terminal`s group 1006 px wide and a terminal in front: in Cursor 3.17.19 the ' +
+      '`editor/title` maximise button is NOT DRAWN, beside four controls of Cursor`s own in the same bar ' +
+      'that are; in VS Code 1.134.0 the same build draws it at 22x22. That is the defect the customer ' +
+      'reported three times, and it is the first number anybody has had for it. ALSO MEASURED, and it is ' +
+      'why two of their four sightings come back REFUSED rather than green: on a fresh profile Cursor lays ' +
+      'out no side bar at all -- `.part.sidebar` is `display: none`, and Cursor`s own ' +
+      '`Collapse Folders in Explorer` is as absent from it as ours -- so the list of terminals cannot be ' +
+      'looked at in that fork by these or any other eyes.',
   },
   {
     name: 'mutation',
@@ -433,7 +560,9 @@ function writeReceipt(receipt) {
  */
 function stagesHere() {
   const at = STAGES.findIndex((stage) => stage.name === 'live');
-  return [...STAGES.slice(0, at), ...inCursor(), ...STAGES.slice(at)];
+  // The eyes go last and are excluded from every level but their own; they are
+  // here at all so that `--only eyes` can find them by name.
+  return [...STAGES.slice(0, at), ...inCursor(), ...STAGES.slice(at), ...theEyes()];
 }
 
 /**
@@ -506,7 +635,10 @@ function main() {
     return;
   }
   const wanted = only === null
-    ? here.filter((stage) => !fast || stage.fast)
+    // `onItsOwn` marks a stage that is a LEVEL rather than part of one: it runs
+    // when it is asked for by name and never as part of the full gate. See
+    // `theEyes()` for why that is a decision and not an oversight.
+    ? here.filter((stage) => stage.onItsOwn !== true && (!fast || stage.fast))
     : here.filter((stage) => stage.name === only);
   const ran = [];
   for (const stage of wanted) {
@@ -551,7 +683,7 @@ function main() {
     at: new Date().toISOString(),
     revision: at,
     ok: failed.length === 0,
-    stages: ran.map(({ name, ok, ms, because, budget, rates }) => ({ name, ok, ms, because, budget, rates })),
+    stages: ran.map(({ name, ok, ms, because, budget, rates, eyes }) => ({ name, ok, ms, because, budget, rates, eyes })),
     notCovered: uncovered.map((one) => one.name),
   };
   writeReceipt(receipt);

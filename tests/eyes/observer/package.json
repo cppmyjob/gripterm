@@ -1,0 +1,16 @@
+{
+  "name": "gripterm-eyes-observer",
+  "displayName": "Gripterm: the scene builder of the eyes",
+  "description": "Loaded beside the product into a real development host by tests/eyes/run.mjs. Builds the scene the eyes are to look at and says what the API believes about it; looks at nothing itself. Not a product, never packaged.",
+  "private": true,
+  "version": "0.0.0",
+  "publisher": "gripterm-eyes",
+  "engines": {
+    "vscode": "^1.94.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {}
+}

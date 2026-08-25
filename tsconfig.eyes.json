@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.integration.json",
+  // The judging half of the eyes, compiled so that `tests/eyes/run.mjs` can
+  // require it after a run -- the same arrangement `tsconfig.stand.json` makes
+  // for the stand's judge, and for the same reason: the verdict is written by
+  // the run that produced it rather than recomputed by whoever reads it later.
+  //
+  // `types` is narrowed to node alone: nothing here runs inside an editor. The
+  // half that does is `observer/extension.js`, which is plain JavaScript the
+  // editor loads from source and which no build step stands in front of.
+  //
+  // The suite that checks the judge is excluded rather than compiled: it is a
+  // Jest suite, `npx jest` reads it from source through ts-jest, and compiling
+  // it here would only put a second copy of it under `out/`.
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["tests/eyes/**/*.ts"],
+  "exclude": ["tests/eyes/**/*.test.ts"]
+}
