@@ -24,7 +24,17 @@ export const STORAGE_DIRECTORY_MODE = 0o700;
 const VERSION_FILE = 'version';
 const OWNERS_DIRECTORY = 'owners';
 const TERMINALS_DIRECTORY = 'terminals';
-const RECORD_FILE = 'record.json';
+/**
+ * The file a terminal's record lives in, wherever its folder happens to be.
+ *
+ * Exported, unlike its neighbours, because `TrashStore` reads it out of a COPY
+ * in the trash -- a directory whose name may not decode to an id at all, so
+ * there is no `TerminalId` to form the path from and no member of this class
+ * that could. One name for it rather than a second literal in another file.
+ */
+export const RECORD_FILE_NAME = 'record.json';
+
+const RECORD_FILE = RECORD_FILE_NAME;
 const OBSERVED_FILE = 'observed.json';
 const SETTINGS_FILE = 'settings.json';
 const EVENTS_DIRECTORY = 'events';
@@ -180,6 +190,28 @@ export class StorageLayout {
   }
 
   /**
+   * A presence file by the NAME it was found under, rather than by an id.
+   *
+   * The way back for `discardedOwnerFile`, and it takes the same kind of string
+   * for the same reason: the files worth collecting are the ones nothing could
+   * be read from, so a return has only the name the trash kept. Checked here,
+   * because this one is a destination for a WRITE.
+   */
+  public ownerFileNamed(fileName: string): string {
+    return join(this.ownersDir, requireSafeFileName(fileName));
+  }
+
+  /**
+   * A terminal's directory by the NAME it was found under, rather than by an id.
+   *
+   * The way back for `discardedStrayDir`: what the cleanup swept includes
+   * directories no record could be read from, so a return has only a name.
+   */
+  public terminalDirNamed(name: string): string {
+    return join(this.terminalsDir, requireSafeFileName(name));
+  }
+
+  /**
    * One window's log, named after the window.
    *
    * Refused for the same reasons the presence file is, and by the same check:
@@ -298,6 +330,24 @@ export class StorageLayout {
   }
 
   /**
+   * One batch by the NAME it was found under, for the pass that reads the trash
+   * rather than the one that writes it.
+   *
+   * The moment is gone by then: what a person is offered comes off `readdir`,
+   * and re-deriving a `Date` from a stamp in order to hand it back to
+   * `trashBatchDir` would be parsing our own file names -- which is exactly what
+   * the retention refuses to do.
+   */
+  public trashBatchNamed(batch: string): string {
+    return join(this.trashDir, requireSafeFileName(batch));
+  }
+
+  /** Where in one batch the collected presence files are. */
+  public discardedOwnersDir(batch: string): string {
+    return join(this.trashBatchNamed(batch), OWNERS_DIRECTORY);
+  }
+
+  /**
    * Where a whole terminal directory goes when the cleanup sweeps it.
    *
    * Takes the NAME it was found under rather than a `TerminalId`, and that is
@@ -350,6 +400,21 @@ export function isTrashBatchName(name: string): boolean {
 }
 
 const TRASH_BATCH_NAME = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/;
+
+/**
+ * Whether an entry in a batch holds presence files rather than a terminal.
+ *
+ * A directory under `terminals/` could in principle be called `owners` and land
+ * here beside the real one -- `discardedStrayDir` takes the name it was found
+ * under and only refuses what would LEAVE the batch. Nothing mints such a name
+ * (a terminal directory is a uuid), so this is a reading rule and not a guard:
+ * what is in `owners/` is read as presence files, and a person who put a folder
+ * of that name under `terminals/` is told so by the list rather than surprised
+ * by it.
+ */
+export function isDiscardedOwnersArea(name: string): boolean {
+  return name === OWNERS_DIRECTORY;
+}
 
 /**
  * Whether a path the directory watcher reported is journal traffic.

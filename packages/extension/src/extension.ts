@@ -39,6 +39,7 @@ import {
   TerminalMetadataService,
   TerminalStateMachine,
   TerminalTabNamer,
+  TrashStore,
   claudeRenameCommand,
   claudeSessionsDirectory,
   claudeSettingsLocations,
@@ -46,6 +47,7 @@ import {
   describeCliVersion,
   endOwnTerminals,
   findExecutable,
+  forgottenNotice,
   gatherRestoreInputs,
   isProcessThere,
   launchReadiness,
@@ -89,8 +91,10 @@ import type {
   WindowShutdownReport,
 } from '@gripterm/core';
 import { Asker } from './ui/ask';
+import { Picker } from './ui/pick';
 import { registerAdoptTerminal } from './commands/adopt-terminal';
 import { registerCleanUpStorage } from './commands/clean-up-storage';
+import { registerRestoreFromTrash } from './commands/restore-from-trash';
 import { registerCloseTerminal } from './commands/close-terminal';
 import { registerDeleteTerminal } from './commands/delete-terminal';
 import { registerShowRecord } from './commands/show-record';
@@ -397,6 +401,16 @@ export interface GriptermApi {
    * conversation asks first -- could otherwise be held by nothing.
    */
   readonly asker: Asker;
+  /**
+   * The lists this window offers, and the seam that answers them (Ш15).
+   *
+   * Exposed for the reason `asker` is: a quick pick cannot be chosen from by a
+   * run, so "a record comes back OUT OF THE INTERFACE" could otherwise be held
+   * by nothing but a unit test of the store beneath it.
+   */
+  readonly picker: Picker;
+  /** The trash and the way back out of it, or `null` in a window with no shared base. */
+  readonly trash: TrashStore | null;
   /** `null` when this window is not reading the shared store. */
   readonly repository: TerminalRepository | null;
   /**
@@ -496,6 +510,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   // The modal questions, in one place for the same reason: a run cannot click
   // a dialog, and a dialog nobody can answer is a run that hangs (M3.14).
   const asker = new Asker();
+  // Everything this window ASKS a person to choose between goes through here,
+  // for the reason `Asker` gives about everything it asks them to confirm.
+  const picker = new Picker();
 
   /*
    * When this window began waking up, so that it can say how long it took.
@@ -684,6 +701,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   if (cleaner !== null) {
     context.subscriptions.push(cleaner);
   }
+  /*
+   * The way back out of `trash/` (Ш15).
+   *
+   * Beside the cleaner rather than inside it, and the split is the one this
+   * build already draws between reading a store and sweeping one: `StorageCleaner`
+   * is the object that MOVES records out on a rule and empties the trash on a
+   * clock, and nothing that only ever gives a record back belongs behind the same
+   * door. Only where there is a shared base, for the reason the cleaner is: a
+   * window reading nothing has no trash to look in.
+   */
+  const trash = shared === null ? null : new TrashStore({ layout: storage, logger });
   /*
    * The journal, wrapped in the one thing the panel needs from it: a word after
    * each write has landed (M3.11). The wrapper is here rather than inside
@@ -1042,6 +1070,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     })
   );
   context.subscriptions.push(
+    registerRestoreFromTrash({
+      // The store alone: bringing a record back is a decision about the trash
+      // and about nothing else in the world, which is exactly why it needs no
+      // predicate, no survey and no window liveness the way the cleanup does.
+      trash,
+      picker,
+      announcer,
+      logger,
+    })
+  );
+  context.subscriptions.push(
     registerCleanUpStorage({
       // Both or neither: the cleanup moves files by a predicate, and the
       // predicate is exactly the world `gather` reads. A cleanup with a store
@@ -1109,7 +1148,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   // After the restore and against the SAME reading: the two plans are disjoint
   // by construction (M2.15), and a record this window has just adopted is one
   // whose owner is now alive, which no cleanup touches.
-  await forgetClosedTerminals({ world, cleaner, logger });
+  await forgetClosedTerminals({
+    world,
+    cleaner,
+    logger,
+    // Out loud (Ш15). This is the ONE way into the trash that takes a record
+    // with nobody asked, and until now the whole of its trace was two lines in
+    // a log -- so from the chair it read as rows quietly disappearing. What is
+    // said, and when nothing is said at all, is decided by `forgottenNotice`,
+    // in the domain, because it is a decision.
+    announce: (message) => { announcer.say('info', message); },
+  });
 
   // After the restore, not before: a sweep that ran first would look at records
   // this window is about to adopt and start, and the first thing it would find
@@ -1224,6 +1273,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
       return announcer.said;
     },
     asker,
+    /**
+     * The lists, and the seam that answers them (Ш15).
+     *
+     * Exposed for the reason `asker` is: a quick pick cannot be clicked by a run
+     * at all, so the promise standing behind one -- a record brought back out of
+     * the trash FROM THE INTERFACE rather than from a file manager -- could
+     * otherwise be held by nothing but a unit test of the store underneath it.
+     */
+    picker,
+    /**
+     * The trash itself, or `null` in a window with no shared base.
+     *
+     * Exposed so that a suite can read what a person would be offered without
+     * driving the list, and can check the store after a return.
+     */
+    trash,
     hookToken: token,
     readiness: {
       cliPath: cli.path,
@@ -1448,8 +1513,9 @@ async function forgetClosedTerminals(parts: {
   readonly world: MachineSurvey;
   readonly cleaner: StorageCleaner | null;
   readonly logger: Logger;
+  readonly announce: (message: string) => void;
 }): Promise<void> {
-  const { world, cleaner, logger } = parts;
+  const { world, cleaner, logger, announce } = parts;
   if (world.kind === 'unread' || cleaner === null) {
     return;
   }
@@ -1477,6 +1543,14 @@ async function forgetClosedTerminals(parts: {
       batch: outcome.batch,
       kept: plan.kept,
     });
+    const notice = forgottenNotice({
+      moved: outcome.moved.length,
+      failed: outcome.failed.length,
+      batch: outcome.batch,
+    });
+    if (notice !== null) {
+      announce(notice);
+    }
   } catch (cause: unknown) {
     logger.warn('the records of closed terminals could not be moved to the trash', {
       cause,

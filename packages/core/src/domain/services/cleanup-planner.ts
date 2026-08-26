@@ -50,6 +50,62 @@ export function explainCleanup(reason: CleanupReason): string {
   return CLEANUP_WORDS[reason];
 }
 
+/** What one run of `forgetClosedTerminals` did, as the person needs to hear it. */
+export interface ForgottenBatch {
+  readonly moved: number;
+  readonly failed: number;
+  /** The batch it all went into, `trash/<stamp>/`, without the `trash/`. */
+  readonly batch: string;
+}
+
+/**
+ * One sentence about the records that were forgotten without anybody being
+ * asked, or `null` when there is nothing to say (Ш15).
+ *
+ * **The gap this closes.** Four ways lead into `trash/`, and three of them speak:
+ * `Delete Record` names the batch and the way back, `Clean Up Storage` names the
+ * batch, the way back and the retention, and the presence sweep carries off a
+ * file about a window rather than anything a person wrote. `forgetClosedTerminals`
+ * is the fourth, it is the ONLY one that takes a record with nobody asked, and
+ * until this it left two lines in a log -- so from the chair it read as rows
+ * quietly disappearing, which is the same complaint the restore refusals drew on
+ * 2026-08-21.
+ *
+ * **Why the sentence carries the way back rather than only the count.** A person
+ * told that something was taken and not told how to undo it has been handed the
+ * worse half of the news; and until Ш15 there was no way back to name that did
+ * not begin "open a file manager".
+ *
+ * Here rather than in the command, for the reason `restoreNotice` is: what is
+ * said, and when nothing is said at all, is a decision -- and a decision belongs
+ * where it can be read without a running editor.
+ */
+export function forgottenNotice(batch: ForgottenBatch): string | null {
+  if (batch.moved === 0) {
+    return batch.failed === 0
+      ? null
+      : `Gripterm could not move ${records(batch.failed)} of ${terminals(batch.failed)} you had closed out of the store, see the Gripterm log.`;
+  }
+  const they = batch.moved === 1 ? 'it' : 'them';
+  const said =
+    `Gripterm forgot ${records(batch.moved)} of ${terminals(batch.moved)} you had closed, and moved ` +
+    `${they} to trash/${batch.batch} in your Gripterm storage folder — ` +
+    `"Gripterm: Restore from Trash" brings ${they} back.`;
+  return batch.failed === 0
+    ? said
+    : `${said} ${records(batch.failed)} could not be moved, see the Gripterm log.`;
+}
+
+/** `1 record` or `4 records`, so that the sentence above reads as English. */
+function records(items: number): string {
+  return items === 1 ? '1 record' : `${items} records`;
+}
+
+/** The other half of the same agreement, one word further along the sentence. */
+function terminals(items: number): string {
+  return items === 1 ? 'a terminal' : 'terminals';
+}
+
 /**
  * What may be taken out of the store, and how much was left alone.
  *

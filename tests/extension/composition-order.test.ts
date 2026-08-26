@@ -115,3 +115,33 @@ describe('the order a window leaves in', () => {
     expect(ending).toBeLessThan(firstAwait);
   });
 });
+
+/*
+ * The voice of the one pass that takes a record without asking (Ш15), held the
+ * same weak honest way and named as one.
+ *
+ * `forgetClosedTerminals` runs during activation, from a plan made against a
+ * world gathered before mocha loads its first file -- so no suite in a running
+ * host can put a closed record of a window that is gone in front of it at the
+ * right moment. `forgottenNotice` has its own tests in `tests/domain`, and what
+ * NOTHING else can see is whether anybody still calls it: a sentence that is
+ * composed and never handed to the announcer is exactly the silence this step
+ * existed to end.
+ */
+describe('what activation says about the records it forgets', () => {
+  it('hands the pass a way to speak, and the pass uses it', () => {
+    const activation = bodyOf('activate');
+    const called = activation.indexOf('forgetClosedTerminals({');
+    expect(called).toBeGreaterThan(-1);
+    expect(activation.slice(called, activation.indexOf('});', called))).toContain('announce:');
+
+    // From the opening brace of the BODY, not of the parameter object: the
+    // parts are declared inline, so the first `\n}` is theirs.
+    const pass = SOURCE.slice(SOURCE.indexOf('async function forgetClosedTerminals('));
+    const opens = pass.indexOf('): Promise<void> {');
+    expect(opens).toBeGreaterThan(-1);
+    const body = pass.slice(opens, pass.indexOf('\n}', opens));
+    expect(body).toContain('forgottenNotice({');
+    expect(body).toContain('announce(notice)');
+  });
+});

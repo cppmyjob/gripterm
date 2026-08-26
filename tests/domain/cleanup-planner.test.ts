@@ -6,6 +6,7 @@ import {
   TerminalId,
   disposalOf,
   explainCleanup,
+  forgottenNotice,
   planCleanup,
   planRestore,
   planUnaskedCleanup,
@@ -476,5 +477,52 @@ describe('disposalOf says whose record this is to throw away', () => {
     // difference lives: a window that is merely silent may be asleep and come
     // back, and the person is the only one who can know.
     expect(disposalOf(false, 'unknown')).toStrictEqual({ kind: 'abandoned', liveness: 'unknown' });
+  });
+});
+
+/*
+ * The one path in this build that takes a record away WITHOUT ASKING, and until
+ * now the only trace of it was two lines in a log nobody has open (Ш15).
+ *
+ * The sentence is here rather than in the command for the reason `restoreNotice`
+ * is: what a person is told, and when they are told nothing at all, is a
+ * decision -- and a decision belongs where it can be read without a running
+ * editor. What it has to carry is the way BACK: a person who reads that
+ * something was taken and cannot see how to undo it has been told the worst
+ * half of the news.
+ */
+describe('forgottenNotice says out loud what was taken without asking', () => {
+  const BATCH = '2026-08-12_14-33-07';
+
+  it('says nothing when nothing was forgotten', () => {
+    expect(forgottenNotice({ moved: 0, failed: 0, batch: BATCH })).toBeNull();
+  });
+
+  it('names the batch and the way back for one record', () => {
+    expect(forgottenNotice({ moved: 1, failed: 0, batch: BATCH })).toBe(
+      'Gripterm forgot 1 record of a terminal you had closed, and moved it to ' +
+        `trash/${BATCH} in your Gripterm storage folder — "Gripterm: Restore from Trash" brings it back.`
+    );
+  });
+
+  it('counts, and stays one sentence however many there were', () => {
+    expect(forgottenNotice({ moved: 3, failed: 0, batch: BATCH })).toBe(
+      'Gripterm forgot 3 records of terminals you had closed, and moved them to ' +
+        `trash/${BATCH} in your Gripterm storage folder — "Gripterm: Restore from Trash" brings them back.`
+    );
+  });
+
+  it('adds what could not be moved, because a record still in the list is the surprise', () => {
+    expect(forgottenNotice({ moved: 2, failed: 1, batch: BATCH })).toBe(
+      'Gripterm forgot 2 records of terminals you had closed, and moved them to ' +
+        `trash/${BATCH} in your Gripterm storage folder — "Gripterm: Restore from Trash" brings them back. ` +
+        '1 record could not be moved, see the Gripterm log.'
+    );
+  });
+
+  it('speaks when nothing moved at all and something was meant to', () => {
+    expect(forgottenNotice({ moved: 0, failed: 2, batch: BATCH })).toBe(
+      'Gripterm could not move 2 records of terminals you had closed out of the store, see the Gripterm log.'
+    );
   });
 });

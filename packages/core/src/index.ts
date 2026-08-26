@@ -73,11 +73,13 @@ export {
 export {
   disposalOf,
   explainCleanup,
+  forgottenNotice,
   planCleanup,
   planUnaskedCleanup,
   type CleanupItem,
   type CleanupPlan,
   type CleanupReason,
+  type ForgottenBatch,
   type RecordDisposal,
 } from './domain/services/cleanup-planner';
 
@@ -310,12 +312,21 @@ export {
   STORAGE_DIRECTORY_MODE,
   STORAGE_SCHEMA_VERSION,
   StorageLayout,
+  RECORD_FILE_NAME,
+  isDiscardedOwnersArea,
   isJournalFileName,
   isJournalPath,
   isTrashBatchName,
   journalDay,
   trashStamp,
 } from './infrastructure/store/storage-layout';
+export {
+  TrashStore,
+  type TrashForm,
+  type TrashItem,
+  type TrashRestoreOutcome,
+  type TrashStoreOptions,
+} from './infrastructure/store/trash-store';
 export {
   DEFAULT_TRASH_SWEEP_INTERVAL_MS,
   MAX_EXPIRED_PER_PASS,
