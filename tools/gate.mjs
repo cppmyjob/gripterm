@@ -553,13 +553,22 @@ function standAgainstTheBudgetOrThrow(ran) {
 }
 
 /**
- * What the Cursor strip measured, against the ceilings in the budget.
+ * What the Cursor strip measured, against the ceilings in the budget -- and in
+ * WHICH of the fork's two workbenches it measured it.
  *
  * The whole of this stage's colour, because there is nothing else to read: the
  * exit code of the host it ran in is a coin (measured 2026-08-25, four identical
  * consecutive launches: 1, 0, 0, 1). A file that is not there is therefore RED
  * and is never silence -- a probe that died before writing is the one outcome a
  * clean pass is indistinguishable from once the exit code says nothing.
+ *
+ * **Three answers since 2026-08-26, not two.** Cursor opens a window in one of
+ * two workbenches and names neither through its API; the same command misses 10
+ * of 10 in the glass one and none of 10 outside it. So a rate whose workbench is
+ * not established is UNMEASURED -- red, and never "so many misses of so many",
+ * because the second sentence sends a person after a defect of the product on a
+ * day the window changed. The rule lives in `cursorAgainstBudget` where a Jest
+ * suite can hold it; this prints it.
  */
 function cursorAgainstTheBudget(ran) {
   try {
@@ -570,7 +579,7 @@ function cursorAgainstTheBudget(ran) {
 }
 
 function cursorAgainstTheBudgetOrThrow(ran) {
-  const { ALLOWANCES, ratesAgainstBudget, readAllowances } =
+  const { ALLOWANCES, cursorAgainstBudget, readAllowances } =
     require(join(REPO, 'out', 'tests', 'stand', 'allowance.js'));
 
   if (!existsSync(CURSOR_RATE)) {
@@ -588,7 +597,15 @@ function cursorAgainstTheBudgetOrThrow(ran) {
   const measured = JSON.parse(readFileSync(CURSOR_RATE, 'utf8'));
   const document = readAllowances(readFileSync(ALLOWANCES, 'utf8'));
   const checks = measured.checks.map((one) => ({ check: one.check, attempts: one.attempts, misses: one.misses }));
-  const refusals = ratesAgainstBudget(checks, document);
+  // The workbench BEFORE the arithmetic, and the arithmetic only if it holds.
+  // Cursor has two workbenches whose answers to the same command differ
+  // completely -- 10 misses of 10 against none of 10 -- and which one this stage
+  // opens is decided by an argument that is here for something else. So a run
+  // that cannot say which one it measured has numbers with nowhere to be filed,
+  // and this prints the reason instead of a rate. See `cursorAgainstBudget`.
+  const workbench = measured.workbench ?? null;
+  const judged = cursorAgainstBudget(checks, workbench, document);
+  const refusals = judged.refusals;
 
   say('');
   // The build, printed rather than left in the file, because it is the point of
@@ -600,15 +617,29 @@ function cursorAgainstTheBudgetOrThrow(ran) {
     `--- the Cursor strip, in ${build === null ? 'an editor whose build went unrecorded' : `${build.editor} ${build.version}`}` +
     `${build === null ? '' : ` (commit ${String(build.commit).slice(0, 8)}, built ${String(build.built).slice(0, 10)}, API ${measured.apiVersion})`}`
   );
-  for (const one of measured.checks) {
-    const line = document.rates.find((rate) => rate.check === one.check);
+  say(
+    `  the workbench it measured: ${workbench === null ? 'NOT RECORDED -- this run said nothing about one' : `${workbench.is} -- ${workbench.because}`}`
+  );
+  if (judged.measured) {
+    for (const one of measured.checks) {
+      const line = document.rates.find((rate) => rate.check === one.check);
+      say(
+        `  ${one.check}: ${String(one.misses)} miss(es) of ${String(one.attempts)}` +
+        `${line === undefined ? '   -- nothing in the budget names this check' : `, and its line admits ${String(line.atMost)} of ${String(line.of)}`}`
+      );
+    }
+  } else {
+    // The numbers deliberately go unprinted. They exist -- they are in the file
+    // named below -- and printing them beside a budget they cannot be held
+    // against is how "this run opened the other window" is read as "the product
+    // missed 10 of 10".
     say(
-      `  ${one.check}: ${String(one.misses)} miss(es) of ${String(one.attempts)}` +
-      `${line === undefined ? '   -- nothing in the budget names this check' : `, and its line admits ${String(line.atMost)} of ${String(line.of)}`}`
+      `  NOT JUDGED: the ${String(measured.checks.length)} check(s) this run wrote down are in ${CURSOR_RATE}, ` +
+      'and no ceiling here applies to them.'
     );
   }
   for (const refusal of refusals) {
-    say(`  REFUSED  ${refusal.because}`);
+    say(`  ${judged.measured ? 'REFUSED ' : 'UNMEASURED'}  ${refusal.because}`);
   }
   for (const line of measured.notMeasured ?? []) {
     say(`  NOT MEASURED HERE: ${line}`);
@@ -619,8 +650,20 @@ function cursorAgainstTheBudgetOrThrow(ran) {
     // The exit code is not consulted at all, and that is the point. `ran.ok`
     // said 0 and would have said 0 over ten failed assertions.
     ok: refusals.length === 0,
-    because: refusals.length === 0 ? undefined : `${String(refusals.length)} refusal(s) from the budget`,
-    rates: { checks, refusals, build },
+    because:
+      refusals.length === 0
+        ? undefined
+        : judged.measured
+          ? `${String(refusals.length)} refusal(s) from the budget`
+          // Which workbench it was, and not "it could not say": a run that named
+          // the WRONG one said plenty, and the two are told apart here because
+          // telling them apart is the whole of this stage's third answer.
+          : `the Cursor strip's numbers were not judged -- its workbench is ${workbench === null ? 'not recorded at all' : `"${workbench.is}"`}`,
+    // The workbench goes onto the RECEIPT and not only into the printed
+    // summary: a receipt is what `tools/pre-push.sh` reads and what an analysis
+    // of a red gate re-reads weeks later, and a rate on it with no window
+    // beside it is the record this step exists to stop being written.
+    rates: { checks, refusals, build, workbench, judged: judged.measured },
   };
 }
 

@@ -583,6 +583,111 @@ export function standingAllowances(document: AllowanceDocument, today: string): 
 }
 
 /**
+ * Which workbench of the fork a run says it was measured in, and how it knows.
+ *
+ * The shape only, spelled here rather than imported: the reading is done by
+ * `tools/cursor-workbench.js`, which is CommonJS because a Mocha file inside an
+ * extension host has to require it with nothing compiled. What this file needs
+ * of it is two strings.
+ */
+export interface WorkbenchSaid {
+  /** `classic`, `glass`, or `unknown` -- never a guess at the third. */
+  readonly is: string;
+  /** The two readings, in words, so that a refusal can quote them. */
+  readonly because: string;
+}
+
+/**
+ * The workbench the rate ceilings in `gate/allowed-red.json` were measured in.
+ *
+ * A constant here rather than a field on each ceiling, and that is a smaller
+ * claim than it looks: every rate line in that document was measured in the same
+ * window on 2026-08-25, and the day one of them is not, this is where the
+ * difference goes -- as a field on `RateCeiling`, which is a change to the
+ * BUDGET and belongs to whoever ratifies budgets. It is `classic` because that
+ * is the workbench the owner works in, checked by the owner on his own profile
+ * on 2026-08-25, and not because it is the one the stage happens to get.
+ */
+export const THE_WORKBENCH_THE_RATES_WERE_MEASURED_IN = 'classic';
+
+/** What the gate may say about the Cursor strip, and whether it may say it. */
+export interface CursorJudgement {
+  /**
+   * Whether the numbers belong to a window at all.
+   *
+   * `false` is the third answer, and it is neither green nor "so many misses of
+   * so many". A caller that prints a rate when this is `false` is naming a
+   * defect of the product for a run that measured a different workbench.
+   */
+  readonly measured: boolean;
+  readonly refusals: readonly Refusal[];
+}
+
+/**
+ * Everything the gate refuses about the Cursor strip's run, workbench first.
+ *
+ * **Why the workbench comes before the arithmetic.** A rate is a fraction whose
+ * denominator is the attempts and whose SUBJECT is the window they were made in.
+ * Cursor has two workbenches and its API names neither; measured 2026-08-25 over
+ * 33 launches, `newGroupBelow` missed 10 of 10 in the glass one and 0 of 10
+ * outside it. Which one the stage gets is decided today by an argument that is
+ * there for something else -- a folder added for `newGroupBelow` that switches
+ * glass off as a side effect. So the day the window changes, comparing the
+ * numbers anyway would print "10 misses of 10" against a ceiling of nought and
+ * send somebody after a defect of the product that is a fact about a window.
+ *
+ * **So the numbers are not compared at all in that case, and that is the point.**
+ * Not compared and reported as worse; not compared and reported as anything. An
+ * unmeasured run and a failed one are two different facts -- the rule
+ * `verdictAgainstAllowances` already holds for a point nothing judged -- and a
+ * rate filed under the wrong window is neither of them. The colour it costs is
+ * paid on purpose: an unestablished workbench is RED, exactly as a missing
+ * `rate.json` is RED, because the alternative is a gate that guesses.
+ *
+ * @param measured what the probe wrote down, one entry per check
+ * @param said which workbench the probe read itself into, or `null` where it said nothing
+ * @param document the budget as read from `gate/allowed-red.json`
+ */
+export function cursorAgainstBudget(
+  measured: readonly RateMeasured[],
+  said: WorkbenchSaid | null,
+  document: AllowanceDocument
+): CursorJudgement {
+  if (said === null) {
+    return {
+      measured: false,
+      refusals: [
+        {
+          point: null,
+          because:
+            'this run did not say which workbench of the fork it measured, and the fork has two whose answers ' +
+            'to the same command differ completely. Its numbers are not judged: there is nothing to file them ' +
+            'under. A `rate.json` with no workbench in it was written by a stage older than this reading -- ' +
+            'run the stage again.',
+        },
+      ],
+    };
+  }
+  if (said.is !== THE_WORKBENCH_THE_RATES_WERE_MEASURED_IN) {
+    return {
+      measured: false,
+      refusals: [
+        {
+          point: null,
+          because:
+            `this run measured the "${said.is}" workbench of the fork, and every ceiling in this budget was ` +
+            `measured in the "${THE_WORKBENCH_THE_RATES_WERE_MEASURED_IN}" one -- the workbench the owner ` +
+            'works in. Its numbers are NOT judged here and are not evidence about the product: the same ' +
+            'command answers 10 misses of 10 in glass and none of 10 outside it (2026-08-25, 33 launches). ' +
+            `What this run read: ${said.because}`,
+        },
+      ],
+    };
+  }
+  return { measured: true, refusals: ratesAgainstBudget(measured, document) };
+}
+
+/**
  * Everything the gate refuses about what the Cursor strip measured.
  *
  * An empty list is the only thing the gate may call green about that stage --

@@ -87,12 +87,18 @@ function inCursor() {
   // So the layout of this window is decided today by an argument that is here
   // for something else, and that is FRAGILE: drop the folder, or let the fork
   // change how it reads the command line, and this stage measures a different
-  // window without a word. `--classic` would say the same thing on purpose --
-  // it beats even an explicit `--glass`, 3 launches of 3. It is deliberately
-  // NOT added here: what the `cursor` stage should measure -- a glass window, a
-  // classic one, or both -- decides what this gate covers, and that question is
-  // the owner's and was open on 2026-08-25. This comment is the proposal; the
-  // arguments are unchanged.
+  // window. `--classic` would say the same thing on purpose -- it beats even an
+  // explicit `--glass`, 3 launches of 3. It is deliberately NOT added here: what
+  // the `cursor` stage should measure -- a glass window, a classic one, or both
+  // -- decides what this gate covers, and that question is the owner's; the
+  // owner settled the first half of it on 2026-08-25 (the ordinary window is the
+  // one he works in) and the arguments are unchanged.
+  //
+  // What Ш19 changed is the last four words of the paragraph above: "without a
+  // word". The stage now READS which workbench it got, out of the fork's own
+  // logs, and writes both readings into `rate.json` beside the numbers; the gate
+  // refuses to judge a rate from any other one. The fragility is still here --
+  // it is an argument doing two jobs -- and it is no longer silent.
   if (!existsSync(CURSOR_PROJECT)) {
     mkdirSync(CURSOR_PROJECT, { recursive: true });
     writeFileSync(
@@ -103,6 +109,7 @@ function inCursor() {
   }
 
   const { forkBuild } = require_('./tools/fork-build.js');
+  const userData = hostUserData('cursor');
   return [
     {
       label: 'cursor',
@@ -110,9 +117,26 @@ function inCursor() {
       extensionDevelopmentPath: 'packages/extension',
       useInstallation: { fromPath: CURSOR },
       workspaceFolder: CURSOR_PROJECT,
-      launchArgs: [`--user-data-dir=${hostUserData('cursor')}`],
+      // `--glass` ON DEMAND, and never in the gate:
+      //
+      //     GRIPTERM_CURSOR_GLASS=1 npx vscode-test --label cursor
+      //
+      // That is the acceptance of Ш19 and nothing else. A glass window misses 10
+      // of 10 at `newGroupBelow` (measured 2026-08-25, 5 launches of 5), so a
+      // gate that opened one would be red for ever; what the run is FOR is to
+      // see the stage answer "not judged, this is the other workbench" instead
+      // of naming a defect of the product. It is an environment variable rather
+      // than a second label because a label is a thing the gate can pick up by
+      // accident, and this must be asked for by hand every time.
+      launchArgs: [`--user-data-dir=${userData}`, ...(process.env.GRIPTERM_CURSOR_GLASS === '1' ? ['--glass'] : [])],
       env: {
         GRIPTERM_CURSOR_OUT: CURSOR_OUT,
+        // Where the window's own logs land, handed in rather than worked out
+        // inside. The extension host's `process.argv` is not this process's, and
+        // `--user-data-dir` is a launch argument of the editor: a suite that
+        // guessed the default profile directory would read another window's logs
+        // and say which workbench THAT was.
+        GRIPTERM_CURSOR_USER_DATA: userData,
         // Read out here, where the executable is known. `vscode.version` inside
         // the window answers `1.128.0` for Cursor 3.17.19 -- the VS Code it is a
         // fork OF -- and a workbench measurement filed under that number is

@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ALLOWANCES, ratesAgainstBudget, readAllowances, standingAllowances, verdictAgainstAllowances } from './allowance';
+import { ALLOWANCES, cursorAgainstBudget, ratesAgainstBudget, readAllowances, standingAllowances, verdictAgainstAllowances } from './allowance';
 import { BUDGET, judge } from './judge';
 import { parseRecording } from './recording';
-import type { AllowanceDocument, RateMeasured } from './allowance';
+import type { AllowanceDocument, RateMeasured, WorkbenchSaid } from './allowance';
 import type { Finding, Verdict } from './judge';
 
 /**
@@ -613,6 +613,113 @@ describe('the budget of admitted redness', () => {
 
       expect(document.rates.map((one) => one.check)).toContain('cursor-newGroupBelow');
       expect(standingAllowances(document, new Date().toISOString().slice(0, 10))).toStrictEqual([]);
+    });
+  });
+
+  /*
+   * The third answer, and it is the reason the second one is worth anything.
+   *
+   * A rate is a fraction whose denominator is the number of attempts -- and
+   * whose SUBJECT is the window they were attempted in. Cursor has two
+   * workbenches; measured 2026-08-25 over 33 launches, `newGroupBelow` misses 10
+   * of 10 in the glass one and 0 of 10 outside it. Which one the stage gets is
+   * decided today by an argument that is there for something else. So a run that
+   * does not say which workbench it measured has produced a number with nowhere
+   * to be filed, and a budget that compared it anyway would report a defect of
+   * the product on the day the window changed.
+   *
+   * The rule is the one `verdictAgainstAllowances` already holds for a point
+   * nothing judged: an unmeasured thing and a failed one are two different
+   * facts, and a line about one does not cover the other. It costs a colour --
+   * an unmeasured run is red, exactly as a missing `rate.json` is red -- and it
+   * buys the reason being true.
+   */
+  describe('which workbench the rates were measured in', () => {
+    const CEILING = {
+      check: 'cursor-newGroupBelow',
+      says: 'a group below is made',
+      of: 10,
+      atMost: 0,
+      seen: 'a number this fixture never has to be true about',
+      measured: 'nothing, this is a fixture',
+      why: 'a test',
+      allowedBy: 'a test',
+      ratifiedBy: null,
+      renewals: 0,
+      expires: '2026-09-08',
+    } as const;
+
+    function measured(misses: number): readonly RateMeasured[] {
+      return [{ check: 'cursor-newGroupBelow', attempts: 10, misses }];
+    }
+
+    function workbench(is: string): WorkbenchSaid {
+      return { is, because: `the window directory is window1_wb0 and 68 log lines say layout glass` };
+    }
+
+    it('judges the numbers when the run says it measured the workbench the budget was measured in', () => {
+      const document = documentOf([], 5, [CEILING]);
+
+      const judged = cursorAgainstBudget(measured(0), workbench('classic'), document);
+
+      expect(judged.measured).toBe(true);
+      expect(judged.refusals).toStrictEqual([]);
+    });
+
+    /*
+     * The acceptance of Ш19, as a second: today this run answers "7 misses of
+     * 10" and a person reads it as the product. The number is not restated at
+     * all -- hence the 7, which nothing in the refusal may carry -- because a
+     * rate from the other workbench is not a smaller fact about the product, it
+     * is a fact about a different window.
+     */
+    it('refuses the numbers without restating them when the run measured the OTHER workbench', () => {
+      const document = documentOf([], 5, [CEILING]);
+
+      const judged = cursorAgainstBudget(measured(7), workbench('glass'), document);
+
+      expect(judged.measured).toBe(false);
+      expect(judged.refusals).toHaveLength(1);
+      expect(judged.refusals[0]?.because).toContain('glass');
+      expect(judged.refusals[0]?.because).not.toContain('7');
+    });
+
+    it('refuses when the run could not establish its workbench, and quotes what it read', () => {
+      const document = documentOf([], 5, [CEILING]);
+
+      const judged = cursorAgainstBudget(measured(0), workbench('unknown'), document);
+
+      expect(judged.measured).toBe(false);
+      expect(judged.refusals[0]?.because).toContain('window1_wb0');
+    });
+
+    /*
+     * A `rate.json` written by a stage older than this reading. It is not
+     * silence and it is not a pass: the file says nothing about the one variable
+     * that decides what its numbers are about.
+     */
+    it('refuses when the run said nothing about a workbench at all', () => {
+      const document = documentOf([], 5, [CEILING]);
+
+      const judged = cursorAgainstBudget(measured(0), null, document);
+
+      expect(judged.measured).toBe(false);
+      expect(judged.refusals).toHaveLength(1);
+    });
+
+    /*
+     * Not one refusal on top of the rate's own. When the workbench is wrong the
+     * rates are not compared AT ALL -- neither the ceiling that nothing measured
+     * nor the check nothing admits -- because every one of those sentences would
+     * be about numbers that belong to no window.
+     */
+    it('does not compare the rates at all, so no refusal of theirs can be printed beside it', () => {
+      const document = documentOf([], 5, [{ ...CEILING, check: 'a check nothing measured' }]);
+
+      const judged = cursorAgainstBudget(measured(7), workbench('glass'), document);
+
+      expect(judged.refusals).toHaveLength(1);
+      expect(judged.refusals[0]?.because).toContain('glass');
     });
   });
 });
