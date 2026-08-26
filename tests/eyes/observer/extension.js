@@ -215,10 +215,49 @@ async function activate() {
     await sleep(QUIET_MS);
     handOver('three', { closedName, error: null });
     await theDriverHasLooked('three');
+
+    /*
+     * Scenes four, five and six: the button PRESSED, and both ways.
+     *
+     * The customer asked for one thing in one sentence -- "распахивала бы
+     * панель на всю высоту экрана... и после при повторном клике возвращалась
+     * бы на место" -- and until now nothing had measured either half in the
+     * fork it was asked about. The live suites measure both, in VS Code, off
+     * `vscode.getEditorLayout`; this measures them where the customer is, off
+     * the boxes the workbench actually laid out.
+     *
+     * A FILE is put in front first, and that is not decoration: the editor's
+     * toggle names no target and takes the ACTIVE group, so a run that pressed
+     * the button from the terminal's own tab bar would pass while maximising
+     * somebody's source file everywhere else.
+     */
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    if (folder !== undefined) {
+      const readme = await vscode.workspace.openTextDocument(vscode.Uri.joinPath(folder.uri, 'README.md'));
+      await vscode.window.showTextDocument(readme, { viewColumn: vscode.ViewColumn.One });
+      await until(
+        'a file of the person`s own to be the editor in front',
+        () => vscode.window.tabGroups.activeTabGroup.activeTab?.input instanceof vscode.TabInputText,
+        TERMINAL_WITHIN_MS
+      );
+    }
+    await sleep(QUIET_MS);
+    handOver('four', { pressed: 0, error: null });
+    await theDriverHasLooked('four');
+
+    await vscode.commands.executeCommand('gripterm.maximizeTerminals');
+    await sleep(QUIET_MS);
+    handOver('five', { pressed: 1, error: null });
+    await theDriverHasLooked('five');
+
+    await vscode.commands.executeCommand('gripterm.maximizeTerminals');
+    await sleep(QUIET_MS);
+    handOver('six', { pressed: 2, error: null });
+    await theDriverHasLooked('six');
   } catch (failed) {
     // Written to whichever scene has not been handed over yet, so that a driver
     // waiting on a file gets an answer instead of a deadline.
-    for (const name of ['one', 'two', 'three']) {
+    for (const name of ['one', 'two', 'three', 'four', 'five', 'six']) {
       if (!existsSync(`${SCENES}-${name}.json`)) {
         handOver(name, { error: String(failed?.message ?? failed) });
       }

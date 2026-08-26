@@ -146,6 +146,13 @@
         "when": "gripterm.terminalFocused"
       }
     ],
+    "submenus": [
+      {
+        "id": "gripterm.terminalTitle",
+        "label": "Gripterm",
+        "icon": "$(screen-full)"
+      }
+    ],
     "menus": {
       "view/title": [
         {
@@ -293,8 +300,14 @@
       ],
       "editor/title": [
         {
-          "command": "gripterm.maximizeTerminals",
+          "submenu": "gripterm.terminalTitle",
           "when": "gripterm.terminalInFront",
+          "group": "navigation@1"
+        }
+      ],
+      "gripterm.terminalTitle": [
+        {
+          "command": "gripterm.maximizeTerminals",
           "group": "navigation@1"
         }
       ]

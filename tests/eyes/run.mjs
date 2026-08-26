@@ -311,9 +311,26 @@ const LOOK = `(() => {
              close: close === null ? null : drawnOf(close) };
   });
 
+  // Every group of the editor area, with the tabs on it. What "maximised" means
+  // to a person is this and nothing else: one group over the whole area and the
+  // others with no height left.
+  const editorGroups = [...document.querySelectorAll('.editor-group-container')].map((g) => ({
+    box: box(g),
+    tabs: [...g.querySelectorAll('.tabs-container .tab')].map((t) => (t.querySelector('.label-name') || t).textContent.trim()),
+  }));
+
+  // Anything anywhere in the window carrying one of the labels this run cares
+  // about, wherever it is. "Not in that bar" and "not in this window" are two
+  // findings, and the eyes used to be able to report only the first.
+  const named = /Maximise the Terminals/iu;
+  const anywhere = [...document.querySelectorAll('[aria-label], [title]')]
+    .filter((e) => named.test(label(e)))
+    .slice(0, 40)
+    .map(drawnOf);
+
   return JSON.stringify({
     onboardingOverlays: document.querySelectorAll('.onboarding-v2-overlay').length,
-    editorActionBars, paneHeaders, rows, tabs,
+    editorActionBars, paneHeaders, rows, tabs, anywhere, editorGroups,
   });
 })()`;
 
@@ -520,6 +537,28 @@ async function hover(cdp, at) {
 }
 
 /**
+ * How tall the group holding a run's terminals is, against the whole editor
+ * area, in the pixels the workbench laid out.
+ *
+ * The measure of the customer's own sentence. `share` is what fraction of the
+ * editor area's height the terminals have: a strip at rest holds a part of it,
+ * and maximised it holds the lot.
+ */
+function theStrip(seen, terminals) {
+  const groups = seen.editorGroups.filter((one) => one.box.h > 0);
+  const ours = groups.find((one) => one.tabs.some((tab) => terminals.includes(tab))) ?? null;
+  const top = Math.min(...groups.map((one) => one.box.y));
+  const bottom = Math.max(...groups.map((one) => one.box.y + one.box.h));
+  const area = bottom - top;
+  return {
+    groups: groups.length,
+    height: ours === null ? 0 : ours.box.h,
+    area,
+    share: ours === null || area === 0 ? 0 : Math.round((ours.box.h / area) * 100) / 100,
+  };
+}
+
+/**
  * Looks again until what is drawn agrees with what the product believes, or the
  * ceiling passes.
  *
@@ -608,6 +647,8 @@ async function main() {
   let sightings = [];
   let cleared = 0;
   let cdp = null;
+  /** What the strip measured before the button was pressed, after one press and after two. */
+  let presses = [];
   try {
     await until('the debugging endpoint to answer', () => endpoint(`http://127.0.0.1:${String(port)}/json/version`), UP_WITHIN_MS);
     const targets = await until(
@@ -675,6 +716,11 @@ async function main() {
     const seen2 = await look(cdp);
     sightings = [s13InTheEditorTitle(seen2, two.terminals), s13InTheViewTitle(seen2)];
     await screenshot(cdp, 'scene-two');
+    say(`  anything anywhere in the window by the names this run looks for: ${
+      seen2.anywhere.length === 0 ? 'none' : seen2.anywhere.map((one) => `${one.label} ${String(one.box.w)}x${String(one.box.h)} visible=${String(one.visible)}`).join(' | ')}`);
+    const strip = seen2.editorActionBars.find((one) => one.activeTab !== null && two.terminals.includes(one.activeTab));
+    say(`  the bar in the terminal's own title holds: ${
+      (strip?.items ?? []).map((one) => `${one.label} ${String(one.box.w)}x${String(one.box.h)}`).join(' | ') || 'nothing'}`);
     looked('two');
 
     const three = await scene('three');
@@ -684,6 +730,28 @@ async function main() {
     sightings = [...sightings, ...agreed.sightings];
     await screenshot(cdp, 'scene-three');
     looked('three');
+
+    /*
+     * The button PRESSED, and both ways, in whichever editor this is.
+     *
+     * Printed and recorded rather than judged. What the gate holds this editor
+     * to is that the button is DRAWN -- the defect the customer reported three
+     * times -- and what the toggle does is held by the live suites, which can
+     * ask `vscode.getEditorLayout` for the sizes instead of reading them off
+     * the screen. This is the third thing neither of those covers: the same
+     * two presses in the fork, measured where a person would look.
+     */
+    const pressed = [];
+    for (const [name, what] of [['four', 'before it was pressed'], ['five', 'after one press'], ['six', 'after a second press']]) {
+      const handed = await scene(name);
+      const strip = theStrip(await look(cdp), handed.terminals);
+      pressed.push({ name, what, ...strip, activeTab: handed.activeTab });
+      say(`  the strip ${what}: ${String(strip.height)} px of the ${String(strip.area)} px editor area`
+        + ` (${String(strip.share)} of it), across ${String(strip.groups)} group(s), with ${JSON.stringify(handed.activeTab)} in front`);
+      await screenshot(cdp, `scene-${name}`);
+      looked(name);
+    }
+    presses = pressed;
   } catch (failed) {
     // A driver that died is not a product that failed, and the difference must
     // survive into the file the gate reads. The sightings taken so far are kept
@@ -711,7 +779,7 @@ async function main() {
     }
   }
 
-  const recording = { build, laidOutAt: LAYOUT, onboardingOverlaysCleared: cleared, sightings };
+  const recording = { build, laidOutAt: LAYOUT, onboardingOverlaysCleared: cleared, sightings, presses };
   writeFileSync(RECORDING, `${JSON.stringify(recording, null, 2)}\n`, 'utf8');
 
   const verdict = judge(recording);

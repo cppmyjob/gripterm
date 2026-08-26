@@ -45,14 +45,21 @@ export interface MaximizeTerminalsOptions {
  * **What it acts on, and why that changed on 2026-08-22.** The editor's toggle
  * takes the ACTIVE group and names no target. That was left as it stood while
  * the only way to the button was a terminal's own tab bar, where the active
- * group IS the strip. Cursor has now refused three times to draw it there --
- * measured the same day: the key it hangs on is set correctly in Cursor
- * (`probe-empty-strip.ts`: `inFront = true` with a terminal in front), so what
- * is missing is the drawing and not the condition -- and the button had to be
- * put where that editor is known to draw ours, which is the title bar of the
- * list of terminals. From there the active group is whatever file the person
+ * group IS the strip. Then the button was put ALSO in the title bar of the list
+ * of terminals -- and from there the active group is whatever file the person
  * last touched, and a toggle would have maximised THAT: the same class of
  * defect as the arrow, a button doing the opposite of what it says.
+ *
+ * **Why Cursor did not draw it in the tab bar, found 2026-08-26 and no longer
+ * true of this build.** Not the condition: the key was measured correct in
+ * Cursor three times over. The fork hides, BY DEFAULT AND IN `editor/title`
+ * ONLY, every command an extension contributes there unless its id begins with
+ * one of ten prefixes of the editor's own -- `PersistedMenuHideState.isHidden`,
+ * `_isEditorTitleCommandVisibleByDefault`, in both of its workbenches and in
+ * neither of VS Code's. The manifest now reaches that bar through a SUBMENU of
+ * one item, which that rule does not cover and which the editor folds back into
+ * the single icon; `tests/extension/editor-title-in-the-fork.test.ts` carries
+ * the mechanism, the way through and the numbers both were measured with.
  *
  * So the strip is stood on first. When there is no strip to stand on, the
  * button acts only if the editor in front is a terminal -- the case of a

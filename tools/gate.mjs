@@ -357,9 +357,17 @@ const MISSING = [
       'WHAT THAT COSTS: nothing runs them unless a person asks, so a button that stops being drawn between ' +
       'two people asking goes unnoticed for as long as that. WHAT THEY FOUND, measured 2026-08-25 with ' +
       'the terminal`s group 1006 px wide and a terminal in front: in Cursor 3.17.19 the ' +
-      '`editor/title` maximise button is NOT DRAWN, beside four controls of Cursor`s own in the same bar ' +
-      'that are; in VS Code 1.134.0 the same build draws it at 22x22. That is the defect the customer ' +
-      'reported three times, and it is the first number anybody has had for it. ALSO MEASURED, and it is ' +
+      '`editor/title` maximise button was NOT DRAWN, beside four controls of Cursor`s own in the same bar ' +
+      'that were; in VS Code 1.134.0 the same build drew it at 22x22. That is the defect the customer ' +
+      'reported three times, and it is the first number anybody had for it. FIXED 2026-08-26 AND ' +
+      'MEASURED THE SAME WAY, and the past tense above is deliberate: the fork hides, in `editor/title` ' +
+      'and in no other menu, every command an EXTENSION contributes there unless its id starts with one ' +
+      'of ten prefixes of its own (`PersistedMenuHideState.isHidden`, both of its workbenches, nought ' +
+      'occurrences in VS Code). A submenu is not covered by that rule and a one-item submenu in the ' +
+      '`navigation` group is folded back into its one icon, so the manifest goes that way now and the ' +
+      'button draws at 22x22 in BOTH editors. The eyes also press it, twice, with a FILE in front: the ' +
+      'strip went 381 px of a 1143 px editor area, then 1143 of 1143, then 381 again, the same three ' +
+      'numbers in Cursor 3.17.19 and VS Code 1.134.0. ALSO MEASURED, and it is ' +
       'why two of their four sightings come back REFUSED rather than green: on a fresh profile Cursor lays ' +
       'out no side bar at all -- `.part.sidebar` is `display: none`, and Cursor`s own ' +
       '`Collapse Folders in Explorer` is as absent from it as ours -- so the list of terminals cannot be ' +
