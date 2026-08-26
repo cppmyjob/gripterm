@@ -4,7 +4,9 @@ import * as vscode from 'vscode';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { whatTheSizesDid } from './what-the-sizes-did';
 import type { GriptermApi } from '../../packages/extension/src/extension';
+import type { SizesSeen } from './what-the-sizes-did';
 
 /**
  * A terminal of ours, on our own screen, in the only place either half is real:
@@ -433,24 +435,50 @@ suite('a terminal of ours, on our own screen', () => {
           );
         }
       };
-      await until(
-        'the pseudoconsole to acknowledge a resize at all',
-        () => {
-          noteSizes();
-          return bridge.tail.text.includes(`${String.fromCharCode(27)}[8;`);
-        },
-        SETTLES_WITHIN_MS
-      ).catch((cause: unknown) => {
+      /*
+       * The same numbers, said on EVERY run and not only on the one that fails
+       * (2026-08-26).
+       *
+       * They were built inside the `catch` below and nowhere else, so a green
+       * run gave none of them -- and collecting a sample meant waiting for red,
+       * which is 7 runs in 26 full gates over three days. The wait polls every
+       * 25 ms, so this is said once when it is over rather than once per look:
+       * twelve hundred lines for a fact with one value would be the opposite of
+       * a record. `tests/what-the-sizes-did.test.ts` holds the wording.
+       */
+      let acknowledgedAfterMs: number | null = null;
+      const sizesSeen = (): SizesSeen => ({
+        sent: bridge.resizeCount,
+        moments: sizesSent,
+        acknowledgedAfterMs,
+        waitedMs: acknowledgedAfterMs ?? Date.now() - startedWaiting,
+        settled: { cols: settled.cols, rows: settled.rows },
+        // node-pty's own default, and the size a pseudoconsole that acknowledged
+        // nothing leaves the process at.
+        spawned: { cols: 80, rows: 30 },
+      });
+      try {
+        await until(
+          'the pseudoconsole to acknowledge a resize at all',
+          () => {
+            noteSizes();
+            return bridge.tail.text.includes(`${String.fromCharCode(27)}[8;`);
+          },
+          SETTLES_WITHIN_MS
+        );
+        acknowledgedAfterMs = Date.now() - startedWaiting;
+      } catch (cause: unknown) {
         // With what the gateway said while it was trying: a resize that never
         // reached the pseudoconsole and one it refused look the same from here.
         noteSizes();
         throw new Error(
-          `${String(cause)} -- the bridge sent ${String(bridge.resizeCount)} sizes ` +
-          `[${sizesSent.join(', ')}], the page settled at ` +
-          `${String(settled.cols)}x${String(settled.rows)}, the pty was spawned at 80x30 ` +
-          `-- the gateway said: ${stand.said.join(' | ')}`
+          `${String(cause)} -- ${whatTheSizesDid(sizesSeen())} -- the gateway said: ${stand.said.join(' | ')}`
         );
-      });
+      } finally {
+        noteSizes();
+        // Straight to the host's stdout, which is where the gate reads from.
+        console.log(whatTheSizesDid(sizesSeen()));
+      }
       // And the size the page settled at is the one the pty was last told.
       await until(
         `the pty to be told ${String(settled.cols)}x${String(settled.rows)}`,

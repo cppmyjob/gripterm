@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -59,6 +59,28 @@ import { fileURLToPath } from 'node:url';
 
 const REPO = dirname(dirname(fileURLToPath(import.meta.url)));
 const require = createRequire(import.meta.url);
+
+/**
+ * Which tests a red stage says went red, read out of the output it prints anyway.
+ *
+ * Loaded here at the top rather than where it is used, and CommonJS rather than
+ * a compiled module, because the FIRST stage this is asked about is `types` --
+ * which is `tsc --build`, and a stage that has not run yet cannot have produced
+ * the thing that reads it. See the head of `tools/what-fell.js`.
+ */
+const { transcript, whatFell } = require(join(REPO, 'tools', 'what-fell.js'));
+
+/**
+ * How much of a stage's output is held while it runs.
+ *
+ * A megabyte, which is far more than any stage here produces (the largest
+ * measured is the live stage) and small enough that an extension host stuck in
+ * a logging loop cannot make the gate itself the thing that falls over. What is
+ * kept is the TAIL: Mocha, Jest and ESLint all say what failed at the END, so a
+ * transcript that filled up and stopped listening would drop the one thing it
+ * exists for.
+ */
+const MOST_KEPT = 1_000_000;
 
 /** Where a receipt is kept. Per-machine and untracked: it is about a run, not about the code. */
 const RECEIPTS = join(REPO, '.gate');
@@ -362,8 +384,61 @@ function say(line = '') {
   console.log(line);
 }
 
+/**
+ * A stage's own output, on the terminal as it happens AND kept for reading.
+ *
+ * **Piped rather than inherited, and that is a trade with a named price.** The
+ * stage used to be launched with `stdio: 'inherit'`, which is the cheapest way
+ * to put a child's output on a terminal and the one way to make sure nothing
+ * else can ever see it. Every chunk is now written on as it arrives, so the
+ * four minutes of the live stage still scroll past in real time; what changes is
+ * that a tool asking `process.stdout.isTTY` is now answered "no", and the ones
+ * that colour their output by that answer stop colouring it. Measured
+ * 2026-08-26: Jest colours its code frames regardless, so `tools/what-fell.js`
+ * strips ANSI either way; `tsc` and ESLint go plain. That is the whole cost, it
+ * is cosmetic, and it buys the receipt a name for what fell over.
+ *
+ * Nothing in this repository reads its own stdout as a terminal -- checked
+ * 2026-08-26 across `tools`, `tests` and every package's `src`: the only
+ * `isTTY` and `process.stdout.columns` in the tree are inside processes the
+ * suites spawn under a pty, which is a different stdout entirely.
+ */
+function theOutputOf(command, args, kept) {
+  return new Promise((settle) => {
+    const child = spawn(command, args, {
+      cwd: REPO,
+      // stdin stays inherited: nothing here asks a question, and a child given a
+      // closed stdin behaves differently from one given a terminal's.
+      stdio: ['inherit', 'pipe', 'pipe'],
+      shell: process.platform === 'win32',
+    });
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (text) => { process.stdout.write(text); kept.say(text); });
+    child.stderr.on('data', (text) => { process.stderr.write(text); kept.say(text); });
+    child.on('error', (failed) => { settle({ status: null, error: failed }); });
+    // `close` and not `exit`: the last of a stage's output arrives after the
+    // process is gone, and that last part is where Mocha prints what failed.
+    child.on('close', (status) => { settle({ status, error: null }); });
+  });
+}
+
+/**
+ * What a red stage's output says fell over, in the few strings a receipt holds.
+ *
+ * A stage the parser does not recognise is written down as `unrecognised`
+ * rather than left out: "the gate looked and could name nothing" and "nobody
+ * looked" are different facts, and the first one is the entry that says a
+ * format wants teaching (I.1).
+ */
+function whatItSaidFellOver(kept) {
+  const fell = whatFell(kept.said()) ?? { kind: 'unrecognised', count: null, named: [], first: null };
+  const dropped = kept.dropped();
+  return dropped === 0 ? fell : { ...fell, dropped };
+}
+
 /** One stage, run so that its own output reaches the terminal as it happens. */
-function runStage(stage) {
+async function runStage(stage) {
   const started = Date.now();
   say('');
   say(`=== ${stage.name}  --  ${stage.what}`);
@@ -371,12 +446,17 @@ function runStage(stage) {
     stage.before();
   }
   const [command, ...args] = stage.command;
-  const done = spawnSync(command, args, { cwd: REPO, stdio: 'inherit', shell: process.platform === 'win32' });
+  const kept = transcript(MOST_KEPT);
+  const done = await theOutputOf(command, args, kept);
   const ms = Date.now() - started;
-  if (done.error !== undefined) {
+  if (done.error !== null) {
     return { name: stage.name, ok: false, ms, because: `${stage.command.join(' ')} did not start: ${done.error.message}` };
   }
-  return { name: stage.name, ok: done.status === 0, ms, status: done.status };
+  const ok = done.status === 0;
+  // Only where the command itself came back non-zero. A stand judged red on a
+  // clean exit has its answer in `budget` already, and a second answer read out
+  // of prose would be the weaker of the two standing beside the stronger.
+  return { name: stage.name, ok, ms, status: done.status, ...(ok ? {} : { fell: whatItSaidFellOver(kept) }) };
 }
 
 /**
@@ -636,7 +716,7 @@ function onlyStage(argv) {
   return at === -1 ? null : argv[at + 1] ?? null;
 }
 
-function main() {
+async function main() {
   const fast = process.argv.includes('--fast');
   const only = onlyStage(process.argv);
   const level = only === null ? (fast ? 'fast' : 'full') : `only:${only}`;
@@ -667,7 +747,7 @@ function main() {
     : here.filter((stage) => stage.name === only);
   const ran = [];
   for (const stage of wanted) {
-    let result = runStage(stage);
+    let result = await runStage(stage);
     if (stage.judgedBy !== undefined) {
       result = stage.judgedBy(result);
     }
@@ -686,6 +766,14 @@ function main() {
   say('=== the gate');
   for (const one of ran) {
     say(`  ${one.ok ? 'PASS' : 'FAIL'}  ${one.name.padEnd(8)}${String(Math.round(one.ms / 1000)).padStart(5)} s${one.because === undefined ? '' : `   ${one.because}`}`);
+    // The same thing the receipt gets, said here as well, because the output it
+    // was read out of is by now several thousand lines up the terminal.
+    if (one.fell !== undefined) {
+      say(`        ${one.fell.count === null ? 'an unknown number of things' : `${String(one.fell.count)} of them`} (${one.fell.kind}): ${one.fell.named.length === 0 ? 'nothing this gate knows how to name' : one.fell.named.join(' | ')}`);
+      if (one.fell.first !== null) {
+        say(`        first: ${one.fell.first}`);
+      }
+    }
   }
   for (const one of skipped) {
     say(`  ----  ${one.name.padEnd(8)}    -    not reached: an earlier stage failed`);
@@ -708,7 +796,12 @@ function main() {
     at: new Date().toISOString(),
     revision: at,
     ok: failed.length === 0,
-    stages: ran.map(({ name, ok, ms, because, budget, rates, eyes }) => ({ name, ok, ms, because, budget, rates, eyes })),
+    // `fell` is present only on a stage whose command came back non-zero, and
+    // `JSON.stringify` drops the key everywhere else -- so a green stage's line
+    // is byte-for-byte what it was before this field existed, and the 98 lines
+    // already in `receipts.ndjson` are read by exactly what read them before
+    // (`tools/gate-receipt.mjs`, which asks for `level`, `ok` and `revision`).
+    stages: ran.map(({ name, ok, ms, because, budget, rates, eyes, fell }) => ({ name, ok, ms, because, budget, rates, eyes, fell })),
     notCovered: uncovered.map((one) => one.name),
   };
   writeReceipt(receipt);
@@ -725,4 +818,5 @@ function main() {
   process.exitCode = failed.length === 0 ? 0 : 1;
 }
 
-main();
+// Top-level await, because a stage is awaited now: see `theOutputOf`.
+await main();

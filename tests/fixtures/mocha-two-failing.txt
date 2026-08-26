@@ -1,0 +1,33 @@
+
+
+  a terminal of ours, on our own screen
+    ✔ everything the host posts is written, and the page counts it the same
+    1) the size of the screen reaches the terminal, and every later size reaches the pty
+    nested
+      2) a nested one fails too
+
+
+  1 passing (7ms)
+  2 failing
+
+  1) a terminal of ours, on our own screen
+       the size of the screen reaches the terminal, and every later size reaches the pty:
+     Error: waited 30000 ms for the pseudoconsole to acknowledge a resize at all -- the bridge sent 2 sizes [+257ms #2 {"cols":46,"rows":12}], the page settled at 46x12, the pty was spawned at 80x30 -- the gateway said: info: one | info: two
+      at Context.<anonymous> (D:\gripterm\out\tests\integration\terminal-in-view.js:7:11)
+      at process.processImmediate (node:internal/timers:485:21)
+
+  2) a terminal of ours, on our own screen
+       nested
+         a nested one fails too:
+
+      AssertionError [ERR_ASSERTION]: one is not two
+
+1 !== 2
+
+      + expected - actual
+
+      -1
+      +2
+
+      at Context.<anonymous> (D:\gripterm\out\tests\integration\terminal-in-view.js:11:14)
+      at process.processImmediate (node:internal/timers:485:21)

@@ -1,0 +1,9 @@
+tests/integration/terminal-in-view.ts(1,14): error TS2322: Type 'string' is not assignable to type 'number'.
+tests/integration/terminal-in-view.ts(2,31): error TS2322: Type 'number' is not assignable to type 'string'.
+node_modules/@types/mocha/index.d.ts(2652,13): error TS2403: Subsequent variable declarations must have the same type.  Variable 'beforeEach' must be of type 'Lifecycle', but here has type 'HookFunction<Hook>'.
+node_modules/@types/mocha/index.d.ts(2670,13): error TS2403: Subsequent variable declarations must have the same type.  Variable 'afterEach' must be of type 'Lifecycle', but here has type 'HookFunction<Hook>'.
+node_modules/@types/mocha/index.d.ts(2686,13): error TS2403: Subsequent variable declarations must have the same type.  Variable 'describe' must be of type 'Describe', but here has type 'SuiteFunction'.
+node_modules/@types/mocha/index.d.ts(2707,13): error TS2403: Subsequent variable declarations must have the same type.  Variable 'xdescribe' must be of type 'Describe', but here has type 'PendingSuiteFunction'.
+node_modules/@types/mocha/index.d.ts(2721,13): error TS2403: Subsequent variable declarations must have the same type.  Variable 'it' must be of type 'It', but here has type 'TestFunction'.
+node_modules/@types/mocha/index.d.ts(2735,13): error TS2403: Subsequent variable declarations must have the same type.  Variable 'test' must be of type 'It', but here has type 'TestFunction'.
+node_modules/@types/mocha/index.d.ts(2742,13): error TS2403: Subsequent variable declarations must have the same type.  Variable 'xit' must be of type 'It', but here has type 'PendingTestFunction'.

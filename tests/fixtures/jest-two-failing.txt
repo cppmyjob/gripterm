@@ -1,0 +1,43 @@
+FAIL D:/gripterm/tests/sample.test.js
+  a bounded transcript
+    √ keeps the tail (3 ms)
+    × says what it dropped (1 ms)
+    nested
+      × a nested one fails too (2 ms)
+
+  ● a bounded transcript › says what it dropped
+
+    waited 30000 ms for the pseudoconsole to acknowledge a resize at all
+
+    [0m [90m 4 |[39m   })[33m;[39m
+     [90m 5 |[39m   it([32m'says what it dropped'[39m[33m,[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 6 |[39m     [36mthrow[39m [36mnew[39m [33mError[39m([32m'waited 30000 ms for the pseudoconsole to acknowledge a resize at all'[39m)[33m;[39m
+     [90m   |[39m           [31m[1m^[22m[39m
+     [90m 7 |[39m   })[33m;[39m
+     [90m 8 |[39m   describe([32m'nested'[39m[33m,[39m () [33m=>[39m {
+     [90m 9 |[39m     it([32m'a nested one fails too'[39m[33m,[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (sample.test.js:6:11)
+
+  ● a bounded transcript › nested › a nested one fails too
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 2
+    Received: 1
+
+    [0m [90m  8 |[39m   describe([32m'nested'[39m[33m,[39m () [33m=>[39m {
+     [90m  9 |[39m     it([32m'a nested one fails too'[39m[33m,[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 10 |[39m       expect([35m1[39m)[33m.[39mtoBe([35m2[39m)[33m;[39m
+     [90m    |[39m                 [31m[1m^[22m[39m
+     [90m 11 |[39m     })[33m;[39m
+     [90m 12 |[39m   })[33m;[39m
+     [90m 13 |[39m })[33m;[39m[0m
+
+      at Object.toBe (sample.test.js:10:17)
+
+Test Suites: 1 failed, 1 total
+Tests:       2 failed, 1 passed, 3 total
+Snapshots:   0 total
+Time:        0.657 s
+Ran all test suites.
