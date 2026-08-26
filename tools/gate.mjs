@@ -228,7 +228,8 @@ function theEyes() {
       fast: false,
       // Kept out of the full and fast levels, and reachable only by name.
       onItsOwn: true,
-      what: 'pnpm run test:eyes  (one window, looked at over the DevTools protocol; measured 2 min)',
+      what: 'pnpm run test:eyes  (one window, looked at over the DevTools protocol; measured 2026-08-26: '
+        + '52 s in VS Code 1.134.0, 102 s in Cursor 3.17.19)',
       command: ['pnpm', 'run', 'test:eyes'],
       before: () => { rmSync(dirname(EYES_VERDICT), { recursive: true, force: true }); },
       judgedBy: eyesAgainstWhatTheySaw,
@@ -350,7 +351,9 @@ const MISSING = [
     why:
       'THE EYES -- `pnpm run gate:eyes`, which is `--only eyes`. They open a real editor, attach to its ' +
       'workbench over the DevTools protocol and ask the DOM what it is DRAWING: whether the maximise button ' +
-      'is there and has a box, and whether a terminal`s tab is coloured the way its own row is. They are a ' +
+      'is there and has a box, whether a terminal`s tab is coloured the way its own row is, and -- since ' +
+      '2026-08-26 -- whether the notification a waiting agent raises is on the screen and where its button ' +
+      'takes the person who presses it. They are a ' +
       'LEVEL of their own and this gate never runs them, on purpose: the full gate is 7.7-9.3 minutes ' +
       'against a ceiling of ten and one pass of the eyes is another two, so including them would put the ' +
       'gate over the ceiling -- and the plan asked for a mark whose failure does not stop the other gates. ' +
@@ -367,11 +370,59 @@ const MISSING = [
       '`navigation` group is folded back into its one icon, so the manifest goes that way now and the ' +
       'button draws at 22x22 in BOTH editors. The eyes also press it, twice, with a FILE in front: the ' +
       'strip went 381 px of a 1143 px editor area, then 1143 of 1143, then 381 again, the same three ' +
-      'numbers in Cursor 3.17.19 and VS Code 1.134.0. ALSO MEASURED, and it is ' +
-      'why two of their four sightings come back REFUSED rather than green: on a fresh profile Cursor lays ' +
-      'out no side bar at all -- `.part.sidebar` is `display: none`, and Cursor`s own ' +
-      '`Collapse Folders in Explorer` is as absent from it as ours -- so the list of terminals cannot be ' +
-      'looked at in that fork by these or any other eyes.',
+      'numbers in Cursor 3.17.19 and VS Code 1.134.0. ' +
+      'WHETHER THE EYES WOULD CATCH S26 AT ALL -- ANSWERED 2026-08-26, AND UNANSWERED BEFORE THAT DAY: ' +
+      'the tab-against-row sightings had never once come back red, in any run, so "they are green" said ' +
+      'nothing about whether they could go red. A POSITIVE CONTROL was put under them and then removed. ' +
+      'A stand-in extension registered a second `FileDecorationProvider` over ONE of the ' +
+      '`vscode-terminal:` uris the product colours a tab through -- so the editor drew the disagreement, ' +
+      'through the product`s own channel, with nothing of the eyes in the picture -- and in ONE run of ' +
+      'VS Code 1.134.0 the two sightings read 2 green before it, then RED for the decorated tab ' +
+      '(`rgb(173, 128, 215)` where `rgb(134, 207, 134)` was due) and GREEN for the other, in the same ' +
+      'look. A second control was measured and rejected: the driver painting the tab itself reddens ' +
+      'identically, but a driver that writes into the DOM it reads cannot tell "the eyes see the colour" ' +
+      'from "the eyes see what they wrote". WHAT IS STILL NOT PROVEN: that a LATER build would be ' +
+      'caught, because nothing repeats the control -- it is a fact about that day and that build, and ' +
+      'the head of `tests/eyes/run.mjs` says so. ' +
+      'S25, MEASURED END TO END FOR THE FIRST TIME 2026-08-26, both halves: the observer posts the CLI`s ' +
+      'own `PermissionRequest` hook to the product`s own loopback endpoint (the token and session id come ' +
+      'from that terminal`s `creationOptions`), and in VS Code 1.134.0 the product raised the toast ' +
+      '"eyes-project 2 is waiting for permission" at 452x86, and pressing its "Show terminal" button ' +
+      'closed it and put THAT terminal in front -- the tab the eyes saw and `window.activeTerminal` ' +
+      'agreeing. What the AGENT does is the only thing stood in for. ' +
+      'IN CURSOR 3.17.19 THE SAME REQUEST SHOWED NO TOAST THE EYES COULD FIND, AND THAT IS RECORDED AS ' +
+      'REFUSED RATHER THAN AS A DEFECT, on purpose and after it was nearly recorded as one. The first ' +
+      'anchor for this sighting was the editor`s own notification bell, which is drawn whether or not ' +
+      'anything was raised -- and against it the fork answered "NOT DRAWN, beside Notifications, which ' +
+      'the editor drew", a red about the product resting on nothing. A bell in the status bar proves the ' +
+      'STATUS BAR was seen. So the observer now raises a notification OF ITS OWN a moment after the ' +
+      'product`s, through the same one API, and in Cursor the eyes did not find THAT one either: the ' +
+      'sighting refuses, and what is unknown there is whether the fork toasts an extension`s ' +
+      'notification at all or merely toasts it somewhere these selectors do not look. Its bell reads ' +
+      '`codicon-bell-dot`, so something was raised. WHAT WOULD CLOSE IT: reading that fork`s ' +
+      'notification DOM, which nobody has done. ' +
+      'FOUR RUNS WERE SPENT ON THE PRESS FIRST, and both reasons are worth keeping because both ' +
+      'looked exactly like a button that does nothing. One: a press dispatched over the DevTools ' +
+      'protocol carries the window`s REAL pixels, while the eyes lay the workbench out at 1920x1200 over ' +
+      'a window the desktop had made 1440x900, so every press landed outside it -- ours AND the editor`s ' +
+      'own control on the same toast, which is how the eyes knew to answer REFUSED instead of accusing ' +
+      'the product. The override is lifted around the press now. Two: the FIRST press this driver sends ' +
+      'into a window is spent and the second answers, with `Page.bringToFront` before it and without, so ' +
+      'the eyes press once more and print how many presses it took. What keeps the difference honest is ' +
+      'a control on the press itself: when ours changes nothing, the EDITOR`S OWN control on the same ' +
+      'toast is pressed the same way, and a toast that answers neither is a run that says REFUSED. ' +
+      'WHAT THE EYES CANNOT SEE IN CURSOR, AND IT IS NOT OUR SIDE: on a fresh profile the fork lays out ' +
+      'no side bar and no panel and has no activity bar in the DOM at all -- measured 2026-08-26 at ' +
+      '1920x1200: `.part.activitybar` absent, `.part.sidebar` `display: none` 0x0, `.part.panel` ' +
+      '`display: none` 0x0, against `.part.auxiliarybar` (the fork`s own chat) 400x1143 and ' +
+      '`.part.editor` 1006x1143. Four commands of the EDITOR`S OWN were executed in that window to try ' +
+      'to open it -- `workbench.action.toggleSidebarVisibility`, `workbench.action.focusSideBar`, ' +
+      '`workbench.view.explorer`, `gripterm.terminals.focus`, none of them refused -- and the side bar ' +
+      'stayed `display: none`. So the list of terminals cannot be looked at in that fork by these or any ' +
+      'other eyes, and no other anchor for it was found: the rows are in the DOM with the right icons ' +
+      'and nobody can see them, which is a picture the judge must refuse rather than read. In Cursor ' +
+      'that leaves S13`s view-title sighting and both S26 sightings REFUSED, and only what lives in the ' +
+      'editor area answered.',
   },
   {
     name: 'mutation',

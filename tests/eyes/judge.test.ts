@@ -8,6 +8,18 @@
  * eyes from a green one, and this file does it in a second. Without it, an eyes
  * that answered RED to everything would pass its own run exactly as well as a
  * working one.
+ *
+ * **What this file does NOT prove, and what was done about it once.** It holds
+ * the judging half only. That the LOOKING half -- a real workbench, its DOM, the
+ * colours read off it -- would notice a tab that disagreed with its row was an
+ * assumption until 2026-08-26, because no run had ever produced a red S26. On
+ * that day a positive control was put under it in a live VS Code 1.134.0 and
+ * then taken out again: a stand-in extension decorated ONE tab through the same
+ * `FileDecorationProvider` API the product colours tabs with, and in that single
+ * run the sightings went 2 green before it, then RED for the decorated tab
+ * ("coloured rgb(173, 128, 215) where rgb(134, 207, 134) was due") and GREEN for
+ * the undecorated one, in the same look. The head of `run.mjs` carries the rest
+ * of it. Nothing repeats that control, so it is a fact about that day.
  */
 
 import { judge } from './judge';
@@ -85,6 +97,32 @@ describe('the eyes, judging what they saw', () => {
     expect(verdict.findings[0]?.says).toContain('no anchor');
   });
 
+  /**
+   * A refusal is a sentence somebody reads instead of a number, so what it
+   * calls the anchor has to be true.
+   *
+   * Measured 2026-08-26 in Cursor 3.17.19: both S26 sightings came back saying
+   * "Not one of the 1 control(s) of the EDITOR'S OWN there was drawn either
+   * (eyes-project 2 (codicon-check))" -- and that control is OURS. The row is
+   * the anchor of an S26 sighting because it is the product's own belief
+   * rendered by the editor's list, which is a different argument from S13's,
+   * and a receipt that misstates which of the two it made is a receipt the next
+   * reader acts on wrongly.
+   */
+  it('names the anchors for what they are, instead of calling our own row the editor own', () => {
+    const row: Drawn = { ...NO_BOX, label: 'eyes-project 2', codicon: 'codicon-check' };
+    const verdict = judge(recordingOf(sighting({
+      scenario: 'S26',
+      ours: null,
+      anchors: [row],
+      anchorsAre: 'the row the product drew in the list',
+    })));
+
+    expect(verdict.findings[0]?.answer).toBe('refused');
+    expect(verdict.findings[0]?.says).toContain('the row the product drew in the list');
+    expect(verdict.findings[0]?.says).not.toContain('of the editor\'s own');
+  });
+
   it('holds a control with no layout to be undrawn, whatever it calls itself', () => {
     const verdict = judge(recordingOf(sighting({ ours: { ...NO_BOX, visible: true } })));
 
@@ -131,6 +169,59 @@ describe('the eyes, judging what they saw', () => {
 
       expect(judge(recordingOf(sighting({ scenario: 'S26', ours: half, wanted }))).findings[0]?.answer)
         .toBe('red');
+    });
+
+    /**
+     * The anchor of an S26 sighting is the ROW, and the row is where the colour
+     * the tab is held to comes from. A row drawn with no colour in it therefore
+     * leaves NOTHING to compare -- and a sighting that then answers green is
+     * reporting the absence of a measurement as the success of one, which is
+     * the one failure this whole apparatus exists to make impossible (I.1).
+     *
+     * It is reachable rather than theoretical: the row's colour is read off the
+     * first `[class*=codicon-]` inside it, so a build that drew that icon any
+     * other way -- an svg `iconPath`, a background image, a theme that puts the
+     * icon in a pseudo-element -- would hand every S26 sighting a `null` and
+     * turn the whole scenario permanently green while measuring nothing.
+     */
+    it('REFUSES a comparison the anchor could not supply, rather than passing it', () => {
+      const nothingToCompare: Wanted = {
+        codicon: null,
+        color: null,
+        because: 'the row for eyes-project 2 is drawn in null',
+      };
+      const ours: Drawn = { ...SEEN, codicon: 'codicon-terminal', color: 'rgb(134, 207, 134)' };
+
+      const verdict = judge(recordingOf(sighting({ scenario: 'S26', ours, wanted: nothingToCompare })));
+
+      expect(verdict.findings[0]?.answer).toBe('refused');
+      expect(verdict.findings[0]?.says).toContain('nothing to compare');
+      expect(verdict.green).toBe(0);
+    });
+
+    /**
+     * S25 asks a question about IDENTITY rather than about colour: after a
+     * person clicks "Show terminal" on the notification, the tab in front must
+     * be the tab of the terminal the notification was about. A button that
+     * brings up SOMEBODY ELSE'S terminal is the whole of the complaint, and it
+     * is invisible to a judge that can only compare icons and colours.
+     */
+    it('is RED when what is drawn is the wrong thing, however right it looks', () => {
+      const readme: Drawn = { ...SEEN, label: 'README.md', codicon: 'codicon-terminal', color: null };
+      const verdict = judge(recordingOf(sighting({
+        scenario: 'S25',
+        ours: readme,
+        wanted: {
+          codicon: null,
+          color: null,
+          label: 'eyes-project 2',
+          because: 'the notification was raised for eyes-project 2',
+        },
+      })));
+
+      expect(verdict.findings[0]?.answer).toBe('red');
+      expect(verdict.findings[0]?.says).toContain('README.md');
+      expect(verdict.findings[0]?.says).toContain('eyes-project 2');
     });
 
     it('still REFUSES a look nobody got, rather than reading its colour', () => {

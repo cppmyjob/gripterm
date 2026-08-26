@@ -40,26 +40,34 @@ function name(what: Drawn): string {
  * The order of the three questions IS the rule, and reordering it is how this
  * stops being worth running:
  *
- *   1. does the sighting name an anchor at all -- a look with nothing of the
- *      editor's own in it cannot tell "we did not draw" from "we did not see";
+ *   1. does the sighting name an anchor at all -- a look with nothing beside
+ *      ours in it cannot tell "we did not draw" from "we did not see". What the
+ *      anchor IS differs by sighting and each one says so in `anchorsAre`: S13
+ *      is judged beside the editor's own buttons, S26 beside the row, which is
+ *      the product's belief drawn by the editor's list;
  *   2. was any anchor drawn -- if not, the eyes did not get a look at that part
  *      of the window and there is no evidence about us either way;
  *   3. only THEN, is ours drawn, and does it look like what the product believes.
  *
  * Steps 1 and 2 produce REFUSED, which is never a defect of the product's. Step
- * 3 is the only door to RED, and by the time it is reached the editor has proved
- * -- with its own control, in the same bar, in the same run -- that the place
- * was there to be looked at.
+ * 3 is the only door to RED, and by the time it is reached something the eyes
+ * did not draw -- named in the sighting, in the same place, in the same run --
+ * has proved that the place was there to be looked at.
  */
 function answer(one: Sighting): Finding {
   const said = (verdict: Answer, says: string): Finding =>
     ({ point: one.point, scenario: one.scenario, answer: verdict, says });
 
+  // What the anchors are, in the words of whoever took the sighting. The
+  // default is S13's and true of it; S26 anchors on our own row and says so.
+  const anchorsAre = one.anchorsAre ?? 'controls of the editor\'s own';
+
   if (one.anchors.length === 0) {
     return said(
       'refused',
-      `${one.what}: this sighting names no anchor -- no control of the editor's own to prove the eyes ` +
-        'got a look at that bar -- so nothing here can tell a button we never drew from a window we never saw.'
+      `${one.what}: this sighting names no anchor -- nothing of the kind it is judged beside (${anchorsAre}) ` +
+        'to prove the eyes got a look at that place -- so nothing here can tell a control we never drew from a ' +
+        'window we never saw.'
     );
   }
 
@@ -67,9 +75,9 @@ function answer(one: Sighting): Finding {
   if (anchorsDrawn.length === 0) {
     return said(
       'refused',
-      `${one.what}: the eyes did not get a look at it. Not one of the ${String(one.anchors.length)} control(s) ` +
-        `of the editor's own there was drawn either (${one.anchors.map(name).join(', ')}), so whatever is or is ` +
-        'not true of our button, this run is not evidence of it.'
+      `${one.what}: the eyes did not get a look at it. Not one of the ${String(one.anchors.length)} anchor(s) ` +
+        `there -- ${anchorsAre} -- was drawn either (${one.anchors.map(name).join(', ')}), so whatever is or is ` +
+        'not true of ours, this run is not evidence of it.'
     );
   }
 
@@ -90,7 +98,23 @@ function answer(one: Sighting): Finding {
 
   const wanted = one.wanted;
   if (wanted !== null) {
+    if (wanted.codicon === null && wanted.color === null && wanted.label === undefined) {
+      // A look that asked how something is drawn and got nothing to hold it to.
+      // Green here would be the absence of a measurement wearing the answer of
+      // one -- and for S26 that is not hypothetical: the colour a tab is held to
+      // is read off the row's icon, so any build that stopped drawing that icon
+      // as a codicon would turn the whole scenario permanently green (I.1).
+      return said(
+        'refused',
+        `${one.what}: drawn as ${name(ours)}, and there was nothing to compare it with -- ` +
+          `${anchorsAre} carried neither an icon nor a colour this run could hold it to (${wanted.because}). ` +
+          'What it looks like is therefore unmeasured, which is not the same as right.'
+      );
+    }
     const wrong: string[] = [];
+    if (wanted.label !== undefined && ours.label !== wanted.label) {
+      wrong.push(`it is ${ours.label === '' ? 'nameless' : ours.label} where ${wanted.label} was due`);
+    }
     if (wanted.codicon !== null && !ours.codicon.split(' ').includes(wanted.codicon)) {
       wrong.push(`it draws ${ours.codicon === '' ? 'no icon' : ours.codicon} where ${wanted.codicon} was due`);
     }

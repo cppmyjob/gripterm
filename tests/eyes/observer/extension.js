@@ -24,10 +24,16 @@
  */
 
 const vscode = require('vscode');
-const { writeFileSync, existsSync } = require('node:fs');
+const { writeFileSync, existsSync, readFileSync } = require('node:fs');
 
 /** The product, by its exact identity: `/gripterm/i` would also match this file. */
 const PRODUCT = 'gripterm-placeholder.gripterm';
+
+/**
+ * What the stand-in's own notification says. Named here because the driver
+ * looks for this exact sentence, and a sentence in two files drifts.
+ */
+const STAND_IN_NOTICE = 'The eyes: a notification raised by the scene builder, to prove one can be seen.';
 
 const SCENES = process.env.GRIPTERM_EYES_SCENES;
 const MAKE = Number(process.env.GRIPTERM_EYES_MAKE ?? '2');
@@ -133,6 +139,93 @@ async function makeATerminal() {
   return made;
 }
 
+/**
+ * Puts a file of the person's own in front.
+ *
+ * Not decoration in either place it is used: the editor's maximise toggle takes
+ * the ACTIVE group, and S25's whole question is where a click LEADS -- which
+ * cannot be asked at all if the terminal is already the thing in front.
+ */
+async function aFileInFront() {
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  if (folder === undefined) {
+    return;
+  }
+  const readme = await vscode.workspace.openTextDocument(vscode.Uri.joinPath(folder.uri, 'README.md'));
+  await vscode.window.showTextDocument(readme, { viewColumn: vscode.ViewColumn.One });
+  await until(
+    'a file of the person`s own to be the editor in front',
+    () => vscode.window.tabGroups.activeTabGroup.activeTab?.input instanceof vscode.TabInputText,
+    TERMINAL_WITHIN_MS
+  );
+}
+
+/**
+ * Makes the agent of one terminal ask for permission -- through the CLI's own
+ * channel, and nothing else.
+ *
+ * **Why this is not a lie the eyes tell the product.** Claude Code reports what
+ * it is doing by POSTing hook payloads to a loopback endpoint the product hands
+ * it in a settings file, authenticated with a token the product puts in that
+ * terminal's environment. Both are readable HERE because the editor hands every
+ * extension a terminal's `creationOptions` -- so this posts the same payload the
+ * CLI would, to the same URL, with the same token and the same session id, and
+ * every step after it is the product's own: the parser, the state machine, the
+ * notifier and the toast. What is simulated is the AGENT, which is the one part
+ * of S25 nobody can schedule.
+ *
+ * The alternative was to sit and wait for a real agent to hit a permission
+ * prompt, which is minutes of somebody's account per run and cannot be made to
+ * happen on purpose.
+ */
+async function askForPermission(name) {
+  const terminal = vscode.window.terminals.find((one) => one.name === name);
+  if (terminal === undefined) {
+    return { asked: false, why: `there is no terminal named ${JSON.stringify(name)} in this window` };
+  }
+  const options = terminal.creationOptions;
+  const args = options.shellArgs === undefined ? [] : [...options.shellArgs];
+  const after = (flag) => {
+    const at = args.indexOf(flag);
+    return at < 0 ? null : args[at + 1] ?? null;
+  };
+  const settingsPath = after('--settings');
+  const sessionId = after('--session-id') ?? after('--resume');
+  const token = (options.env ?? {}).GRIPTERM_TOKEN ?? null;
+  if (settingsPath === null || sessionId === null || token === null) {
+    return {
+      asked: false,
+      why: 'that terminal was not launched with the three things a hook needs',
+      settings: settingsPath, session: sessionId, token: token === null ? null : 'present',
+    };
+  }
+
+  let url = null;
+  try {
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+    url = settings.hooks.PermissionRequest[0].hooks[0].url;
+  } catch (failed) {
+    return { asked: false, why: `the settings file said nothing usable: ${String(failed?.message ?? failed)}`, settingsPath };
+  }
+
+  const body = JSON.stringify({
+    hook_event_name: 'PermissionRequest',
+    session_id: sessionId,
+    tool_name: 'Bash',
+    permission_level: 'ask',
+  });
+  try {
+    const answer = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body,
+    });
+    return { asked: answer.ok, url, status: answer.status, said: (await answer.text()).slice(0, 200) };
+  } catch (failed) {
+    return { asked: false, why: `the post never landed: ${String(failed?.message ?? failed)}`, url };
+  }
+}
+
 async function activate() {
   try {
     const ours = vscode.extensions.getExtension(PRODUCT);
@@ -163,6 +256,17 @@ async function activate() {
      * -- and neither is asserted here. Whether the editor DREW either of them is
      * the driver's question, and the whole point of Ш10 is that this side of the
      * API answers yes to it either way.
+     *
+     * **Why nothing further is tried, measured 2026-08-26 rather than assumed.**
+     * In Cursor 3.17.19 on a fresh profile the side bar cannot be opened at all.
+     * `workbench.action.toggleSidebarVisibility` and
+     * `workbench.action.focusSideBar` were executed beside these two, none of the
+     * four refused, and the driver then found `.part.sidebar` still
+     * `display: none` at 0x0 -- with `.part.activitybar` ABSENT from the DOM
+     * entirely and `.part.panel` `display: none` as well, beside the fork's own
+     * `.part.auxiliarybar` laid out at 400x1143 and the editor at 1006x1143. So
+     * the list of terminals is unlookable in that fork by any arrangement this
+     * file can make, and the sightings that need it REFUSE rather than accuse.
      */
     const did = [];
     for (const command of ['workbench.view.explorer', 'gripterm.terminals.focus']) {
@@ -216,6 +320,7 @@ async function activate() {
     handOver('three', { closedName, error: null });
     await theDriverHasLooked('three');
 
+
     /*
      * Scenes four, five and six: the button PRESSED, and both ways.
      *
@@ -231,16 +336,7 @@ async function activate() {
      * the button from the terminal's own tab bar would pass while maximising
      * somebody's source file everywhere else.
      */
-    const folder = vscode.workspace.workspaceFolders?.[0];
-    if (folder !== undefined) {
-      const readme = await vscode.workspace.openTextDocument(vscode.Uri.joinPath(folder.uri, 'README.md'));
-      await vscode.window.showTextDocument(readme, { viewColumn: vscode.ViewColumn.One });
-      await until(
-        'a file of the person`s own to be the editor in front',
-        () => vscode.window.tabGroups.activeTabGroup.activeTab?.input instanceof vscode.TabInputText,
-        TERMINAL_WITHIN_MS
-      );
-    }
+    await aFileInFront();
     await sleep(QUIET_MS);
     handOver('four', { pressed: 0, error: null });
     await theDriverHasLooked('four');
@@ -254,10 +350,46 @@ async function activate() {
     await sleep(QUIET_MS);
     handOver('six', { pressed: 2, error: null });
     await theDriverHasLooked('six');
+
+    /*
+     * Scene seven: S25 -- an agent asks for permission while the person is
+     * looking at a file.
+     *
+     * The terminal chosen is the FIRST of ours and not the one in front, so
+     * that "the click led to a terminal" and "the click led to the RIGHT
+     * terminal" cannot be confused for one another.
+     */
+    await aFileInFront();
+    const askedFor = stillOpen()[0] ?? null;
+    const permission = await askForPermission(askedFor);
+    /*
+     * A notification of the STAND-IN's own, raised in the same second and
+     * through the same one API, so that the driver has something to hold the
+     * product's to.
+     *
+     * Measured 2026-08-26 and this is why it exists: in Cursor 3.17.19 the eyes
+     * found no toast at all after a permission request, and the anchor they had
+     * -- the editor's own notification bell in the status bar -- proves only
+     * that the STATUS BAR was seen. "The product raised nothing" and "a toast in
+     * this fork is not where these eyes look" are two findings, and without this
+     * one line the first was about to be reported for the second. Nothing is
+     * awaited: a notification is answered minutes later or never.
+     */
+    void vscode.window.showWarningMessage(STAND_IN_NOTICE);
+    await sleep(1200);
+    handOver('seven', { askedFor, permission, standIn: STAND_IN_NOTICE, error: null });
+    await theDriverHasLooked('seven');
+
+    // Scene eight: what the PRODUCT believes is in front once the driver has
+    // clicked. A second witness to the same fact, from the other side of the
+    // API -- printed beside what the eyes saw, never instead of it.
+    await sleep(QUIET_MS);
+    handOver('eight', { error: null });
+    await theDriverHasLooked('eight');
   } catch (failed) {
     // Written to whichever scene has not been handed over yet, so that a driver
     // waiting on a file gets an answer instead of a deadline.
-    for (const name of ['one', 'two', 'three', 'four', 'five', 'six']) {
+    for (const name of ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight']) {
       if (!existsSync(`${SCENES}-${name}.json`)) {
         handOver(name, { error: String(failed?.message ?? failed) });
       }

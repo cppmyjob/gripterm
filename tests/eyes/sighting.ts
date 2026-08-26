@@ -70,6 +70,17 @@ export interface Wanted {
   readonly codicon: string | null;
   /** A computed colour it must have, e.g. `rgb(63, 162, 102)`. */
   readonly color: string | null;
+  /**
+   * The name it must carry -- for the sightings whose question is WHICH thing
+   * is drawn rather than how it looks.
+   *
+   * S25 is that question and nothing else: the notification says a terminal is
+   * waiting, the person clicks it, and what has to be in front afterwards is
+   * THAT terminal. A tab of the right colour with the wrong name on it is the
+   * complaint, not the answer, and a judge that compared only icons and colours
+   * would call it green.
+   */
+  readonly label?: string;
   /** What the product believed, in words, so a red says what it disagreed with. */
   readonly because: string;
 }
@@ -89,6 +100,17 @@ export interface Sighting {
    * no anchor cannot be judged, and the judge says so rather than guessing.
    */
   readonly anchors: readonly Drawn[];
+  /**
+   * What those anchors ARE, in words, for the sentence a refusal prints.
+   *
+   * Not decoration, and it was added after a receipt lied. Measured 2026-08-26
+   * in Cursor 3.17.19: an S26 sighting refused with "not one of the 1 control(s)
+   * of the EDITOR'S OWN there was drawn either (eyes-project 2)" -- and that
+   * control is ours. S13 anchors on the editor's own buttons; S26 anchors on
+   * the row, which is the product's belief drawn by the editor's list, and the
+   * two are different arguments. Left out where the default is true.
+   */
+  readonly anchorsAre?: string;
   /** What ours must look like, or `null` when the sighting only asks whether it is there. */
   readonly wanted: Wanted | null;
 }

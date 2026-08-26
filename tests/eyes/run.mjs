@@ -17,6 +17,34 @@
  * No chromedriver, no browser download, nothing fetched at first run, nothing to
  * keep in step with the fork's Electron.
  *
+ * **What proves these eyes would catch S26 -- and the date it stopped being an
+ * assumption.** Until 2026-08-26 the tab-against-row sightings had answered
+ * green or REFUSED and never once RED, so nothing said they would catch the
+ * defect they exist for. That is this file's own mistake turned on itself: an
+ * absence read as an answer. A positive control was put under them that day and
+ * then removed. It was a STAND-IN EXTENSION registering a second
+ * `FileDecorationProvider` over one of the `vscode-terminal:` uris the product
+ * colours a tab through -- so the disagreement was drawn by the EDITOR, through
+ * the product's own channel, with nothing of the eyes in the picture. In one run
+ * of VS Code 1.134.0 the two sightings read 2 green before it and, with the
+ * leftmost tab decorated `charts.purple`, RED for that tab ("it is coloured
+ * rgb(173, 128, 215) where rgb(134, 207, 134) was due") and GREEN for the other,
+ * in the same look. A second control was measured and NOT chosen: the driver
+ * painting that tab's icon itself reddened identically -- 1 red, 1 green, same
+ * shape -- but a driver that writes into the DOM it reads cannot tell "the eyes
+ * see the colour" from "the eyes see what they wrote", while a decoration the
+ * editor draws can. Neither control is in this file now; what is left of them is
+ * this paragraph and `judge.test.ts`. WHAT IS THEREFORE STILL UNPROVEN: that a
+ * later build would still be caught, since nothing repeats the control.
+ *
+ * **S25, and the one thing here that is simulated.** An agent hitting a
+ * permission prompt cannot be scheduled, so the observer posts the CLI's own
+ * `PermissionRequest` hook to the product's own loopback endpoint, with the
+ * token and the session id that terminal was launched with -- both readable from
+ * `creationOptions` by any extension in the window. What is stood in for is the
+ * AGENT. The parser, the state machine, the notifier, the toast and the button
+ * on it are the product's own, and so is where the button leads.
+ *
  * **What it will not touch.** Every window this starts carries a
  * `--user-data-dir`, an `--extensions-dir` and a `gripterm.storage.path` of its
  * own, all three under `.vscode-test/`, and the run refuses to start if the
@@ -300,14 +328,64 @@ const LOOK = `(() => {
              color: icon === null ? null : getComputedStyle(icon).color };
   });
 
+  // The notifications, as the workbench draws them: the toast itself, what it
+  // says, the buttons it offers, and the controls the EDITOR puts on every one
+  // of them (Clear Notification, Configure Notification) whoever raised it.
+  const toasts = [...document.querySelectorAll('.notifications-toasts .notification-toast')].map((toast) => ({
+    message: (toast.querySelector('.notification-list-item-message') || toast).textContent.trim(),
+    box: box(toast),
+    visible: toast.checkVisibility(),
+    buttons: [...toast.querySelectorAll('.monaco-button')].map((one) => ({
+      label: one.textContent.trim() || label(one),
+      codicon: codicon(one), box: box(one), visible: one.checkVisibility(), color: null,
+    })),
+    ownControls: [...toast.querySelectorAll('.notification-list-item-toolbar-container .action-item')].map(drawnOf),
+  }));
+
+  // Whether a menu is open right now. It is what a press on a "More Actions..."
+  // lands as, and therefore one of the two ways a control can show that a press
+  // reached it at all.
+  const menus = [...document.querySelectorAll('.context-view')]
+    .filter((e) => e.checkVisibility() && e.querySelector('.monaco-menu') !== null).length;
+
+  // The parts of the workbench themselves, laid out or not. This is what turns
+  // "our button was not in that bar" into "that bar is display:none in this
+  // fork", which is a different finding and not ours -- measured 2026-08-25 in
+  // a Cursor on a fresh profile and true of its whole side bar.
+  const parts = ['.part.activitybar', '.part.sidebar', '.part.panel', '.part.auxiliarybar', '.part.editor', '.part.statusbar']
+    .map((selector) => {
+      const part = document.querySelector(selector);
+      return { selector,
+               display: part === null ? 'absent' : getComputedStyle(part).display,
+               box: part === null ? { x: 0, y: 0, w: 0, h: 0 } : box(part),
+               visible: part !== null && part.checkVisibility() };
+    });
+
+  // The status bar, for the editor's own notification bell: it is drawn whether
+  // or not anything has been raised, so it is what proves the eyes got a look
+  // at the part of the window a toast would appear in.
+  const statusBar = [...document.querySelectorAll('.statusbar .statusbar-item')].map((item) => ({
+    label: label(item.querySelector('a') || item) || item.textContent.trim(),
+    codicon: codicon(item.querySelector('[class*=codicon-]') || item),
+    box: box(item),
+    visible: item.checkVisibility(),
+    color: null,
+  }));
+
   const tabs = [...document.querySelectorAll('.tabs-container .tab')].map((tab) => {
     const icon = tab.querySelector('.tab-label [class*=codicon-], .monaco-icon-label[class*=codicon-], [class*=codicon-]:not(.tab-actions [class*=codicon-])');
     const name = tab.querySelector('.label-name');
     const close = tab.querySelector('.tab-actions .action-item');
+    const group = tab.closest('.editor-group-container');
     return { label: (name === null ? tab.textContent : name.textContent).trim(),
              codicon: icon === null ? '' : codicon(icon),
              box: box(tab), visible: tab.checkVisibility(),
              color: icon === null ? null : getComputedStyle(icon).color,
+             // Which tab a person would call "in front": the active one of the
+             // active group. Two groups have an active tab each; only one of
+             // them is what somebody is looking at.
+             active: tab.classList.contains('active'),
+             inActiveGroup: group !== null && group.classList.contains('active'),
              close: close === null ? null : drawnOf(close) };
   });
 
@@ -330,7 +408,7 @@ const LOOK = `(() => {
 
   return JSON.stringify({
     onboardingOverlays: document.querySelectorAll('.onboarding-v2-overlay').length,
-    editorActionBars, paneHeaders, rows, tabs, anywhere, editorGroups,
+    editorActionBars, paneHeaders, rows, tabs, anywhere, editorGroups, toasts, statusBar, parts, menus,
   });
 })()`;
 
@@ -428,12 +506,165 @@ function s26TabsAgreeWithRows(seen, terminals, from) {
       // The row, as the editor drew it. It is the anchor AND the source of what
       // the tab is held to, which is why an unseen row can only ever refuse.
       anchors: row === null ? [] : [row],
+      anchorsAre: 'the row the product drew in the list',
       wanted: row === null || !row.visible || row.box.w === 0
         ? null
         : { codicon: null, color: row.color, because: `the row for ${name} is drawn in ${String(row.color)}` },
     };
   });
 }
+
+/** The editor's own notification bell, which is drawn whether or not anything was raised. */
+function theBell(seen) {
+  return seen.statusBar.filter((one) => /notification/iu.test(one.label));
+}
+
+/** The tab a person would say is in front: the active one of the active group. */
+function tabInFront(seen) {
+  return seen.tabs.find((one) => one.active && one.inActiveGroup)
+    ?? seen.tabs.find((one) => one.active)
+    ?? null;
+}
+
+/**
+ * S25, first half: the agent asked for permission, and the product said so
+ * where somebody in another window would see it.
+ *
+ * **The anchor is a notification the STAND-IN raised in the same second**, and
+ * it took a red in Cursor to learn why it has to be. The first version anchored
+ * on the editor's own notification bell in the status bar -- always drawn,
+ * toast or no toast -- and in Cursor 3.17.19 that produced "NOT DRAWN, beside
+ * Notifications, which the editor drew". But a bell in the status bar proves the
+ * STATUS BAR was seen; it says nothing about whether a toast, had there been
+ * one, is where these eyes look. The fork restyles what it pleases. So the
+ * anchor is a toast that certainly exists: one raised through the same one API
+ * by the observer, a moment after the product's. Ours missing beside it is the
+ * product; both missing is a window whose notifications the eyes cannot read,
+ * and that is REFUSED.
+ *
+ * A request that never reached the product names no anchor at all: whatever is
+ * or is not on the screen then, it is not the product's answer to a question
+ * nobody asked it.
+ */
+function s25TheToastIsDrawn(seen, name, delivered, standIn, point) {
+  const toast = seen.toasts.find((one) => one.message.includes(String(name))) ?? null;
+  const theirs = standIn === undefined || standIn === null
+    ? null
+    : seen.toasts.find((one) => one.message.includes(String(standIn))) ?? null;
+  return {
+    point,
+    scenario: 'S25',
+    what: delivered.asked === true
+      ? `a notification naming ${JSON.stringify(name)}, after its agent asked for permission`
+      : `a notification for a permission request that never reached the product (${String(delivered.why)})`,
+    ours: toast === null
+      ? null
+      : { label: toast.message, codicon: '', box: toast.box, visible: toast.visible, color: null },
+    anchors: delivered.asked !== true
+      ? []
+      : [theirs === null
+        ? { label: 'the stand-in raised a notification of its own and the eyes did not find it either', codicon: '', box: { x: 0, y: 0, w: 0, h: 0 }, visible: false, color: null }
+        : { label: 'a notification of the stand-in\'s own, raised a moment later', codicon: '', box: theirs.box, visible: theirs.visible, color: null }],
+    anchorsAre: 'a notification the stand-in raised through the same API, beside the editor\'s own bell '
+      + (theBell(seen).map((one) => `${one.label} (${one.codicon})`).join(', ') || 'which is not drawn either'),
+    wanted: null,
+  };
+}
+
+/**
+ * S25, second half: the click leads to the terminal it was raised about.
+ *
+ * The scenario's own sentence -- "клик по ней ведёт к нужному терминалу" -- and
+ * the word that carries it is НУЖНОМУ. A button that brings up a terminal, any
+ * terminal, is not what was asked for, so what is judged is the NAME of the tab
+ * in front and not merely that a tab is.
+ */
+function s25TheClickLeadsThere(seen, name, point, landed) {
+  const front = tabInFront(seen);
+  return {
+    point,
+    scenario: 'S25',
+    what: `the tab in front, after the notification about ${JSON.stringify(name)} was clicked`,
+    ours: front,
+    /*
+     * The anchor of THIS sighting is not a control: it is the evidence that a
+     * press lands in this window at all.
+     *
+     * Without it a red here has two causes and no way to tell them apart -- the
+     * product's button did nothing, or the eyes cannot press a button -- and the
+     * second dressed as the first is exactly the mistake this apparatus was
+     * built to stop. So a press of the EDITOR'S OWN control on the very same
+     * toast is made when ours changes nothing, and what it answered stands here
+     * as the anchor.
+     */
+    anchors: [landed],
+    anchorsAre: 'a press that landed -- a control that answered one, on the same toast',
+    wanted: { codicon: null, color: null, label: String(name), because: `the notification was raised about ${String(name)}` },
+  };
+}
+
+/**
+ * Clicks where a person would click, and gives the workbench a moment to act.
+ *
+ * The pointer is moved first and the press is spaced out from it, because a
+ * workbench draws hovers and moves things under a pointer that has just
+ * arrived: a press in the same millisecond as the move can land on a layout
+ * that no longer holds.
+ */
+async function press(cdp, at) {
+  const x = Math.round(at.x + at.w / 2);
+  const y = Math.round(at.y + at.h / 2);
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, buttons: 0 });
+  await new Promise((wake) => setTimeout(wake, 300));
+  await cdp.send('Input.dispatchMouseEvent', {
+    type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1,
+  });
+  await new Promise((wake) => setTimeout(wake, 80));
+  await cdp.send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1,
+  });
+  await new Promise((wake) => setTimeout(wake, 1500));
+  return { x, y };
+}
+
+/** Escape, the way a person closes a menu they did not mean to open. */
+async function escape(cdp) {
+  for (const type of ['rawKeyDown', 'keyUp']) {
+    await cdp.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+  }
+  await new Promise((wake) => setTimeout(wake, 500));
+}
+
+/** Whether a toast naming this terminal is still on the screen. */
+function toastFor(seen, name) {
+  return seen.toasts.find((one) => one.message.includes(String(name))) ?? null;
+}
+
+/**
+ * Looks until the thing about to be pressed has stopped moving.
+ *
+ * By the state of the picture and not by a sleep, for the reason `agreeing()`
+ * gives: a press aimed at a box read during a reflow lands on whatever has since
+ * slid into that place, and the failure it produces looks exactly like a button
+ * that does nothing. The layout override is lifted just before this is called,
+ * which is precisely a reflow.
+ */
+async function settled(cdp, where) {
+  let seen = await look(cdp);
+  let last = JSON.stringify(where(seen));
+  for (let tries = 0; tries < 8; tries += 1) {
+    await new Promise((wake) => setTimeout(wake, 600));
+    const again = await look(cdp);
+    const now = JSON.stringify(where(again));
+    seen = again;
+    if (now === last) {
+      return seen;
+    }
+    last = now;
+  }
+  return seen;
+}
+
 
 // --- getting ready ----------------------------------------------------------
 
@@ -718,6 +949,7 @@ async function main() {
     await screenshot(cdp, 'scene-two');
     say(`  anything anywhere in the window by the names this run looks for: ${
       seen2.anywhere.length === 0 ? 'none' : seen2.anywhere.map((one) => `${one.label} ${String(one.box.w)}x${String(one.box.h)} visible=${String(one.visible)}`).join(' | ')}`);
+    say(`  the parts of the window: ${seen2.parts.map((one) => `${one.selector} ${one.display} ${String(one.box.w)}x${String(one.box.h)}`).join(' | ')}`);
     const strip = seen2.editorActionBars.find((one) => one.activeTab !== null && two.terminals.includes(one.activeTab));
     say(`  the bar in the terminal's own title holds: ${
       (strip?.items ?? []).map((one) => `${one.label} ${String(one.box.w)}x${String(one.box.h)}`).join(' | ') || 'nothing'}`);
@@ -752,6 +984,140 @@ async function main() {
       looked(name);
     }
     presses = pressed;
+
+    /*
+     * S25, both halves, and the first time either has been looked at.
+     *
+     * The scene is the customer's: an agent asks for permission while the
+     * person is looking at something else. The observer puts a FILE in front
+     * and posts the CLI's own `PermissionRequest` hook to the product's own
+     * loopback endpoint -- the very channel a real agent uses, with the token
+     * and session id that terminal was launched with -- so everything after it
+     * is the product's doing and nothing of ours.
+     */
+    const seven = await scene('seven');
+    say(`  scene seven: permission asked for ${JSON.stringify(seven.askedFor)}: ${JSON.stringify(seven.permission)}`);
+    say(`  in front when it was asked: ${JSON.stringify(seven.activeTab)}`);
+    const raised = await look(cdp);
+    say(`  the window's toasts: ${raised.toasts.length === 0 ? 'none' : raised.toasts.map((one) => `${JSON.stringify(one.message)} ${String(one.box.w)}x${String(one.box.h)} [${one.buttons.map((b) => b.label).join(', ')}]`).join(' | ')}`);
+    say(`  the notification bell says: ${theBell(raised).map((one) => `${one.label} (${one.codicon}) ${String(one.box.w)}x${String(one.box.h)}`).join(', ') || 'nothing of the kind is drawn'}`);
+    sightings = [...sightings, s25TheToastIsDrawn(raised, seven.askedFor, seven.permission, seven.standIn, 5)];
+    await screenshot(cdp, 'scene-seven');
+
+    /*
+     * The click, and the ONE thing about it that had to be measured before it
+     * could be believed.
+     *
+     * A press is dispatched in the window's REAL pixels, and the layout
+     * override is lifted for it. Measured 2026-08-26, and it cost two runs: with
+     * the workbench laid out at 1920x1200 over a window the desktop had made
+     * 1440x900, every press this driver sent landed outside the window and
+     * NOTHING answered it -- not our button and not the editor's own on the same
+     * toast. The same button pressed with the override lifted, at 1328,830
+     * instead of 1808,1130, closed the notification and brought the terminal up.
+     * So the boxes are read again in the real layout, the press is made there,
+     * and the override goes back on afterwards for whatever is looked at next.
+     *
+     * AND THE FIRST PRESS IS SPENT. Measured over four runs the same day: the
+     * first press this driver dispatches into the window changes nothing and the
+     * second answers -- with `Page.bringToFront` in front of it and without, so
+     * that is not what it is. It is a fact about this driver and not about the
+     * product, and the way it is kept honest is that the eyes press again ONCE,
+     * say how many presses it took, and hold a button that answers neither press
+     * to the control below rather than to an accusation.
+     */
+    await cdp.send('Emulation.clearDeviceMetricsOverride');
+    const real = await settled(cdp, (seen) => toastFor(seen, seven.askedFor)?.buttons[0]?.box ?? null);
+    const toast = toastFor(real, seven.askedFor);
+    const button = toast?.buttons.find((one) => one.box.w > 0) ?? null;
+    if (button === null) {
+      say('  no button to press on it, so where the click leads cannot be asked');
+      sightings = [...sightings, {
+        point: 6,
+        scenario: 'S25',
+        what: `the tab in front, after a notification about ${JSON.stringify(seven.askedFor)} that offered nothing to press`,
+        ours: null,
+        anchors: [],
+        anchorsAre: 'a button on the notification, of which there was none',
+        wanted: null,
+      }];
+    } else {
+      say(`  pressing ${JSON.stringify(button.label)} on it, ${String(button.box.w)}x${String(button.box.h)} at ${String(button.box.x)},${String(button.box.y)}, in the window's real layout`);
+      let at = await press(cdp, button.box);
+      let after = await look(cdp);
+      let presses = 1;
+      if (toastFor(after, seven.askedFor) !== null) {
+        // Pressed again, once, and the number is printed rather than hidden: a
+        // button that needs two presses from this driver and one from a person
+        // is a fact about the driver, and a button that answers neither is a
+        // fact about the product. They must not be told apart by guesswork.
+        say('  it did not answer, so the same button is pressed once more');
+        at = await press(cdp, button.box);
+        after = await look(cdp);
+        presses = 2;
+      }
+      const answered = toastFor(after, seven.askedFor) === null;
+      say(`  after ${String(presses)} press(es): the tab in front is ${JSON.stringify(tabInFront(after)?.label ?? null)}`
+        + `, and the notification is ${answered ? 'GONE' : 'still on the screen'}`);
+
+      /*
+       * The control for the press itself, made only when ours changed nothing:
+       * the editor's own control on the same toast, pressed the same way by the
+       * same driver. A toast that closes for it and not for ours is the
+       * product's answer; a toast that closes for neither is a press that never
+       * landed, and the eyes must say so rather than call it a defect.
+       */
+      let landed = {
+        label: `the notification closed when ${JSON.stringify(button.label)} was pressed at ${String(at.x)},${String(at.y)}`
+          + `${presses === 1 ? '' : `, on press ${String(presses)}`}`,
+        codicon: '', box: { x: at.x, y: at.y, w: 1, h: 1 }, visible: true, color: null,
+      };
+      if (!answered) {
+        const own = toast?.ownControls.find((one) => one.box.w > 0) ?? null;
+        if (own === null) {
+          landed = { label: 'the toast carried no control of the editor own to press instead', codicon: '', box: { x: 0, y: 0, w: 0, h: 0 }, visible: false, color: null };
+        } else {
+          say(`  ours changed nothing, so pressing the editor's own ${JSON.stringify(own.label)} the same way`);
+          await press(cdp, own.box);
+          const control = await look(cdp);
+          // Two ways a control can show a press reached it, and the second is
+          // not optional: the one control a notification toast always carries is
+          // `More Actions...`, which OPENS A MENU rather than closing anything.
+          // Measured 2026-08-26 -- reading only "did the toast close" called a
+          // press that plainly landed a press that never landed.
+          const closed = toastFor(control, seven.askedFor) === null;
+          const opened = control.menus > 0;
+          const answeredControl = closed || opened;
+          say(`  the editor's own control ${answeredControl
+            ? `answered it (${closed ? 'the notification closed' : 'a menu opened'}) -- so a press does land in this window`
+            : 'changed nothing either -- so no press lands in this window at all'}`);
+          if (opened) {
+            // Put the menu away again, so that whatever is looked at next is the
+            // window and not our own leftovers.
+            await escape(cdp);
+          }
+          landed = {
+            label: `${own.label}, the editor's own on that toast, ${answeredControl ? 'answered the same press' : 'did not answer the same press'}`,
+            codicon: own.codicon,
+            box: answeredControl ? own.box : { x: 0, y: 0, w: 0, h: 0 },
+            visible: answeredControl,
+            color: null,
+          };
+        }
+      }
+      sightings = [...sightings, s25TheClickLeadsThere(after, seven.askedFor, 6, landed)];
+      await screenshot(cdp, 'scene-eight');
+    }
+    await cdp.send('Emulation.setDeviceMetricsOverride', {
+      width: LAYOUT.width, height: LAYOUT.height, deviceScaleFactor: 1, mobile: false,
+    });
+    looked('seven');
+
+    const eight = await scene('eight');
+    // What the PRODUCT believes is in front, beside what the eyes saw. Printed
+    // and not judged: the eyes judge the picture, and this is the other witness.
+    say(`  the product's own account of it: active terminal ${JSON.stringify(eight.activeTerminal)}, active tab ${JSON.stringify(eight.activeTab)}`);
+    looked('eight');
   } catch (failed) {
     // A driver that died is not a product that failed, and the difference must
     // survive into the file the gate reads. The sightings taken so far are kept
