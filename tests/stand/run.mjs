@@ -26,10 +26,15 @@
  * are taken before each sitting is launched and the difference is what gets
  * `CloseMainWindow()` -- not a filter on the command line, which breaks the day
  * somebody opens a second copy with the same user data directory, and not a kill
- * by name, which would close the window the owner is working in.
+ * by name, which would close the window the owner is working in. Both of those
+ * readings are still a list of WINDOWS, asked of PowerShell; what changed on
+ * 2026-08-26 is only the WAIT after the asking, which watches the pid it already
+ * knows rather than enumerating windows again. Measured that day over four
+ * sittings: the process outlives its window by 507 to 1040 ms, against a ceiling
+ * of 60 000.
  */
 
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -57,6 +62,28 @@ const STARTED_AT = new Date();
 // need this one function: this file and `.vscode-test.mjs` are ESM, and its own
 // suite is Jest. See the head of `tools/fork-build.js`.
 const { forkBuild } = require(join(REPO, 'tools', 'fork-build.js'));
+/*
+ * Everything this file asks the operating system, and the count of what it
+ * started in order to ask. CommonJS for the same reason as the line above.
+ *
+ * The module exists because on 2026-08-26 a full gate died HERE, in the fourth
+ * sitting, because Windows would not make another `powershell.exe`
+ * (`0xC0000142`, and no verdict at all). MEASURED that day: a whole run started
+ * twenty of them, five per sitting. Four of the five are the edges of a sitting,
+ * where the question really is about a WINDOW; the fifth was the close-wait,
+ * which now asks whether a pid is still running and starts nothing. Sixteen
+ * chances of being refused are not meaningfully better than twenty, so the same
+ * module also asks again when it is refused -- see `ASKED_AGAIN` there.
+ */
+const {
+  closeWindow,
+  editorWindows,
+  lost,
+  opened,
+  powershellRuns,
+  waitUntilGone,
+  windowsAmong,
+} = require(join(REPO, 'tools', 'editor-windows.js'));
 const BASE = join(REPO, '.vscode-test');
 const STORE = runStore(LABEL);
 const EXTENSIONS = join(BASE, `extensions-${LABEL}`);
@@ -138,46 +165,6 @@ const EDITORS = [
 
 function step(what) {
   console.log(`\n=== ${what}`);
-}
-
-function powershell(script) {
-  return execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
-    encoding: 'utf8',
-  }).trim();
-}
-
-/**
- * The editor windows on this machine right now, by pid.
- *
- * A window and not a process: an editor is a dozen processes and one of them has
- * a main window handle. `Cursor` and `Code` by name, because both are editors
- * this stand may have started and either may be the one the owner is sitting in.
- */
-function editorWindows() {
-  /*
-   * `Get-Process -Name Cursor,Code` is NOT what this asks, and the difference
-   * cost the stand its first run: a name in that list that nothing is running
-   * under is a non-terminating error, `-ErrorAction SilentlyContinue` hides the
-   * message and not the failed status, and PowerShell then exits 1 with the
-   * right answer on its stdout. `execFileSync` reads that as a crash. Every
-   * process is enumerated instead and the names are matched here, which cannot
-   * fail whichever editors happen to be running; `@()` around it keeps a single
-   * match a list rather than a scalar.
-   */
-  const out = powershell(
-    '@(Get-Process | Where-Object {' +
-      ' ($_.ProcessName -eq \'Cursor\' -or $_.ProcessName -eq \'Code\')' +
-      ' -and $_.MainWindowHandle -ne 0 }) | ForEach-Object { $_.Id }'
-  );
-  return out.length === 0 ? [] : out.split(/\r?\n/u).map((line) => Number(line.trim()));
-}
-
-/** Asks one window to close the way a person closes it, so that deactivation runs. */
-function closeWindow(pid) {
-  powershell(
-    `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue;` +
-      ' if ($p) { $null = $p.CloseMainWindow() }'
-  );
 }
 
 async function until(what, ready, ms) {
@@ -364,6 +351,32 @@ function megabytes(bytes) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/**
+ * Whether the close-wait also watches the WINDOW go, at a whole `powershell.exe`
+ * per poll, beside the process it is actually waiting on.
+ *
+ * Off, and the flag is here rather than deleted because it is the instrument
+ * that CHOSE the wait. "The window is gone" and "the process is gone" are two
+ * events, and moving the wait from the first to the second is only honest if
+ * somebody has measured the gap -- so the measurement stays runnable:
+ *
+ *     GRIPTERM_STAND_WATCH_WINDOWS=yes pnpm run test:stand
+ *
+ * Its answer on 2026-08-26 is in the report of the day and in the comment on
+ * `waitUntilGone`.
+ */
+const WATCH_WINDOWS_TOO = process.env.GRIPTERM_STAND_WATCH_WINDOWS === 'yes';
+
+/** One window's departure, in whichever of the two senses were watched. */
+function wentAway(one) {
+  const process_ = one.afterMs === null ? 'never' : `${String(one.afterMs)} ms`;
+  if (!WATCH_WINDOWS_TOO) {
+    return `${process_} (the process)`;
+  }
+  const window_ = one.alsoAfterMs === null ? 'never' : `${String(one.alsoAfterMs)} ms`;
+  return `${window_} (the window), ${process_} (the process)`;
+}
+
 // --- one sitting ------------------------------------------------------------
 
 async function sitting(number, editor, userData) {
@@ -409,25 +422,25 @@ async function sitting(number, editor, userData) {
   );
   console.log(`  settled after            : ${String(Date.now() - started)} ms`);
 
-  const mine = editorWindows().filter((pid) => !before.includes(pid));
+  const mine = opened(before, editorWindows());
   console.log(`  closing only             : ${mine.join(', ') || 'none'}`);
   for (const pid of mine) {
     closeWindow(pid);
   }
-  await until(
-    `the ${String(mine.length)} window(s) this sitting opened to be gone`,
-    () => {
-      const left = editorWindows().filter((pid) => mine.includes(pid));
-      return left.length === 0 ? true : null;
-    },
-    CLOSES_WITHIN_MS
-  );
+  const closing = await waitUntilGone(mine, {
+    withinMs: CLOSES_WITHIN_MS,
+    pollMs: POLL_MS,
+    also: WATCH_WINDOWS_TOO ? windowsAmong : null,
+  });
+  for (const one of closing.gone) {
+    console.log(`  ${String(one.pid)} gone after              : ${wentAway(one)}`);
+  }
 
   const survivors = editorWindows();
-  const lost = before.filter((pid) => !survivors.includes(pid));
-  if (lost.length > 0) {
+  const takenDown = lost(before, survivors);
+  if (takenDown.length > 0) {
     throw new Error(
-      `this sitting closed ${lost.join(', ')}, which existed before it started. ` +
+      `this sitting closed ${takenDown.join(', ')}, which existed before it started. ` +
         'Those are somebody else`s windows and the run stops here.'
     );
   }
@@ -563,6 +576,7 @@ async function main() {
   console.log(`\n${verdict.red ? 'RED' : 'GREEN'} -- the recording is at ${RECORDING}`);
   writeFileSync(VERDICT, `${JSON.stringify(verdict, null, 2)}\n`, 'utf8');
   console.log(`the verdict, for a machine, is at ${VERDICT}`);
+  console.log(`this run started ${String(powershellRuns())} powershell.exe`);
   process.exitCode = verdict.red ? 1 : 0;
   keep(verdict.red ? 'red' : 'green');
 }
@@ -576,6 +590,10 @@ async function main() {
 try {
   await main();
 } catch (died) {
+  // Before anything else, because it is the number a death from
+  // `0xC0000142` is read against: how many processes this run had asked the
+  // machine for by the time it was refused one.
+  console.log(`\nthis run started ${String(powershellRuns())} powershell.exe before it died`);
   if (ownDirectoriesMade) {
     keep('died');
   } else {
