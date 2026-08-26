@@ -87,6 +87,8 @@ interface Stand {
   readonly logger: RecordingLogger;
   readonly watcher: RepositoryWatcher;
   readonly reads: () => number;
+  /** Wakes of the OTHER signal: who is out there, rather than what they hold. */
+  readonly presenceReads: () => number;
 }
 
 function stand(options: { debounceMs?: number } = {}): Stand {
@@ -105,7 +107,19 @@ function stand(options: { debounceMs?: number } = {}): Stand {
   watcher.watch(() => {
     reads += 1;
   });
-  return { layout, platform, scheduler, logger, watcher, reads: () => reads };
+  let presenceReads = 0;
+  watcher.watchPresence(() => {
+    presenceReads += 1;
+  });
+  return {
+    layout,
+    platform,
+    scheduler,
+    logger,
+    watcher,
+    reads: () => reads,
+    presenceReads: () => presenceReads,
+  };
 }
 
 describe('what the repository watcher attaches to', () => {
@@ -183,14 +197,45 @@ describe('which platform events are worth a re-read', () => {
     expect(rig.reads()).toBe(1);
   });
 
-  it('asks for one when an owner file changes, so a dead window is seen at once', () => {
+  /*
+   * The pulse of presence, and the reason the two signals are two (Ш11).
+   *
+   * Every window rewrites `owners/<id>.json` every ten seconds, and until this
+   * rule existed each of those writes woke every window's list -- W x W full
+   * reads of the whole store per pulse round, measured at exactly that
+   * (`spikes/start-budget/idle-reads.mjs`, 16 for four windows). A heartbeat
+   * changes nothing a list draws: `readAll` never asks presence anything. So it
+   * is filtered from the list's signal for the same reason the journal is, and
+   * kept for the one signal it IS news for.
+   */
+  it('says nothing to the list when a window beats its heart', () => {
     const rig = stand();
     rig.watcher.start();
 
     rig.platform.change(rig.layout.ownersDir, 'e5f6a7b8.json');
     rig.scheduler.elapse();
 
-    expect(rig.reads()).toBe(1);
+    expect(rig.reads()).toBe(0);
+  });
+
+  it('tells the watchers of presence instead, so a dead window is still seen at once', () => {
+    const rig = stand();
+    rig.watcher.start();
+
+    rig.platform.change(rig.layout.ownersDir, 'e5f6a7b8.json');
+    rig.scheduler.elapse();
+
+    expect(rig.presenceReads()).toBe(1);
+  });
+
+  it('does not wake presence for a record, which says nothing about who is out there', () => {
+    const rig = stand();
+    rig.watcher.start();
+
+    rig.platform.change(rig.layout.terminalsDir, RECORD_FILE);
+    rig.scheduler.elapse();
+
+    expect(rig.presenceReads()).toBe(0);
   });
 
   it('says nothing about the journal, which no window reads', () => {
@@ -332,7 +377,11 @@ describe('going blind', () => {
 
     expect(rig.logger.errors[0]?.message).toContain('stopped reporting changes');
     expect(rig.logger.errors[0]?.details).toMatchObject({ path: rig.layout.ownersDir });
-    expect(rig.reads()).toBe(1);
+    // The last honest act of the root that went blind, and of that root only:
+    // `owners/` feeds presence, so a listener drawing the LIST learns nothing
+    // from it going quiet.
+    expect(rig.presenceReads()).toBe(1);
+    expect(rig.reads()).toBe(0);
   });
 });
 

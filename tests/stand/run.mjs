@@ -114,6 +114,13 @@ const PLACES = { base: BASE, userData: USER_DATA, store: STORE, output: OUTPUT, 
  */
 const { KEPT_TRACES, LOUD_ABOVE_BYTES, keepRun, runDirectories } =
   require(join(REPO, 'out', 'tests', 'stand', 'keepsake.js'));
+/*
+ * The budget of the start, and the reader of the two `tookMs` the product
+ * already prints (Ш11). Required beside the keepsake rather than at the verdict,
+ * because a sitting needs it while it is closing.
+ */
+const { START_BUDGET, judgeTheStart, startTimesIn } =
+  require(join(REPO, 'out', 'tests', 'stand', 'start-budget.js'));
 const PRODUCT = join(REPO, 'packages', 'extension');
 const OBSERVER = join(REPO, 'tests', 'stand', 'observer');
 const RECORDING = join(OUTPUT, 'recording.ndjson');
@@ -179,6 +186,35 @@ async function until(what, ready, ms) {
     }
     await new Promise((wake) => setTimeout(wake, POLL_MS));
   }
+}
+
+/**
+ * The log files this run's windows have left in its own store, by name.
+ *
+ * By NAME and not by content: a sitting is timed by the file that appeared while
+ * it was open, and `logs/<ownerId>.log` is named after an ACTIVATION, so the
+ * difference between two listings is exactly the window that just ran.
+ */
+function logsSoFar() {
+  const directory = join(STORE, 'logs');
+  return existsSync(directory) ? readdirSync(directory).filter((one) => one.endsWith('.log')) : [];
+}
+
+/**
+ * What the window that just closed said about its own start.
+ *
+ * Two new logs in one sitting would be a stand that had lost track of what it
+ * was measuring, so the honest answer to that is to time neither: `null` is a
+ * fact the budget can report as unmeasured, a number taken from the wrong window
+ * is not.
+ */
+function startTimes(before) {
+  const seen = new Set(before);
+  const fresh = logsSoFar().filter((one) => !seen.has(one));
+  if (fresh.length !== 1) {
+    return { listedMs: null, activatedMs: null, logs: fresh.length };
+  }
+  return { ...startTimesIn(readFileSync(join(STORE, 'logs', fresh[0]), 'utf8')), logs: 1 };
 }
 
 /** The records in the stand's own store, with what the judge reads of each. */
@@ -384,6 +420,7 @@ async function sitting(number, editor, userData) {
   rmSync(done, { force: true });
   const before = editorWindows();
   const seen = records();
+  const logsBefore = logsSoFar();
   console.log(`--- sitting ${String(number)}`);
   console.log(`  windows that must survive : ${before.join(', ') || 'none'}`);
 
@@ -447,10 +484,22 @@ async function sitting(number, editor, userData) {
 
   keyIsReal(number, userData);
 
+  // After the window has gone, and it has to be: `FileLog` appends
+  // synchronously, but the last line of an activation is written while the
+  // window is still up.
+  const start = startTimes(logsBefore);
+  const said = (ms) => (ms === null ? '-' : String(ms));
+  console.log(
+    `  the product's own clock  : ${said(start.listedMs)} ms to the list, ${said(start.activatedMs)} ms to the end` +
+      (start.logs === 1 ? '' : ` (${String(start.logs)} new logs, so neither number is this window's)`)
+  );
+
   return {
     kind: 'sitting',
     sitting: number,
     restoredMs: signal.restoredMs ?? null,
+    listedMs: start.listedMs,
+    activatedMs: start.activatedMs,
     records: startsSince(seen),
   };
 }
@@ -568,17 +617,42 @@ async function main() {
   // the CommonJS it is, with no guessing about what a named export becomes.
   const { BUDGET, judge } = require(join(REPO, 'out', 'tests', 'stand', 'judge.js'));
   const { parseRecording } = require(join(REPO, 'out', 'tests', 'stand', 'recording.js'));
-  const verdict = judge(parseRecording(readFileSync(RECORDING, 'utf8')), BUDGET);
+  const recording = parseRecording(readFileSync(RECORDING, 'utf8'));
+  const verdict = judge(recording, BUDGET);
   for (const finding of verdict.findings) {
     console.log(`  ${String(finding.point)}. ${finding.answer.toUpperCase().padEnd(10)} ${finding.says}`);
     console.log(`     ${finding.because}`);
   }
-  console.log(`\n${verdict.red ? 'RED' : 'GREEN'} -- the recording is at ${RECORDING}`);
-  writeFileSync(VERDICT, `${JSON.stringify(verdict, null, 2)}\n`, 'utf8');
+  /*
+   * The budget of the start, judged beside the nine points and printed beside
+   * them (Ш11).
+   *
+   * BESIDE and not among: the nine are about the SHAPE of the window a person
+   * came back to, and they have a budget document of their own that the owner
+   * has never ratified (`gate/allowed-red.json`). This is about time, it is read
+   * from the product's own two `tookMs`, and the run is red if either half is.
+   */
+  const start = judgeTheStart(
+    recording.sittings.map((one) => ({
+      sitting: one.sitting,
+      listedMs: one.summary?.listedMs ?? null,
+      activatedMs: one.summary?.activatedMs ?? null,
+    })),
+    START_BUDGET
+  );
+  console.log('');
+  console.log(
+    `  START. ${start.answer.toUpperCase().padEnd(10)} the start stayed inside ` +
+      `${String(START_BUDGET.listedMs)} ms to the list and ${String(START_BUDGET.activatedMs)} ms to the end`
+  );
+  console.log(`     ${start.because}`);
+  const red = verdict.red || start.answer !== 'green';
+  console.log(`\n${red ? 'RED' : 'GREEN'} -- the recording is at ${RECORDING}`);
+  writeFileSync(VERDICT, `${JSON.stringify({ ...verdict, start }, null, 2)}\n`, 'utf8');
   console.log(`the verdict, for a machine, is at ${VERDICT}`);
   console.log(`this run started ${String(powershellRuns())} powershell.exe`);
-  process.exitCode = verdict.red ? 1 : 0;
-  keep(verdict.red ? 'red' : 'green');
+  process.exitCode = red ? 1 : 0;
+  keep(red ? 'red' : 'green');
 }
 
 /*

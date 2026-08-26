@@ -77,6 +77,27 @@ export interface RepositoryWatcherOptions {
 }
 
 /**
+ * One root's traffic: who is waiting for it, and the wait that collapses a burst
+ * into one wake.
+ *
+ * There are two of these and not one because the two roots answer two different
+ * questions at two different rates -- see `watchPresence`.
+ */
+interface Channel {
+  readonly listeners: Set<RepositoryListener>;
+  pending: Disposable | null;
+}
+
+function subscribe(channel: Channel, listener: RepositoryListener): Disposable {
+  channel.listeners.add(listener);
+  return {
+    dispose: (): void => {
+      channel.listeners.delete(listener);
+    },
+  };
+}
+
+/**
  * What makes a change in ANOTHER window visible in this one, without polling.
  *
  * Two roots and not one: `terminals/`, and `owners/` as well. Without the second,
@@ -108,9 +129,9 @@ export interface RepositoryWatcherOptions {
  * which is why it is a rule for the caller and not a branch in this file.
  */
 export class RepositoryWatcher implements Disposable {
-  private readonly _listeners = new Set<RepositoryListener>();
+  private readonly _records: Channel = { listeners: new Set(), pending: null };
+  private readonly _presence: Channel = { listeners: new Set(), pending: null };
   private readonly _roots = new Map<string, DirectoryHandle>();
-  private _pending: Disposable | null = null;
   private _stopped = false;
 
   constructor(private readonly _options: RepositoryWatcherOptions) {}
@@ -128,42 +149,56 @@ export class RepositoryWatcher implements Disposable {
     if (this._stopped || this._roots.size > 0) {
       return;
     }
-    this._attach(this._options.layout.terminalsDir);
-    this._attach(this._options.layout.ownersDir);
+    this._attach(this._options.layout.terminalsDir, this._records);
+    this._attach(this._options.layout.ownersDir, this._presence);
   }
 
+  /** What the LIST is drawn from: the records, and nothing about who holds them. */
   public watch(listener: RepositoryListener): Disposable {
-    this._listeners.add(listener);
-    return {
-      dispose: (): void => {
-        this._listeners.delete(listener);
-      },
-    };
+    return subscribe(this._records, listener);
+  }
+
+  /**
+   * Who is out there: `owners/`, which is a different question and a different
+   * cadence.
+   *
+   * Separate from `watch` because of the pulse. Every window rewrites its own
+   * presence file every ten seconds (`HEARTBEAT_INTERVAL_MS`), so this signal
+   * fires W times per round in every one of W windows -- while the list it used
+   * to wake learns nothing from it at all, `readAll()` never having asked
+   * presence a question. Measured before the split, at four windows and forty
+   * records: sixteen full reads of the whole store per pulse round, 96 a minute,
+   * on a machine where nobody was doing anything.
+   */
+  public watchPresence(listener: RepositoryListener): Disposable {
+    return subscribe(this._presence, listener);
   }
 
   /** Final: a disposed watcher does not start again, and a late event finds nobody. */
   public dispose(): void {
     this._stopped = true;
-    this._pending?.dispose();
-    this._pending = null;
+    for (const channel of [this._records, this._presence]) {
+      channel.pending?.dispose();
+      channel.pending = null;
+      channel.listeners.clear();
+    }
     for (const handle of this._roots.values()) {
       handle.close();
     }
     this._roots.clear();
-    this._listeners.clear();
   }
 
-  private _attach(path: string): void {
+  private _attach(path: string, channel: Channel): void {
     const attach = this._options.watch ?? nodeDirectoryWatch;
     try {
       this._roots.set(
         path,
         attach(path, {
           onChange: (filename): void => {
-            this._onChange(filename);
+            this._onChange(filename, channel);
           },
           onError: (cause): void => {
-            this._onBlind(path, cause);
+            this._onBlind(path, channel, cause);
           },
         })
       );
@@ -179,11 +214,20 @@ export class RepositoryWatcher implements Disposable {
     }
   }
 
-  private _onChange(filename: string | null): void {
+  /**
+   * One platform event, on the root it arrived at.
+   *
+   * The root decides who hears it, and that is the whole of the rule: a name
+   * under `terminals/` is news for the list, a name under `owners/` is news
+   * about who is out there, and a LOST BATCH is both of those about one root --
+   * so it goes to that root's listeners and to nobody else's. Before the split
+   * every event of either kind woke everybody.
+   */
+  private _onChange(filename: string | null, channel: Channel): void {
     if (filename !== null && isJournalPath(filename)) {
       return;
     }
-    this._schedule();
+    this._schedule(channel);
   }
 
   /**
@@ -199,29 +243,29 @@ export class RepositoryWatcher implements Disposable {
    * blind, and it makes the list right as of the moment sight was lost rather
    * than as of whenever the last event happened to arrive.
    */
-  private _onBlind(path: string, cause: unknown): void {
+  private _onBlind(path: string, channel: Channel, cause: unknown): void {
     this._options.logger.error(
       'a store directory stopped reporting changes; this window will not see other windows there until it is reloaded',
       { path, cause }
     );
-    this._schedule();
+    this._schedule(channel);
   }
 
-  private _schedule(): void {
-    if (this._stopped || this._pending !== null) {
+  private _schedule(channel: Channel): void {
+    if (this._stopped || channel.pending !== null) {
       return;
     }
-    this._pending = this._options.scheduler.after(
+    channel.pending = this._options.scheduler.after(
       this._options.debounceMs ?? DEFAULT_DEBOUNCE_MS,
       () => {
-        this._pending = null;
-        this._notify();
+        channel.pending = null;
+        this._notify(channel);
       }
     );
   }
 
-  private _notify(): void {
-    for (const listener of this._listeners) {
+  private _notify(channel: Channel): void {
+    for (const listener of channel.listeners) {
       try {
         listener();
       } catch (cause: unknown) {

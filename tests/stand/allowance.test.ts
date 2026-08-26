@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ALLOWANCES, cursorAgainstBudget, ratesAgainstBudget, readAllowances, standingAllowances, verdictAgainstAllowances } from './allowance';
+import { ALLOWANCES, cursorAgainstBudget, ratesAgainstBudget, readAllowances, refusalForTheStart, standingAllowances, verdictAgainstAllowances } from './allowance';
 import { BUDGET, judge } from './judge';
 import { parseRecording } from './recording';
 import type { AllowanceDocument, RateMeasured, WorkbenchSaid } from './allowance';
@@ -721,5 +721,46 @@ describe('the budget of admitted redness', () => {
       expect(judged.refusals).toHaveLength(1);
       expect(judged.refusals[0]?.because).toContain('glass');
     });
+  });
+});
+
+/*
+ * The budget of the START, which is not in `gate/allowed-red.json` and must not
+ * be (Ш11): that document is the budget of admitted redness, unratified, and a
+ * ceiling on time is not a redness anybody is admitting. So the gate refuses on
+ * it directly -- and this is where that refusal is decided, so that the gate is
+ * left doing the wiring.
+ *
+ * The case that matters most is the LAST one. `tests/stand/run.mjs` writes the
+ * start's verdict into `verdict.json`; a gate reading a verdict without one is
+ * reading a stand that did not ask, and "did not ask" must never come out green.
+ */
+describe('the budget of the start, at the gate', () => {
+  test('a green start is not refused', () => {
+    expect(refusalForTheStart({ answer: 'green', because: 'inside it', over: 0 })).toBeNull();
+  });
+
+  test('a red start is refused, and carries its own numbers', () => {
+    const refusal = refusalForTheStart({
+      answer: 'red',
+      because: 'sitting 3 took 41000 ms to activate',
+      over: 1,
+    });
+
+    expect(refusal?.point).toBeNull();
+    expect(refusal?.because).toMatch(/41000/u);
+  });
+
+  test('an unmeasured start is refused too, because it is not a pass', () => {
+    const refusal = refusalForTheStart({ answer: 'unmeasured', because: 'nothing was timed', over: 0 });
+
+    expect(refusal?.because).toMatch(/unmeasured/u);
+  });
+
+  test('a verdict that says nothing about the start is refused, not read as green', () => {
+    const refusal = refusalForTheStart(undefined);
+
+    expect(refusal?.point).toBeNull();
+    expect(refusal?.because).toMatch(/nothing about the start/u);
   });
 });

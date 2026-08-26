@@ -264,7 +264,7 @@ export class Reconciler implements Disposable {
       return;
     }
     this._started = true;
-    void this._tick();
+    void this._begin();
   }
 
   /**
@@ -460,6 +460,28 @@ export class Reconciler implements Disposable {
     this._timer = this._options.scheduler.after(interval, () => {
       void this._tick();
     });
+  }
+
+  /**
+   * The first pass, which the caller may already have made.
+   *
+   * Through the floor and not through `sweep()`, and that is the whole
+   * difference from every tick after it: the composition root awaits one pass
+   * before it starts the timer -- it has to, because what follows depends on
+   * it -- and until Ш11 `start()` immediately made a second one. Two passes
+   * about the same instant, each spawning `claude agents --json` at
+   * 0.56-0.70 s (A24), on the path a person is waiting on.
+   *
+   * The ticks after this one are NOT gated, and need not be: the floor is the
+   * interval itself, so a tick that has waited out the interval is stale by
+   * definition.
+   */
+  private async _begin(): Promise<void> {
+    try {
+      await this.sweepIfStale();
+    } finally {
+      this._arm();
+    }
   }
 
   private async _tick(): Promise<void> {

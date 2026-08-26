@@ -539,7 +539,7 @@ function standAgainstTheBudget(ran) {
 }
 
 function standAgainstTheBudgetOrThrow(ran) {
-  const { ALLOWANCES, readAllowances, todayIs, verdictAgainstAllowances } =
+  const { ALLOWANCES, readAllowances, refusalForTheStart, todayIs, verdictAgainstAllowances } =
     require(join(REPO, 'out', 'tests', 'stand', 'allowance.js'));
 
   if (!existsSync(VERDICT)) {
@@ -555,7 +555,21 @@ function standAgainstTheBudgetOrThrow(ran) {
   const verdict = JSON.parse(readFileSync(VERDICT, 'utf8'));
   const document = readAllowances(readFileSync(ALLOWANCES, 'utf8'));
   const today = todayIs(new Date());
-  const refusals = verdictAgainstAllowances(verdict, document, today);
+  /*
+   * Two budgets, and the second one is admitted by nothing (Ш11).
+   *
+   * `gate/allowed-red.json` is how much of the stand's NINE POINTS a gate lets
+   * through. The budget of the START is a ceiling on time, set from measurement
+   * (`tests/stand/start-budget.ts`), and there is no line to write for it and no
+   * cap to spend: a run over it is red here. A verdict that says nothing about
+   * the start is refused too -- the stand writes it, so its absence is a stand
+   * that never asked.
+   */
+  const startRefusal = refusalForTheStart(verdict.start);
+  const refusals = [
+    ...verdictAgainstAllowances(verdict, document, today),
+    ...(startRefusal === null ? [] : [startRefusal]),
+  ];
 
   say('');
   say(`--- the stand against gate/allowed-red.json, on ${today}`);
@@ -564,11 +578,19 @@ function standAgainstTheBudgetOrThrow(ran) {
     const mark = found.answer === 'green' ? 'green' : admitted ? 'red (admitted)' : 'red';
     say(`  ${String(found.point)}. ${mark.padEnd(15)}${found.says}`);
   }
+  say(
+    `  START. ${(verdict.start === undefined ? 'not judged' : verdict.start.answer).padEnd(15)}` +
+      'the start of a window stayed inside the budget measured for it'
+  );
+  if (verdict.start !== undefined) {
+    say(`     ${verdict.start.because}`);
+  }
   for (const refusal of refusals) {
     say(`  REFUSED  ${refusal.point === null ? 'the budget itself' : `point ${String(refusal.point)}`}: ${refusal.because}`);
   }
   if (refusals.length === 0) {
     say(`  every point that is not green is one of the ${String(document.allowances.length)} admitted, inside the number its line admits.`);
+    say('  the start of a window is inside the budget measured for it, which nothing admits and nothing may.');
     say(`  the earliest of those lines stops working on ${document.allowances.map((one) => one.expires).sort()[0] ?? 'no date at all'}.`);
   }
 

@@ -123,6 +123,18 @@ export interface StandSitting {
    * are the stand's cost rather than the product's.
    */
   readonly restoredMs: number | null;
+  /**
+   * The two `tookMs` the product itself printed into its log, read back out of
+   * the store after the sitting closed (Ш11).
+   *
+   * Not the driver's own clock, and that is the whole point: the driver's
+   * numbers hold its waits, its spawns and the editor's own startup, none of
+   * which are the product's. These two are stamped inside `activate` -- one when
+   * the list reaches the screen, one when activation finishes -- and until this
+   * field existed nothing anywhere read them.
+   */
+  readonly listedMs: number | null;
+  readonly activatedMs: number | null;
   readonly records: readonly StandRecord[];
 }
 
@@ -301,6 +313,8 @@ function readSitting(line: number, value: Fields): StandSitting {
   return {
     sitting: number(line, 'sitting', value.sitting),
     restoredMs: maybeNumber(line, 'restoredMs', value.restoredMs),
+    listedMs: maybeNumber(line, 'listedMs', value.listedMs),
+    activatedMs: maybeNumber(line, 'activatedMs', value.activatedMs),
     records: list(line, 'records', value.records).map((one) => readRecord(line, one)),
   };
 }

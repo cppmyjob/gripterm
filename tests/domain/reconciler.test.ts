@@ -1160,6 +1160,28 @@ describe('the sweep as a repeating thing', () => {
     expect(base.reads).toBe(1);
   });
 
+  /*
+   * The second half of the same complaint, and the reason the FIRST pass goes
+   * through the floor (Ш11). The composition root sweeps and then starts the
+   * timer -- deliberately, because the pass has to be awaited before the trash
+   * is swept -- and `start()` swept again on top of it. Two passes a second
+   * apart, and each one spawns `claude agents --json` at 0.56-0.70 s (A24), on
+   * the path a person is waiting on.
+   *
+   * The floor is the interval, so the timer's own ticks are not touched: by the
+   * time one arrives, the interval has passed by definition.
+   */
+  it('does not sweep again when the composition root has just swept', async () => {
+    const { reconciler, base } = build();
+    await reconciler.sweep();
+
+    reconciler.start();
+    await settled();
+
+    expect(base.reads).toBe(1);
+    reconciler.dispose();
+  });
+
   it('is not started twice by a second call', async () => {
     const { reconciler, scheduler, base } = build();
     reconciler.start();

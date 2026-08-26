@@ -68,6 +68,7 @@ import {
 import type {
   OwnerId,
   AgentCommandFactory,
+  Disposable,
   EditorIdentity,
   EventJournal,
   ExecutableSearch,
@@ -703,10 +704,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   });
   context.subscriptions.push(details);
   const address = await listen({ token, registry, logger, journal: events });
-  const cli = await findCli(logger);
+  const cliPath = await findCli(logger);
+  /*
+   * Which BUILD of `claude` this is -- started here and awaited at the bottom
+   * (Ш11).
+   *
+   * It is a process spawn, and nothing between here and the list needs its
+   * answer: `launchReadiness` takes the path. Before this it was awaited on the
+   * spot, so the wait bought a string for one log line.
+   *
+   * ITS SIZE, MEASURED RATHER THAN QUOTED, and it is smaller than the comment
+   * on `VERSION_TIMEOUT_MS` would suggest: four runs on this machine on
+   * 2026-08-26 took 91, 91, 87 and 96 ms, against the 264 ms measured on
+   * 2026-08-11. So this move is worth about a tenth of a second of a person's
+   * wait -- real, and the smallest of the four repairs of Ш11.
+   *
+   * Not fire-and-forget: `readiness.cliVersion` is part of what activation
+   * establishes and the integration suite reads it, so the promise is awaited
+   * once, after the list is up. Its own failures are already values rather than
+   * throws -- see `probeVersionOutput` -- so there is no rejection here to lose.
+   */
+  const cliVersion = versionOfCli(cliPath, logger);
   const forwarder = await findForwarder(context, logger);
 
-  const readiness = launchReadiness({ cliName: CLAUDE_CLI, cliPath: cli.path, address });
+  const readiness = launchReadiness({ cliName: CLAUDE_CLI, cliPath, address });
 
   const lifecycle = new TerminalLifecycleService({
     registry,
@@ -736,6 +757,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
    * The base-change trigger is why watching `owners/` was worth doing (§4.8):
    * another window retiring rewrites that directory, and without this the news
    * would wait up to the whole interval.
+   *
+   * **It is the STORE's signal and not this window's own** (Ш11). Until
+   * 2026-08-26 it hung off `shared.repository.watch`, which fires on what THIS
+   * window writes -- so it was woken by the records the restore was laying down,
+   * inside the restore, with no previous pass to hold it back, and it was never
+   * woken by another window at all. Measured, at eight records:
+   * `spikes/start-budget/activation-spawns.mjs --wired local` asks the CLI once
+   * inside the restore, `--wired store` asks nought.
    */
   const reconciler = shared === null
     ? null
@@ -770,7 +799,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
       })
     );
     context.subscriptions.push(
-      shared.repository.watch(() => {
+      shared.watchPresence(() => {
         void reconciler.sweepIfStale();
       })
     );
@@ -830,6 +859,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     tookMs: clock.now().getTime() - wokeAtMs,
     rows: registry.list().length,
   });
+  // The version probe, collected now that nobody is waiting on the list for it.
+  const cli = { path: cliPath, version: await cliVersion };
   // The person's own colour, on the row's label. The icon's colour belongs to
   // the state, and the two must not be confusable (M2.7).
   const decorations = new TerminalDecorationProvider(registry);
@@ -1482,6 +1513,16 @@ function sentenceFor(report: WatchReport): string {
 interface SharedBase {
   readonly repository: TerminalRepository;
   readonly presence: OwnerPresence;
+  /**
+   * A word when `owners/` changes -- another window announcing itself, or
+   * retiring.
+   *
+   * The store's watcher and not this window's repository, which is the whole of
+   * Ш11's cause 2: the repository's own signal fires on what WE write, so the
+   * sweep hung off it was woken by the restore's own records, in the middle of
+   * the restore, and never by the event it was subscribed for.
+   */
+  readonly watchPresence: (listener: () => void) => Disposable;
 }
 
 /**
@@ -1572,7 +1613,11 @@ async function shareTheBase(parts: {
   // The base as it is right now, before anything changes: a window that only
   // reacted to changes would show an empty list until somebody else moved.
   await projection.refresh();
-  return { repository, presence: owner };
+  return {
+    repository,
+    presence: owner,
+    watchPresence: (listener) => watcher.watchPresence(listener),
+  };
 }
 
 /**
@@ -1714,8 +1759,14 @@ async function listen(parts: {
   }
 }
 
-/** Where `claude` is, and which build it is -- both established by asking it, never by a file. */
-async function findCli(logger: Logger): Promise<{ path: string | null, version: string | null }> {
+/**
+ * Where `claude` is: a walk of the PATH, and no process started.
+ *
+ * Split from the version probe on 2026-08-26 (Ш11), because the two cost
+ * entirely different things and only one of them is needed before a person can
+ * see their list.
+ */
+async function findCli(logger: Logger): Promise<string | null> {
   const path = await findExecutable(CLAUDE_CLI, systemSearch());
   if (path === null) {
     // Not an error: a person may simply not have installed it. The refusal a
@@ -1723,9 +1774,15 @@ async function findCli(logger: Logger): Promise<{ path: string | null, version: 
     logger.warn('Claude Code was not found on the PATH this window inherited', {
       looked: CLAUDE_CLI,
     });
-    return { path: null, version: null };
   }
+  return path;
+}
 
+/** Which build it is -- established by running it, never by reading a file. */
+async function versionOfCli(path: string | null, logger: Logger): Promise<string | null> {
+  if (path === null) {
+    return null;
+  }
   const report = describeCliVersion(await probeVersionOutput(path, VERSION_TIMEOUT_MS));
   const details = { path, message: report.message };
   if (report.level === 'warn') {
@@ -1733,7 +1790,7 @@ async function findCli(logger: Logger): Promise<{ path: string | null, version: 
   } else {
     logger.info('Claude Code is the build this was measured against', details);
   }
-  return { path, version: report.version };
+  return report.version;
 }
 
 /**

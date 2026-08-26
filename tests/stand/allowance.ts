@@ -1,6 +1,7 @@
 import { dirname, join, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 import type { Answer, Verdict } from './judge';
+import type { StartVerdict } from './start-budget';
 
 /**
  * The budget of admitted redness: a function from a verdict, a document and a
@@ -860,4 +861,39 @@ function text_(line: Record<string, unknown>, key: string, what: string): string
     throw new Error(`${what} has no \`${key}\`, and every line says who admitted what and why`);
   }
   return value;
+}
+
+/**
+ * The budget of the START, refused at the gate and admitted by nothing (Ш11).
+ *
+ * **Why it is not a line in `gate/allowed-red.json`.** That document is the
+ * budget of ADMITTED REDNESS -- how much of the stand's own nine points a gate
+ * will let through, unratified, with a date on it. A ceiling on how long a
+ * window takes to start is not a redness anybody is admitting: it is a number
+ * set from measurement, and a run over it is a run that has to be looked at. So
+ * there is no line to write and no cap to spend, and the gate is red on it
+ * directly.
+ *
+ * **`undefined` is refused, and that is the case worth the function.** The
+ * stand writes the start's verdict into `verdict.json`; a gate reading a
+ * verdict without one is reading a stand that never asked, and a question
+ * nobody asked must never come out green (`judge.ts` says the same about
+ * `unmeasured`, at more length).
+ */
+export function refusalForTheStart(start: StartVerdict | undefined): Refusal | null {
+  if (start === undefined) {
+    return {
+      point: null,
+      because:
+        'this verdict says nothing about the start at all. A stand that did not time the start ' +
+        'is not a stand that found it inside its budget -- see `tests/stand/start-budget.ts`.',
+    };
+  }
+  if (start.answer === 'green') {
+    return null;
+  }
+  return {
+    point: null,
+    because: `the start of a window answered "${start.answer}": ${start.because}`,
+  };
 }

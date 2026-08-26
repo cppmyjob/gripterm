@@ -51,6 +51,52 @@ describe('the order activation keeps', () => {
   });
 });
 
+/*
+ * The three rules of Ш11 that live in the composition root, held the same weak
+ * honest way as the two above: by reading the file that states them.
+ *
+ * **This is a source-reading test and it is named as one.** What it can see is
+ * somebody moving one line, or re-pointing one subscription. What it cannot see
+ * is whether the objects behave -- that is what
+ * `tests/infrastructure/repository-watcher.test.ts` and
+ * `tests/domain/reconciler.test.ts` are for, and both of those are behaviour.
+ * The wiring itself has no seam a unit test can reach: `activate` needs a real
+ * extension host, and an integration suite runs after activation is over.
+ */
+describe('what activation does NOT put on the path of the first list', () => {
+  it('wakes the cross-window sweep from the store`s watcher, not from its own repository', () => {
+    /*
+     * Ш11, cause 2. `shared.repository.watch` fires on what THIS window writes,
+     * so every record the restore laid down woke a full pass -- inside the
+     * restore, and the first one finds no previous pass, so nothing holds it
+     * back. Measured with `spikes/start-budget/activation-spawns.mjs`: one
+     * `claude agents --json` of 0.56-0.70 s, gone when the same listener hangs
+     * off the watcher's presence signal instead.
+     */
+    const body = bodyOf('activate');
+
+    expect(body).toContain('shared.watchPresence(');
+    expect(body).not.toContain('shared.repository.watch(');
+  });
+
+  it('does not wait for `claude --version` before the list is on screen', () => {
+    /*
+     * Ш11, cause 3. The probe is a process spawn -- 87 to 96 ms over four runs
+     * on this machine on 2026-08-26 -- and nothing before the list needs its
+     * answer: `launchReadiness` takes the PATH, not the version. So it is
+     * started early and awaited late, and the only thing that waits for it is
+     * the line that prints it.
+     */
+    const body = bodyOf('activate');
+    const onScreen = body.indexOf('the list of terminals is on screen');
+    const awaited = body.indexOf('await cliVersion');
+
+    expect(onScreen).toBeGreaterThan(-1);
+    expect(awaited).toBeGreaterThan(-1);
+    expect(onScreen).toBeLessThan(awaited);
+  });
+});
+
 describe('the order a window leaves in', () => {
   it('ends its own processes before it awaits anything', () => {
     /*
