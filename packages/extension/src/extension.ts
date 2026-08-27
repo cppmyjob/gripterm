@@ -29,6 +29,7 @@ import {
   SessionNameMirror,
   SessionRegistry,
   ShellLaunchStrategy,
+  StartLedger,
   StorageCleaner,
   StorageLayout,
   StorageMigrator,
@@ -524,6 +525,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
    * are the two moments a person is actually waiting for.
    */
   const wokeAtMs = clock.now().getTime();
+  /*
+   * And WHAT THAT TIME WENT ON (Ш22).
+   *
+   * Ш11 removed four named causes and closed less than a second of the 8 293 ms
+   * the owner's own window took on 2026-08-23. The seven that are left are
+   * explained by nothing, and they cannot be explained from here: the store they
+   * happen over is theirs, and this build does not read it. So the instrument is
+   * HANDED OVER rather than applied -- a start writes down what it was made of,
+   * into the log this window already keeps in the store, and the numbers of that
+   * machine are read on that machine.
+   *
+   * NOT a third counter. It takes the instant above and the clock beside it, and
+   * the two lines below go on printing exactly the `tookMs` they printed before;
+   * what is new is the division of that number, not the number.
+   *
+   * Every part is threaded in by wrapping a call that was already here, so the
+   * order of activation is untouched -- with one exception, named as one: the
+   * plan of the restore and its execution are timed separately inside
+   * `bringTerminalsBack`, which is why that function now takes the ledger.
+   */
+  const ledger = new StartLedger({ clock, wokeAtMs });
   const ids = new SystemIdGenerator();
   const identity = windowIdentity(ids);
   const registry = new SessionRegistry({
@@ -632,7 +654,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
    * variable as `null` for the rest of this function.
    */
   const held: { strip: StripKeeper | null } = { strip: null };
-  const gateway = terminalGatewayFor({
+  // Timed because it is where the native addon is loaded from disk, when the
+  // engine is ours: a `require` of a compiled binding is the one thing in this
+  // stretch of composition that touches a file (Ш22).
+  const gateway = ledger.time('buildingTheGateway', () => terminalGatewayFor({
     keepTheStrip: (keeper) => {
       held.strip = keeper;
     },
@@ -649,7 +674,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     // engine that was honoured.
     announce: (message) => { announcer.say('warning', message); },
     tabOpened: (terminalId, terminal) => { tabs.expect(terminalId, terminal as vscode.Terminal); },
-  });
+  }));
   // Still a subscription as well, and deliberately: `deactivate` covers the
   // ordinary way out, this covers the extension being disabled under a window
   // that stays open. Both ends are idempotent -- a gateway that has let go of
@@ -667,12 +692,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     announcer.say('warning', storageChoice.announce);
   }
   const storage = new StorageLayout(storageChoice.path);
-  const store = await prepareStorage(storage, logger);
+  const store = await ledger.measure(
+    'preparingTheStore',
+    async () => await prepareStorage(storage, logger)
+  );
   // After the migrator, not before it: the log is a directory in the base, and
   // making one there while the base is still being decided about would hand the
   // migrator a store that is not empty when it asks.
   const logFile = keepALogInTheStore(storage, identity.ownerId, logger);
-  const shared = await shareTheBase({ context, storage, store, registry, identity, clock, logger });
+  /*
+   * The part that reads EVERY record on the machine, and the first candidate for
+   * the owner's missing seconds (Ш22): `projection.refresh()` inside it is a
+   * whole pass over the base, so this is the number that ought to move with the
+   * size of a store.
+   */
+  const shared = await ledger.measure(
+    'readingTheStore',
+    async () => await shareTheBase({ context, storage, store, registry, identity, clock, logger })
+  );
   // Per activation, held in memory, never written down: it is only meaningful
   // together with the port below, and the two are born and die together (§4.7).
   const token = newActivationToken();
@@ -731,8 +768,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     logger,
   });
   context.subscriptions.push(details);
-  const address = await listen({ token, registry, logger, journal: events });
-  const cliPath = await findCli(logger);
+  const address = await ledger.measure(
+    'openingThePort',
+    async () => await listen({ token, registry, logger, journal: events })
+  );
+  const cliPath = await ledger.measure('findingTheCli', async () => await findCli(logger));
   /*
    * Which BUILD of `claude` this is -- started here and awaited at the bottom
    * (Ш11).
@@ -753,7 +793,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
    * throws -- see `probeVersionOutput` -- so there is no rejection here to lose.
    */
   const cliVersion = versionOfCli(cliPath, logger);
-  const forwarder = await findForwarder(context, logger);
+  const forwarder = await ledger.measure(
+    'findingTheForwarder',
+    async () => await findForwarder(context, logger)
+  );
 
   const readiness = launchReadiness({ cliName: CLAUDE_CLI, cliPath, address });
 
@@ -833,23 +876,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     );
   }
 
-  const tree = new TerminalTreeDataProvider({
+  const tree = ledger.time('buildingTheList', () => new TerminalTreeDataProvider({
     registry,
     reconciler,
     // The folders of THIS window, which is what puts its own project at the top
     // of a list that shows every project on the machine (П4).
     windowFolders: identity.workspaceFolders,
     logger,
-  });
+  }));
   context.subscriptions.push(tree);
   // Held, not just disposed of: `gripterm.showRecord` reveals a row through it,
   // and a data provider alone cannot select anything (M2.13).
-  const view = vscode.window.createTreeView(TERMINALS_VIEW_ID, {
+  const view = ledger.time('buildingTheList', () => vscode.window.createTreeView(TERMINALS_VIEW_ID, {
     treeDataProvider: tree,
     // The same object: a row is dragged out of the list the provider drew, and
     // where it lands is decided against that same list (owner, 2026-08-21).
     dragAndDropController: tree,
-  });
+  }));
   context.subscriptions.push(view);
   /*
    * The groups a restart brought back with nothing in them (owner, 2026-08-22:
@@ -881,14 +924,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   }
 
   logger.info('the list of terminals is on screen', {
-    // Everything before this: the store, the base read whole, the port, and
-    // finding `claude`. What comes after it -- the restore, the first sweep --
-    // changes what the rows SAY, and is timed by the line at the end.
-    tookMs: clock.now().getTime() - wokeAtMs,
+    /*
+     * Everything before this: the store, the base read whole, the port, and
+     * finding `claude`. What comes after it -- the restore, the first sweep --
+     * changes what the rows SAY, and is timed by the line at the end.
+     *
+     * `tookMs` is the same number and the same arithmetic it has been since
+     * 2026-08-22; `phases` and `remainderMs` are that number divided up (Ш22).
+     * The three obey `sum(phases) + remainderMs === tookMs`, so a part left out
+     * shows as a bigger leftover rather than as a smaller whole. The leftover is
+     * the composition itself -- objects built, settings read, commands
+     * registered -- and it is named rather than shared out among the parts.
+     */
+    ...ledger.breakdown(),
     rows: registry.list().length,
   });
   // The version probe, collected now that nobody is waiting on the list for it.
-  const cli = { path: cliPath, version: await cliVersion };
+  const cli = {
+    path: cliPath,
+    version: await ledger.measure('waitingForTheCliVersion', async () => await cliVersion),
+  };
   // The person's own colour, on the row's label. The icon's colour belongs to
   // the state, and the two must not be confusable (M2.7).
   const decorations = new TerminalDecorationProvider(registry);
@@ -998,18 +1053,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
           repository: shared.repository,
           presence: shared.presence,
           windowFolders: identity.workspaceFolders,
+          /*
+           * The two questions of the survey that leave this machine's own store
+           * are timed under their own names (Ш22), which is why they are wrapped
+           * HERE rather than inside `gatherRestoreInputs`: the gatherer takes
+           * them as callbacks, so the composition root can name them without the
+           * domain learning what a stopwatch is.
+           *
+           * They run INSIDE `readingTheMachine`, and the ledger credits the
+           * innermost part only -- so `readingTheMachine` reports the survey
+           * minus these two, and the three numbers never overlap.
+           */
           readTranscripts: async () =>
-            await readTranscriptIndex(
-              claudeTranscriptsDirectory({
-                platform: process.platform,
-                home: homedir(),
-                configDir: process.env.CLAUDE_CONFIG_DIR,
-              })
-            ),
+            await ledger.measure('theTranscriptIndex', async () =>
+              await readTranscriptIndex(
+                claudeTranscriptsDirectory({
+                  platform: process.platform,
+                  home: homedir(),
+                  configDir: process.env.CLAUDE_CONFIG_DIR,
+                })
+              )),
           readAgents: async () =>
-            readiness.kind === 'refused'
-              ? { kind: 'unavailable', reason: readiness.reason }
-              : await readAgentListing(readiness.cliPath, AGENT_LISTING_TIMEOUT_MS),
+            await ledger.measure('theAgentListing', async () =>
+              readiness.kind === 'refused'
+                ? { kind: 'unavailable', reason: readiness.reason }
+                : await readAgentListing(readiness.cliPath, AGENT_LISTING_TIMEOUT_MS)),
           // Both from one instant, because the boot rule subtracts one from the
           // other (`precedesBoot`).
           nowMs: Date.now(),
@@ -1129,15 +1197,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   // a process ended after that gathering would still be counted as running --
   // and the records of the window that left it behind would be refused while
   // nothing was running them at all.
-  await endTheirProcesses({ context, reconciler, logger });
+  await ledger.measure('endingTheirProcesses', async () => {
+    await endTheirProcesses({ context, reconciler, logger });
+  });
 
   // One reading for both of the decisions below -- see `surveyTheMachine`.
-  const world = await surveyTheMachine({ gather, logger });
+  // Timed as `readingTheMachine`, which is the survey MINUS the two questions it
+  // asks through callbacks -- see `gather` above (Ш22).
+  const world = await ledger.measure(
+    'readingTheMachine',
+    async () => await surveyTheMachine({ gather, logger })
+  );
   const restore = await bringTerminalsBack({
     world,
     orchestrator,
     readiness,
     logger,
+    ledger,
     // Out loud, and once (owner's decision 2026-08-21). Before this, a window
     // that brought nothing back wrote the reason to the log in the same second
     // and said nothing at all -- and from the chair that reads as terminals
@@ -1148,23 +1224,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   // After the restore and against the SAME reading: the two plans are disjoint
   // by construction (M2.15), and a record this window has just adopted is one
   // whose owner is now alive, which no cleanup touches.
-  await forgetClosedTerminals({
-    world,
-    cleaner,
-    logger,
-    // Out loud (Ш15). This is the ONE way into the trash that takes a record
-    // with nobody asked, and until now the whole of its trace was two lines in
-    // a log -- so from the chair it read as rows quietly disappearing. What is
-    // said, and when nothing is said at all, is decided by `forgottenNotice`,
-    // in the domain, because it is a decision.
-    announce: (message) => { announcer.say('info', message); },
+  await ledger.measure('forgettingClosedTerminals', async () => {
+    await forgetClosedTerminals({
+      world,
+      cleaner,
+      logger,
+      // Out loud (Ш15). This is the ONE way into the trash that takes a record
+      // with nobody asked, and until now the whole of its trace was two lines in
+      // a log -- so from the chair it read as rows quietly disappearing. What is
+      // said, and when nothing is said at all, is decided by `forgottenNotice`,
+      // in the domain, because it is a decision.
+      announce: (message) => { announcer.say('info', message); },
+    });
   });
 
   // After the restore, not before: a sweep that ran first would look at records
   // this window is about to adopt and start, and the first thing it would find
   // is that their processes are gone -- which they are, for another second.
   if (reconciler !== null) {
-    await reconciler.sweep();
+    // The pass includes one `claude agents --json` of its own, and it is counted
+    // here rather than under `theAgentListing` (Ш22): that name is the survey's
+    // question, asked once, and folding a second call into it would make one
+    // printed number the sum of two different acts.
+    await ledger.measure('theFirstSweep', async () => {
+      await reconciler.sweep();
+    });
     reconciler.start();
   }
 
@@ -1215,7 +1299,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   // send us -- which is how the list in `identifyEditor` grows from evidence
   // rather than from guesses.
   logger.info('Gripterm activated', {
-    tookMs: clock.now().getTime() - wokeAtMs,
+    // The whole of the start, and what it was made of (Ш22). `tookMs` is
+    // unchanged; `phases` holds every part in the order it happened, and
+    // `remainderMs` is what no part covers -- named, never shared out.
+    ...ledger.breakdown(),
     trustedWorkspace: vscode.workspace.isTrusted,
     ownerId: identity.ownerId.value,
     editorKind: identity.editorKind,
@@ -1333,10 +1420,19 @@ async function bringTerminalsBack(parts: {
   readonly orchestrator: RestoreOrchestrator | null;
   readonly readiness: ReturnType<typeof launchReadiness>;
   readonly logger: Logger;
+  /**
+   * Where the two halves of this are timed (Ш22).
+   *
+   * Handed in rather than the whole call being wrapped from outside, because
+   * the two halves answer different questions: deciding WHAT to bring back is
+   * arithmetic over a value already in memory, and bringing it back starts
+   * processes. One number over both would hide whichever is the expensive one.
+   */
+  readonly ledger: StartLedger;
   /** How the person is told which terminals did not come back. */
   readonly announce: (message: string) => void;
 }): Promise<RestoreSummary> {
-  const { world, readiness, orchestrator, logger, announce } = parts;
+  const { world, readiness, orchestrator, logger, ledger, announce } = parts;
   if (world.kind === 'unread') {
     return refuse(world.reason, logger);
   }
@@ -1348,8 +1444,11 @@ async function bringTerminalsBack(parts: {
   }
 
   try {
-    const plan = planRestore(world.inputs);
-    const report = await orchestrator.run(plan);
+    const plan = ledger.time('planningTheRestore', () => planRestore(world.inputs));
+    const report = await ledger.measure(
+      'bringingTerminalsBack',
+      async () => await orchestrator.run(plan)
+    );
     const notice = restoreNotice(report.skipped);
     if (notice !== null) {
       announce(notice);

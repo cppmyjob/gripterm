@@ -573,6 +573,12 @@ export {
   type ShellKind,
 } from './domain/services/shell-quoting';
 
+export {
+  StartLedger,
+  type StartBreakdown,
+  type StartLedgerOptions,
+} from './domain/services/start-ledger';
+
 export { describeDetails } from './domain/services/log-details';
 export { HELD_LINES, LogRelay, type LogRelayOptions } from './domain/services/log-relay';
 export { FileLog, MAX_LOG_BYTES, type FileLogOptions } from './infrastructure/store/file-log';
