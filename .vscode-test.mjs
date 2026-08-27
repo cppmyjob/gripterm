@@ -5,7 +5,11 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hostUserData, runStore } from './tools/host-user-data.mjs';
 import { refuseStaleBuilds } from './tools/refuse-stale-builds.mjs';
-import { seedRestorableRecord } from './tools/seed-restorable-record.mjs';
+import {
+  howManyToSeed,
+  seedMoreRestorableRecords,
+  seedRestorableRecord,
+} from './tools/seed-restorable-record.mjs';
 
 const require_ = createRequire(import.meta.url);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -225,6 +229,10 @@ refuseStaleBuilds();
  */
 for (const label of ['integration', 'own']) {
   seedRestorableRecord(runStore(label));
+  // One, unless somebody asked for more. `GRIPTERM_SEED_RECORDS` is how a person
+  // measuring a restore of ten gets ten records to restore; unset -- which is
+  // every gate -- it seeds nothing extra and this line does nothing at all.
+  seedMoreRestorableRecords(runStore(label), howManyToSeed());
 }
 
 // Downloads a real VS Code and runs the integration suite inside it, so that

@@ -774,23 +774,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   );
   const cliPath = await ledger.measure('findingTheCli', async () => await findCli(logger));
   /*
-   * Which BUILD of `claude` this is -- started here and awaited at the bottom
-   * (Ш11).
+   * Which BUILD of `claude` this is -- started here and awaited at the very
+   * bottom (Ш11, then Ш23).
    *
-   * It is a process spawn, and nothing between here and the list needs its
-   * answer: `launchReadiness` takes the path. Before this it was awaited on the
-   * spot, so the wait bought a string for one log line.
+   * It is a process spawn, and nothing between here and the end of activation
+   * needs its answer: `launchReadiness` takes the path, and the only two readers
+   * of the version are the last log line and the `readiness` handed back with
+   * it. Before Ш11 it was awaited on the spot, so the wait bought a string for
+   * one log line; Ш11 moved it past the list, and Ш23 moved it past the restore
+   * as well -- see the collection point for what the second half cost.
    *
-   * ITS SIZE, MEASURED RATHER THAN QUOTED, and it is smaller than the comment
-   * on `VERSION_TIMEOUT_MS` would suggest: four runs on this machine on
-   * 2026-08-26 took 91, 91, 87 and 96 ms, against the 264 ms measured on
-   * 2026-08-11. So this move is worth about a tenth of a second of a person's
-   * wait -- real, and the smallest of the four repairs of Ш11.
+   * ITS SIZE, MEASURED RATHER THAN QUOTED, and it is bigger than four runs on a
+   * quiet machine suggested: 87-96 ms measured on 2026-08-26, against 466-882 ms
+   * of actual WAIT in the six ten-record activations of 2026-08-27, where the
+   * probe is competing with everything else a start is doing. The comment on
+   * `VERSION_TIMEOUT_MS` quotes 264 ms from 2026-08-11 and is older than both.
    *
    * Not fire-and-forget: `readiness.cliVersion` is part of what activation
    * establishes and the integration suite reads it, so the promise is awaited
-   * once, after the list is up. Its own failures are already values rather than
-   * throws -- see `probeVersionOutput` -- so there is no rejection here to lose.
+   * once, at the end. Its own failures are already values rather than throws --
+   * see `probeVersionOutput` -- so there is no rejection here to lose.
    */
   const cliVersion = versionOfCli(cliPath, logger);
   const forwarder = await ledger.measure(
@@ -939,11 +942,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     ...ledger.breakdown(),
     rows: registry.list().length,
   });
-  // The version probe, collected now that nobody is waiting on the list for it.
-  const cli = {
-    path: cliPath,
-    version: await ledger.measure('waitingForTheCliVersion', async () => await cliVersion),
-  };
   // The person's own colour, on the row's label. The icon's colour belongs to
   // the state, and the two must not be confusable (M2.7).
   const decorations = new TerminalDecorationProvider(registry);
@@ -1294,6 +1292,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     }
   }
 
+  /*
+   * The version probe, collected HERE -- after the terminals are back and not
+   * before them (Ш23).
+   *
+   * Ш11 took this off the path of the LIST and stopped there, and the half it
+   * left was the expensive one: a person whose window is coming back is waiting
+   * for their TERMINALS, and until 2026-08-27 this await stood between the list
+   * and the machine being read. Measured in the integration host that day, over
+   * six activations: 466, 510, 631, 655, 725 and 882 ms -- spent, every time, on
+   * a string for one log line and one field of `readiness`.
+   *
+   * Nothing between the list and this line ever wanted the answer: the launch
+   * pipeline takes the PATH (`launchReadiness`), and the two readers below are
+   * the only things in this file that read the version at all. So the probe now
+   * runs beside the whole of the restore and the first sweep, and is collected
+   * at the one moment something needs it.
+   *
+   * Still awaited rather than dropped: `readiness.cliVersion` is part of what
+   * activation establishes and the integration suite reads it. Its own failures
+   * are already values rather than throws -- see `probeVersionOutput` -- so
+   * there is no rejection here to lose.
+   */
+  const cli = {
+    path: cliPath,
+    version: await ledger.measure('waitingForTheCliVersion', async () => await cliVersion),
+  };
   // `appName` is logged beside the kind we made of it, unconditionally. An
   // editor we do not recognise then names itself in the one place a person can
   // send us -- which is how the list in `identifyEditor` grows from evidence

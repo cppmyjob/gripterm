@@ -191,6 +191,49 @@ suite('what a start says it was made of', () => {
     }
   });
 
+  /**
+   * WHEN a part happened, which the parts alone cannot say (Ш23).
+   *
+   * **What it is about.** `claude --version` is a process spawn whose whole
+   * product is one line in this log and one field of `readiness`. Until
+   * 2026-08-27 it was awaited between the list going on screen and the machine
+   * being read -- so a person whose terminals had not come back yet was waiting
+   * on it, and nothing between there and their terminals wanted its answer.
+   * Measured in this host that day, over the six activations of ten records:
+   * 466, 510, 631, 655, 725 and 882 ms of a wait bought with a string.
+   *
+   * **Why the ORDER is the assertion and not the duration.** How long the probe
+   * takes is a fact about this machine this afternoon; that it is not waited for
+   * before the terminals are back is the promise. `phases` is written in the
+   * order the parts first opened -- `StartLedger` keeps it that way and JSON
+   * preserves it -- so the log itself carries the evidence, and a suite reading
+   * it needs no seam the composition root does not have.
+   *
+   * It is the weakest thing that could still catch the mistake coming back: an
+   * await moved above the restore would put the name back in front of it here.
+   */
+  test('the version probe is not waited for before the terminals are back', async () => {
+    const { activated } = await theTwoLines();
+    const { readiness } = await api();
+    if (!readiness.sharing) {
+      // No shared base, so nothing was brought back and there is no "before the
+      // restore" to be in front of. Said rather than passed silently.
+      assert.ok(!('bringingTerminalsBack' in activated.phases));
+      return;
+    }
+
+    const order = Object.keys(activated.phases);
+    assert.ok(
+      order.includes('bringingTerminalsBack'),
+      `activation brought nothing back, so this run cannot ask the question -- it named ${order.join(', ')}`
+    );
+    assert.ok(
+      order.indexOf('waitingForTheCliVersion') > order.indexOf('bringingTerminalsBack'),
+      'the version probe was waited for before the terminals came back, so a person waited on a log line'
+        + ` -- the parts opened in the order ${order.join(', ')}`
+    );
+  });
+
   test('a part that did not run is missing rather than nought', async () => {
     const { activated } = await theTwoLines();
     const { readiness } = await api();

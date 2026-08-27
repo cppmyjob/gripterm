@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -66,6 +66,16 @@ export const SEEDED_TERMINAL_ID = '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0';
  */
 const SEEDED_SESSION_ID = '9e8d7c6b-5a4f-4312-8021-fedcba987654';
 
+/**
+ * What the ids of the EXTRA records all begin with.
+ *
+ * The named seed shares it -- the extras are that id with its tail replaced --
+ * which is why the sweep below has to name the seed as the one exception. One
+ * prefix rather than two so that a directory left by a run cannot be mistaken
+ * for anybody's record but this file's.
+ */
+const EXTRA_PREFIX = '0f1e2d3c-4b5a-4968-8776-';
+
 /** An owner id no presence file names, which is what makes the window "gone". */
 const CLOSED_WINDOW = 'a-window-that-closed-before-this-run';
 
@@ -92,15 +102,74 @@ const LAST_HEARD_FROM_MS = 1_786_500_000_000;
  * @returns {string} the id of the record that was seeded
  */
 export function seedRestorableRecord(store) {
-  const directory = join(store, 'terminals', SEEDED_TERMINAL_ID);
+  return seedOne(store, SEEDED_TERMINAL_ID, SEEDED_SESSION_ID);
+}
+
+/**
+ * How many records this run is to seed: one, unless somebody asked for more.
+ *
+ * **What it is for, and it is not the gate.** A run seeds ONE record, and a
+ * restore of one record cannot say what a restore of ten costs -- which is the
+ * question Ш23 was set. So the count is a knob, its default is the number every
+ * gate has always run with, and `activation-restore.test.js` reads the same
+ * function rather than a constant of its own.
+ *
+ * **Every extra record is a real `claude`**, started inside the host and living
+ * as long as it. Ten is not a number to reach for idly: Ш21 measured a machine
+ * that ran out of processes, and it took a whole gate with it.
+ */
+export function howManyToSeed() {
+  const asked = Number.parseInt(process.env.GRIPTERM_SEED_RECORDS ?? '1', 10);
+  return Number.isFinite(asked) && asked >= 1 ? asked : 1;
+}
+
+/**
+ * The extra records, when a run was told to seed more than one -- and the
+ * removal of the ones a previous run was told to seed.
+ *
+ * Each is the same shape as the first and differs only in the two ids, so that
+ * what a bigger restore costs is the only thing that changes with the count.
+ *
+ * **It takes the old ones away FIRST, and that is not tidiness.** Measured on
+ * 2026-08-27, by writing this without it: a run told to seed ten left nine
+ * behind, the next run was told nothing and seeded one, and the host found ten.
+ * Four tests failed in the label that had never been asked for ten -- the plan
+ * held ten, a window ended ten processes where one was expected, and two more
+ * timed out behind them. A knob whose old position survives being turned back is
+ * a knob that makes every later run a different test.
+ *
+ * The recursive delete is bounded twice: to `<store>/terminals`, which this same
+ * file writes, and to directory names carrying the prefix nothing but this file
+ * produces.
+ *
+ * @param {string} store the run's own storage directory
+ * @param {number} howMany the total, the named record included
+ */
+export function seedMoreRestorableRecords(store, howMany) {
+  const terminals = join(store, 'terminals');
+  if (existsSync(terminals)) {
+    for (const name of readdirSync(terminals)) {
+      if (name.startsWith(EXTRA_PREFIX) && name !== SEEDED_TERMINAL_ID) {
+        rmSync(join(terminals, name), { recursive: true, force: true });
+      }
+    }
+  }
+  for (let at = 1; at < howMany; at += 1) {
+    const tail = at.toString(16).padStart(12, '0');
+    seedOne(store, `${EXTRA_PREFIX}${tail}`, `9e8d7c6b-5a4f-4312-8021-${tail}`);
+  }
+}
+
+function seedOne(store, terminalId, sessionId) {
+  const directory = join(store, 'terminals', terminalId);
   const claudeConfigDir = join(store, 'claude-config');
   rmSync(directory, { recursive: true, force: true });
   mkdirSync(directory, { recursive: true });
   mkdirSync(claudeConfigDir, { recursive: true });
 
   const record = {
-    terminalId: SEEDED_TERMINAL_ID,
-    sessionId: SEEDED_SESSION_ID,
+    terminalId,
+    sessionId,
     sessionIdHistory: [],
     owner: {
       kind: 'window',
@@ -146,5 +215,5 @@ export function seedRestorableRecord(store) {
   // does not exist yet -- and the order costs nothing.
   writeFileSync(join(directory, 'observed.json'), JSON.stringify(observed), 'utf8');
   writeFileSync(join(directory, 'record.json'), JSON.stringify(record), 'utf8');
-  return SEEDED_TERMINAL_ID;
+  return terminalId;
 }

@@ -49,6 +49,17 @@ import type { GriptermApi, RestoreSummary } from '../../packages/extension/src/e
  * restore that did not happen.
  */
 const SEEDED_TERMINAL = '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0';
+
+/**
+ * How many records the seeder laid, which is ONE unless somebody measuring a
+ * bigger restore asked for more.
+ *
+ * Read from the environment rather than written down as `1`, and it is the same
+ * variable `tools/seed-restorable-record.mjs` reads: a run told to seed ten
+ * records and asserted against one would fail for the reason it was started.
+ * The host inherits the runner's environment, which is what makes the two agree.
+ */
+const SEEDED = Math.max(1, Number.parseInt(process.env.GRIPTERM_SEED_RECORDS ?? '1', 10) || 1);
 const SEEDER = 'tools/seed-restorable-record.mjs';
 
 /** Long enough for a file the launch appends after it has answered. */
@@ -242,14 +253,14 @@ suite('what a window does at activation about the records of windows that are go
 
     assert.equal(
       restore.planned,
-      1,
-      `the plan held ${String(restore.planned)} records rather than the one ${SEEDER} seeded`
+      SEEDED,
+      `the plan held ${String(restore.planned)} records rather than the ${String(SEEDED)} ${SEEDER} seeded`
         + ` (refused: ${String(restore.refused)})`
     );
     assert.equal(
       restore.started,
-      1,
-      `nothing was started for the record ${SEEDER} seeded; the window's state for it was `
+      SEEDED,
+      `not every record ${SEEDER} seeded was started; the window's state for the named one was `
         + String(seen.observedState)
     );
     // Adoption is what lets a record be written at all (§4.8), so it is asserted
