@@ -1,0 +1,21 @@
+PASS tests/extension/way-out.test.ts
+  what a refused adoption offers the person who asked for it
+    √ answers closed the same way it always has (3 ms)
+    ○ skipped answers owner-live the same way it always has
+    ○ skipped answers owner-unknown the same way it always has
+    ○ skipped answers foreign-folder the same way it always has
+    ○ skipped answers session-running the same way it always has
+    ○ skipped answers session-unknown the same way it always has
+    ○ skipped answers session-listed the same way it always has
+    ○ skipped answers process-listed the same way it always has
+    ○ skipped answers agents-unavailable the same way it always has
+    ○ skipped answers transcripts-unavailable the same way it always has
+    ○ skipped answers no-transcript the same way it always has
+    ○ skipped answers duplicate-session the same way it always has
+    ○ skipped offers a move to a named few, so silence stays the rule and not the exception
+
+Test Suites: 1 passed, 1 total
+Tests:       12 skipped, 1 passed, 13 total
+Snapshots:   0 total
+Time:        0.797 s, estimated 1 s
+Ran all test suites matching /tests\\extension\\way-out.test.ts/i with tests matching "answers closed".

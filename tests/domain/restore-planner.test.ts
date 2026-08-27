@@ -905,6 +905,37 @@ describe('establishing that there is something to resume', () => {
     expect(plan.steps.map((step) => step.intent)).toStrictEqual(['launch']);
   });
 
+  it('never hands `no-transcript` to a caller, whoever asks and however they ask', () => {
+    // **The measurement behind a deletion, 2026-08-27.** `planRestore` is the
+    // only thing `adopt-terminal` reads a refusal out of, and `wayOut` -- the
+    // sentence that tells a person what is left to do with a refused record --
+    // carried a branch for `no-transcript`. It cannot fire. Both places that
+    // push a skip here are past the `startsFresh` test, so a conversation with
+    // no transcript leaves as a STEP with `launch` in it, never as a refusal.
+    //
+    // The value itself stays in the union and is NOT dead: `refusalAnywhere`
+    // still answers it -- the table above asks for it through `everyWindow` for
+    // exactly this reason -- and `cleanup-planner` reads it as `never-spoken`.
+    // What died is the branch in the adapter, and that is all that was removed.
+    const nothingSaid = inputsFor([sketch()], { transcripts: transcriptsFor() });
+    const twoRecords = inputsFor([sketch(), sketch({ terminalId: TERMINAL_B })], {
+      transcripts: transcriptsFor(),
+    });
+
+    for (const world of [nothingSaid, twoRecords]) {
+      expect(refusals(planRestore(world))).not.toContain('no-transcript');
+      // The demanded path too: `adopt-terminal` always asks by name, so it is
+      // the ONE that reaches `wayOut`, and it must not be the exception.
+      expect(refusals(planRestore({ ...world, demanded: TerminalId.fromString(TERMINAL_A) })))
+        .not.toContain('no-transcript');
+    }
+
+    // And `refusalAnywhere`, the caller that DOES get it, still does -- or the
+    // rule above would be passing because the refusal stopped existing.
+    const [only] = nothingSaid.entries;
+    expect(refusalAnywhere(only as TerminalEntry, nothingSaid)).toBe<RestoreRefusal>('no-transcript');
+  });
+
   it('continues the conversation of a record that HAS one', () => {
     // The ordinary path, spelled next to the new one: a record whose transcript
     // is there is resumed, and nothing about this decision moved.

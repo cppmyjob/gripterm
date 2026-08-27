@@ -382,10 +382,18 @@ export class RestoreOrchestrator implements Disposable {
       asked,
       answered: entry.sessionId.value,
     });
+    // The id, and not a command to go and find it with. What this used to say
+    // was `run "Gripterm: Show Record" to see which one it was`, and both halves
+    // of that were wrong (2026-08-27). The command is contributed to the palette
+    // with `when: "false"` -- deliberately, because it takes a terminal id and a
+    // palette gives it none -- so the person was sent to type a name that is not
+    // there. And revealing the row would not have answered the question either:
+    // by now the record names the conversation that DID answer, so the one that
+    // did not is nowhere but this sentence and the log line above it.
     this._options.announce?.(
       `"${entry.metadata.displayName}" did not come back: Claude Code could not continue that conversation `
-      + 'and started a new one in the same terminal. The old conversation is still on disk -- '
-      + 'run "Gripterm: Show Record" to see which one it was.'
+      + 'and started a new one in the same terminal. The old conversation is still on disk, '
+      + `under the id ${asked}.`
     );
   }
 

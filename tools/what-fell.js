@@ -69,6 +69,14 @@ const MOCHA_BLOCK = /^ {2}(\d+)\) (.*)$/u;
 /** `Tests:       2 failed, 1 passed, 3 total`. */
 const JEST_TOTALS = /^Tests:\s+(\d+) failed/u;
 
+/** `  1 passing (7ms)` and `  3 pending`, which is Mocha's own count of what it did and did not run. */
+const MOCHA_PASSING = /^ {2}(\d+) passing/u;
+const MOCHA_PENDING = /^ {2}(\d+) pending/u;
+
+/** `Tests:       12 skipped, 1 passed, 13 total` -- every part of it, whichever parts are there. */
+const JEST_TESTS = /^Tests:\s+(\S.*)$/u;
+const JEST_PART = /(\d+) (skipped|todo|passed|failed|total)/gu;
+
 /** `  ● a suite › a test`. */
 const JEST_BLOCK = /^\s*● (.+)$/u;
 
@@ -302,6 +310,104 @@ function fromLint(lines) {
 }
 
 /**
+ * How many tests a Mocha run did not execute, out of its own summary.
+ *
+ * **The absence of a `pending` line is the answer NOUGHT and not silence**, and
+ * that is the whole subtlety here. Mocha prints `N pending` only when N is not
+ * nought, so a parser that required the line in order to answer would report
+ * "did not say" over every green run in this repository -- which is the exact
+ * reading this was written to remove.
+ *
+ * Summed across the whole transcript rather than read once: the `live` stage
+ * runs two labels one after the other and prints two summaries, and a reader
+ * asking what a green stage skipped is asking about the stage.
+ */
+function didNotRunMocha(lines) {
+  let passing = 0;
+  let pending = 0;
+  let failing = 0;
+  let any = false;
+  for (const line of lines) {
+    const passed = MOCHA_PASSING.exec(line);
+    if (passed !== null) {
+      passing += Number(passed[1]);
+      any = true;
+      continue;
+    }
+    const skipped = MOCHA_PENDING.exec(line);
+    if (skipped !== null) {
+      pending += Number(skipped[1]);
+      continue;
+    }
+    const failed = MOCHA_FAILING.exec(line);
+    if (failed !== null) {
+      failing += Number(failed[1]);
+    }
+  }
+  // Anchored on `passing`, which Mocha prints on every run including one where
+  // everything failed (`0 passing`). A transcript with a `pending` line and no
+  // `passing` line is not a Mocha summary; it is a coincidence.
+  return any ? { kind: 'mocha', skipped: pending, total: passing + pending + failing } : null;
+}
+
+/**
+ * How many tests a Jest run did not execute, out of its totals line.
+ *
+ * `todo` is counted with `skipped`, deliberately. Jest keeps them apart because
+ * they were written differently -- `it.todo` has no body, `it.skip` has one
+ * nobody ran -- and the person reading a green gate is asking one question about
+ * both: what did this not check.
+ */
+function didNotRunJest(lines) {
+  for (const line of lines) {
+    const totals = JEST_TESTS.exec(line);
+    if (totals === null) {
+      continue;
+    }
+    let skipped = 0;
+    let total = null;
+    JEST_PART.lastIndex = 0;
+    let part = JEST_PART.exec(totals[1]);
+    while (part !== null) {
+      const how = Number(part[1]);
+      if (part[2] === 'skipped' || part[2] === 'todo') {
+        skipped += how;
+      } else if (part[2] === 'total') {
+        total = how;
+      }
+      part = JEST_PART.exec(totals[1]);
+    }
+    if (total !== null) {
+      return { kind: 'jest', skipped, total };
+    }
+  }
+  return null;
+}
+
+/**
+ * How many of a stage's tests did not run, or null where its output does not say.
+ *
+ * **The defect this exists for, 2026-08-27.** The gate printed a colour and a
+ * time beside each stage and nothing about what that stage had switched off, so
+ * a green stage holding twenty disabled tests read exactly like a green stage
+ * holding none. This adds nothing to what the gate knows -- the runners already
+ * printed it and the gate already captured it; it simply stopped listening,
+ * which is the same defect `whatFell` was written for one day earlier.
+ *
+ * **Null is not nought and the gate must print them differently.** A stage whose
+ * output no runner wrote -- `tsc`, ESLint, the stand's own driver, the eyes' --
+ * cannot be asked this question, and answering `0` for it would be a number
+ * nobody measured standing where a measured one goes (I.1).
+ *
+ * @param {string} said everything the stage wrote to stdout and stderr
+ * @returns {{kind: string, skipped: number, total: number}|null}
+ */
+function whatDidNotRun(said) {
+  const lines = withoutColour(said).split(/\r?\n/u);
+  return didNotRunMocha(lines) ?? didNotRunJest(lines);
+}
+
+/**
  * What a stage's output says fell over, or null where nothing here recognises it.
  *
  * @param {string} said everything the stage wrote to stdout and stderr
@@ -358,4 +464,4 @@ function transcript(most) {
   };
 }
 
-module.exports = { transcript, whatFell };
+module.exports = { transcript, whatDidNotRun, whatFell };

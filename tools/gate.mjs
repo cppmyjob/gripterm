@@ -68,7 +68,7 @@ const require = createRequire(import.meta.url);
  * which is `tsc --build`, and a stage that has not run yet cannot have produced
  * the thing that reads it. See the head of `tools/what-fell.js`.
  */
-const { transcript, whatFell } = require(join(REPO, 'tools', 'what-fell.js'));
+const { transcript, whatDidNotRun, whatFell } = require(join(REPO, 'tools', 'what-fell.js'));
 
 /**
  * How much of a stage's output is held while it runs.
@@ -133,6 +133,7 @@ const STAGES = [
   {
     name: 'unit',
     fast: true,
+    runsTests: true,
     // With coverage, because the thresholds ARE the promise (65/80/80/80 global,
     // 100 on the pure rules) and `npx jest` on its own does not check them.
     // Measured 2026-08-25: 11.5 s without, 19.7 s with.
@@ -142,12 +143,14 @@ const STAGES = [
   {
     name: 'live',
     fast: false,
+    runsTests: true,
     what: 'pnpm run test:integration  (two labels in a downloaded VS Code; measured 4 min 20 s)',
     command: ['pnpm', 'run', 'test:integration'],
   },
   {
     name: 'stand',
     fast: false,
+    runsTests: true,
     what: 'pnpm run test:stand  (four windows on this desktop; measured 2 min 10 s), then gate/allowed-red.json',
     command: ['pnpm', 'run', 'test:stand'],
     // The stand's own exit code is not the answer. Two or three of its nine
@@ -182,6 +185,7 @@ function inCursor() {
     {
       name: 'cursor',
       fast: false,
+      runsTests: true,
       what: 'pnpm run test:cursor  (the fork`s workbench, in the Cursor installed here; measured 17 s end to end)',
       command: ['pnpm', 'run', 'test:cursor'],
       // Yesterday's numbers must not be readable as today's, and this stage has
@@ -226,6 +230,7 @@ function theEyes() {
     {
       name: 'eyes',
       fast: false,
+      runsTests: true,
       // Kept out of the full and fast levels, and reachable only by name.
       onItsOwn: true,
       what: 'pnpm run test:eyes  (one window, looked at over the DevTools protocol; measured 2026-08-26: '
@@ -330,8 +335,15 @@ const MISSING = [
       'WHAT THAT LEAVES: the live suites in Cursor are UNRUN, not impossible. Between them and this gate ' +
       'stand a cost and a question, neither of them the fork`s doing -- 4 min 30 s onto a full gate ' +
       'measured at 7.7 to 9.3 against a ceiling of ten, and what the `cursor` stage should measure once ' +
-      'its window can be chosen on purpose. The second is the owner`s to answer and was open on ' +
-      '2026-08-25. ' +
+      'its window can be chosen on purpose. ' +
+      'HALF OF THAT SECOND IS ANSWERED, and this record went on calling the whole of it open: until ' +
+      '2026-08-27 it named the question, dated it 2026-08-25 and put it on the owner entire. He had ' +
+      'answered a half of it on that very day -- the ordinary window is the one he works in, so the ' +
+      'ordinary window is what these stages are about -- and `.vscode-test.mjs` has recorded that answer ' +
+      'since. A record that keeps calling a decided thing open costs the next reader the decision: he ' +
+      'reads a question where there is a name. ' +
+      'WHAT IS STILL OPEN is the COST, and only the cost: whether a full gate pays 4 min 30 s to run the ' +
+      'live suites in Cursor as well. That much is the owner`s to answer and was open on 2026-08-27. ' +
       'SECOND, INDEPENDENT REASON, and this one got WORSE rather than better: the exit code of a Cursor ' +
       'test host FLICKERS. Measured the same day on one build with one probe: 5 launches out of 12 under ' +
       '`--classic` exited 1, 1 of 4 under `--glass`, 0 of 6 with no flag, and four identical consecutive ' +
@@ -343,8 +355,9 @@ const MISSING = [
       'defects live in -- and the `stand` stage runs the PRODUCT in Cursor through a DEV host, where ' +
       'the extension does load. Between them, what is uncovered is narrower than "Cursor": it is the ' +
       'product`s behaviour under a Cursor test host, which nothing here has yet shown anybody. ' +
-      'What would close it: paying those minutes with the stage`s window chosen by name -- not, as this ' +
-      'entry used to say, a change in the fork.',
+      'What would close it: paying those minutes with the stage`s window chosen by name -- `--classic`, ' +
+      'now that the owner has said which window the stage is about -- and not, as this entry used to say, ' +
+      'a change in the fork.',
   },
   {
     name: 'eyes',
@@ -512,10 +525,30 @@ async function runStage(stage) {
     return { name: stage.name, ok: false, ms, because: `${stage.command.join(' ')} did not start: ${done.error.message}` };
   }
   const ok = done.status === 0;
-  // Only where the command itself came back non-zero. A stand judged red on a
-  // clean exit has its answer in `budget` already, and a second answer read out
-  // of prose would be the weaker of the two standing beside the stronger.
-  return { name: stage.name, ok, ms, status: done.status, ...(ok ? {} : { fell: whatItSaidFellOver(kept) }) };
+  /*
+   * **How many of this stage's tests did not run, on a GREEN as much as on a
+   * red**, and that asymmetry with `fell` is the point rather than an oversight.
+   * A failure only needs naming when there is one; a switched-off test is
+   * invisible precisely when the stage passes. A green stage holding twenty
+   * disabled tests printed the same line as a green stage holding none until
+   * 2026-08-27.
+   *
+   * `null` where the stage's output is not a runner's -- `tsc` and ESLint have
+   * no tests, and the stand and the eyes count POINTS. The gate says "not said"
+   * for those rather than printing a nought nobody measured (I.1).
+   */
+  const didNotRun = whatDidNotRun(kept.said());
+  return {
+    name: stage.name,
+    ok,
+    ms,
+    status: done.status,
+    ...(didNotRun === null ? {} : { didNotRun }),
+    // Only where the command itself came back non-zero. A stand judged red on a
+    // clean exit has its answer in `budget` already, and a second answer read out
+    // of prose would be the weaker of the two standing beside the stronger.
+    ...(ok ? {} : { fell: whatItSaidFellOver(kept) }),
+  };
 }
 
 /**
@@ -840,6 +873,22 @@ function onlyStage(argv) {
   return at === -1 ? null : argv[at + 1] ?? null;
 }
 
+/**
+ * "None of its 2834 tests were skipped", or how many were.
+ *
+ * A total is printed beside the number on purpose: `12 skipped` reads one way
+ * out of 13 and another out of 2834, and the count alone is the half of the fact
+ * that can mislead.
+ *
+ * @param {{kind: string, skipped: number, total: number}} counted what the runner said
+ * @returns {string} the sentence printed under the stage
+ */
+function didNotRunSaid(counted) {
+  return counted.skipped === 0
+    ? `all ${String(counted.total)} of its tests ran (${counted.kind}): none skipped`
+    : `${String(counted.skipped)} of its ${String(counted.total)} tests DID NOT RUN (${counted.kind}): this green is about the rest`;
+}
+
 async function main() {
   const fast = process.argv.includes('--fast');
   const only = onlyStage(process.argv);
@@ -890,6 +939,14 @@ async function main() {
   say('=== the gate');
   for (const one of ran) {
     say(`  ${one.ok ? 'PASS' : 'FAIL'}  ${one.name.padEnd(8)}${String(Math.round(one.ms / 1000)).padStart(5)} s${one.because === undefined ? '' : `   ${one.because}`}`);
+    // What this stage did NOT run, beside what it did. A stage that runs tests
+    // and cannot say is named as such: silence and nought are different answers
+    // and a reader of a green must be able to tell them apart.
+    if (one.didNotRun !== undefined) {
+      say(`        ${didNotRunSaid(one.didNotRun)}`);
+    } else if (here.find((stage) => stage.name === one.name)?.runsTests === true) {
+      say('        how many of its tests did not run: NOT SAID by this stage`s output, so this green is silent about it');
+    }
     // The same thing the receipt gets, said here as well, because the output it
     // was read out of is by now several thousand lines up the terminal.
     if (one.fell !== undefined) {
@@ -925,7 +982,7 @@ async function main() {
     // is byte-for-byte what it was before this field existed, and the 98 lines
     // already in `receipts.ndjson` are read by exactly what read them before
     // (`tools/gate-receipt.mjs`, which asks for `level`, `ok` and `revision`).
-    stages: ran.map(({ name, ok, ms, because, budget, rates, eyes, fell }) => ({ name, ok, ms, because, budget, rates, eyes, fell })),
+    stages: ran.map(({ name, ok, ms, because, budget, rates, eyes, fell, didNotRun }) => ({ name, ok, ms, because, budget, rates, eyes, fell, didNotRun })),
     notCovered: uncovered.map((one) => one.name),
   };
   writeReceipt(receipt);

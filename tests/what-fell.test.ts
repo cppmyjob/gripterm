@@ -35,6 +35,12 @@ interface Fell {
   readonly first: string | null;
 }
 
+interface DidNotRun {
+  readonly kind: string;
+  readonly skipped: number;
+  readonly total: number;
+}
+
 interface Transcript {
   say: (text: string) => void;
   said: () => string;
@@ -51,8 +57,9 @@ interface Transcript {
  * consumes it from TypeScript, and `tools/gate.mjs` takes it as it is.
  */
 const load = createRequire(__filename);
-const { transcript, whatFell } = load(join(__dirname, '..', 'tools', 'what-fell.js')) as {
+const { transcript, whatDidNotRun, whatFell } = load(join(__dirname, '..', 'tools', 'what-fell.js')) as {
   transcript: (most: number) => Transcript;
+  whatDidNotRun: (said: string) => DidNotRun | null;
   whatFell: (said: string) => Fell | null;
 };
 
@@ -199,6 +206,87 @@ describe('what fell over, out of a stage`s own output', () => {
 
       expect(kept.dropped()).toBeGreaterThan(0);
       expect(whatFell(kept.said())?.named).toHaveLength(2);
+    });
+  });
+});
+
+/**
+ * How many of a stage's tests did NOT run, out of the output it already printed.
+ *
+ * **The defect this exists for, 2026-08-27.** The gate prints `GREEN ... 5 of 5
+ * checked` and a list of what it does not cover, and beside a stage it prints a
+ * time. It has never printed how many tests inside that stage were switched off.
+ * A green stage with twenty disabled tests and a green stage with none are the
+ * same line, and the difference between them is exactly the thing a person
+ * reading a green wants to know.
+ *
+ * **Both fixtures were captured from the real runner** and not written by hand,
+ * which is the rule `what-fell`'s own fixtures follow and for the same reason: a
+ * parser tested against invented output is a parser tested against its author's
+ * memory. `mocha-with-pending.txt` is Mocha 10.8.2's spec reporter over a
+ * throwaway spec with three `it.skip`s, run directly with no editor involved;
+ * `jest-with-skips.txt` is this repository's own `way-out` suite under `-t`,
+ * ANSI and all.
+ *
+ * **What it deliberately does not promise.** That every stage can answer. A
+ * stage whose output no runner wrote comes back `null`, and the gate then says
+ * that the number is not known for that stage rather than printing a nought --
+ * a nought nobody measured would be the worst of the three possible answers.
+ */
+describe('how many of a stage`s tests did not run', () => {
+  describe('Mocha, whose word for it is `pending`', () => {
+    it('counts the pending ones', () => {
+      expect(whatDidNotRun(fixture('mocha-with-pending.txt'))?.skipped).toBe(3);
+    });
+
+    it('counts every test the run had, not only the ones that ran', () => {
+      // 2 passing + 3 pending, and the total is what makes the skipped number
+      // mean anything: `3 skipped` reads differently out of 5 than out of 500.
+      expect(whatDidNotRun(fixture('mocha-with-pending.txt'))?.total).toBe(5);
+      expect(whatDidNotRun(fixture('mocha-with-pending.txt'))?.kind).toBe('mocha');
+    });
+
+    it('says NONE were skipped where Mocha printed no pending line at all', () => {
+      // Mocha prints `N pending` only when N is not nought, so the absence of
+      // the line is the answer `0` and must not be read as "did not say".
+      const none = whatDidNotRun(fixture('mocha-two-failing.txt'));
+
+      expect(none?.kind).toBe('mocha');
+      expect(none?.skipped).toBe(0);
+      expect(none?.total).toBe(3);
+    });
+  });
+
+  describe('Jest, whose word for it is `skipped`', () => {
+    it('counts the skipped ones and the whole run', () => {
+      const some = whatDidNotRun(fixture('jest-with-skips.txt'));
+
+      expect(some?.kind).toBe('jest');
+      expect(some?.skipped).toBe(12);
+      expect(some?.total).toBe(13);
+    });
+
+    it('says NONE were skipped where the totals line names no skipped at all', () => {
+      const none = whatDidNotRun(fixture('jest-two-failing.txt'));
+
+      expect(none?.kind).toBe('jest');
+      expect(none?.skipped).toBe(0);
+      expect(none?.total).toBe(3);
+    });
+
+    it('counts a `todo` as a test that did not run, because it did not', () => {
+      // Jest keeps `todo` apart from `skipped` in its own summary. Both are
+      // tests that were not executed, and a reader asking "what did this green
+      // not check" is asking one question, not two.
+      expect(whatDidNotRun('Tests:       2 todo, 1 skipped, 4 passed, 7 total')?.skipped).toBe(3);
+    });
+  });
+
+  describe('a stage no runner wrote the output of', () => {
+    it('is null rather than nought, so an unmeasured number is never printed as one', () => {
+      expect(whatDidNotRun(fixture('tsc-errors.txt'))).toBeNull();
+      expect(whatDidNotRun(fixture('eslint-errors.txt'))).toBeNull();
+      expect(whatDidNotRun('')).toBeNull();
     });
   });
 });

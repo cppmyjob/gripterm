@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { explainRefusal, planRestore, presentTerminal } from '@gripterm/core';
 import { ADOPTABLE_ROWS, whichTerminal } from './pick-terminal';
+import { wayOut } from './way-out';
 import { say } from '../ui/say';
 import type {
   Logger,
@@ -8,7 +9,6 @@ import type {
   Reconciler,
   RestoreInputs,
   RestoreOrchestrator,
-  RestoreRefusal,
   SessionRegistry,
   TerminalEntry,
 } from '@gripterm/core';
@@ -197,24 +197,6 @@ async function take(
     return;
   }
   say('warning', `Gripterm: "${label}" was taken by another window first.`, logger);
-}
-
-/**
- * The refusals that will still be refusals tomorrow, told apart from the ones
- * that are about this moment (M2.22).
- *
- * A person who pressed "take over" and was told "nothing was ever said in its
- * conversation" has been given a fact and no move. That row is what a `Start
- * Over` left behind by a window which then went away looks like, and it is
- * precisely the row the owner could not get rid of -- so the sentence names the
- * one thing left to do with it. The other refusals are deliberately silent
- * here: a window that is asleep, a conversation the CLI is running, a listing
- * that failed are all states that change, and telling somebody to throw the
- * record away would be advice to lose their notes over a bad minute.
- */
-function wayOut(reason: RestoreRefusal): string {
-  const settled = reason === 'no-transcript' || reason === 'duplicate-session';
-  return settled ? ' You can delete its record from the row\'s menu.' : '';
 }
 
 /**

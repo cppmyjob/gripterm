@@ -1,0 +1,14 @@
+
+
+  a suite with tests nobody ran
+    ✔ runs this one
+    - does not run this one
+    - does not run this one either
+    a nested suite
+      ✔ runs
+      - is pending
+
+
+  2 passing (6ms)
+  3 pending
+

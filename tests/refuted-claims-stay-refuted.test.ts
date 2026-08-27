@@ -83,6 +83,18 @@ const REFUTED: readonly RefutedClaim[] = [
       '48 a glass window answers in 5 out of 5. It beats an explicitly requested `--glass`: 3 launches of ' +
       '`--glass --classic`, found in all 3.',
   },
+  {
+    said: 'broken in Cursor in a folderless window and sound in a window with a folder',
+    refutedBy:
+      'Ш16, 2026-08-25: `--classic` with NO folder missed 0 attempts of 10, measured TWICE. The folder is ' +
+      'not the variable and never was -- it switches GLASS off as a side effect, because a path on the ' +
+      'command line makes the fork`s `hasExplicitFirstWindowIntent` true and no first-window decision is ' +
+      'taken, and on a fresh profile that decision is the only thing that turns glass on. The variable is ' +
+      'the workbench: a glass window throws 10 of 10 (5 launches of 5), a window that is not glass throws ' +
+      '0 of 10 (12 launches of 12 under `--classic`, 6 of 6 with a folder and no flag). Written out in ' +
+      '`.vscode-test.mjs`, `tools/cursor-workbench.js`, `tests/cursor/workbench.test.ts` and ' +
+      '`tests/cursor/new-group-below.js`.',
+  },
 ];
 
 /**
@@ -151,6 +163,22 @@ describe('a claim this repository measured false', () => {
     // record left silent about the configuration that exists -- which the next
     // reader takes for the same "there is none" the sentence said out loud.
     expect(theCursorLiveRecord()).toContain('--classic');
+  });
+
+  it('does not go on calling open the half of its question the owner has answered', () => {
+    // The other way a record outlives what is true of it, and it needs no false
+    // sentence at all: the question stands unchanged while half of it has been
+    // settled, so a reader counts as open something that was decided.
+    //
+    // WHAT WAS ANSWERED, 2026-08-25: what the `cursor` stage should measure. The
+    // owner settled the first half of it -- the ordinary window is the one he
+    // works in -- and `.vscode-test.mjs` has said so since. What is still open
+    // is the COST: 4 min 30 s onto a full gate measured against a ceiling of
+    // ten. The record must say which half is which, in the words the runner
+    // config uses, so that the two cannot drift apart in silence.
+    const record = theCursorLiveRecord();
+    expect(record).not.toContain('The second is the owner`s to answer and was open on');
+    expect(record).toContain('the ordinary window is the one he works in');
   });
 
   it('is looked for over a repository this reader can really see, so that neither rule above is about an empty list', () => {

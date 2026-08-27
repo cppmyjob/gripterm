@@ -517,6 +517,33 @@ describe('RestoreOrchestrator, when the conversation that answers is a different
     ).toBe(true);
   });
 
+  it('names the conversation that did not come back, and advises nothing a person cannot do', async () => {
+    // **The defect, 2026-08-27.** This sentence used to end `run "Gripterm: Show
+    // Record" to see which one it was`, and BOTH halves of that were wrong.
+    //
+    // The command is not in the palette: `packages/extension/package.json`
+    // contributes `gripterm.showRecord` under `commandPalette` with `when:
+    // "false"`, on purpose -- it takes a terminal id, and from a palette it gets
+    // none (`show-record.ts` says so). So the person was told to open the
+    // palette and type a name that is not there.
+    //
+    // And it would not have answered the question anyway. By the time this is
+    // announced the record names the NEW conversation, so revealing its row
+    // shows the id that DID come back, not the one that did not. The id that
+    // did not is `asked`, which nothing but the log has ever held -- so the
+    // sentence carries it now, and offers no move at all rather than an
+    // impossible one.
+    const here = stand();
+    const entry = abandoned(here);
+
+    await here.orchestrator.run(planFor(entry));
+    announceAnother(here, entry, SessionId.fromString(SECOND_SESSION));
+
+    const said = here.said[0] ?? '';
+    expect(said).toContain(entry.sessionId.value);
+    expect(said).not.toContain('Show Record');
+  });
+
   it('says nothing when the conversation it asked for is the one that answers', async () => {
     const here = stand();
     const entry = abandoned(here);

@@ -1,8 +1,10 @@
 # Spike: panel keys (M3.1)
 
-Throwaway measurement stand for [14-m3-plan.md](../../../docs/14-m3-plan.md) step
-**M3.1** — the keyboard gate. Nothing here moves into `packages/`; the product of
-this directory is a protocol in `docs/experiments/`.
+Throwaway measurement stand for step **M3.1** of `14-m3-plan.md` — the keyboard
+gate. That plan is named and deliberately not linked: it lives in a private
+repository, so a link would be dead for every reader of this public one and
+would publish that repository's layout besides. Nothing here moves into
+`packages/`; the product of this directory is a protocol in `docs/experiments/`.
 
 ## What it answers
 
