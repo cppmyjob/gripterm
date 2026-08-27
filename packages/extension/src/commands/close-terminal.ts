@@ -30,15 +30,56 @@ const CONFIRM = 'End Conversation';
  * same answer the tree menus are keyed on, so the palette and the right-click
  * menu cannot come to different conclusions about what is closable.
  *
- * **One dialog on every road, and never none (M3.14).** Where the person was
+ * **One dialog on every road THAT COMES THROUGH HERE -- which is not every
+ * road, and until 2026-08-27 this block said otherwise.** Where the person was
  * handed a picker, the picker IS the last place they see what they are about to
- * end, and Escape backs out of it. Where they were not -- the cross on a tab of
- * our strip, a menu on a tree row -- they are asked here. The acceptance run
- * found the cross ending a live conversation on a single click at a target the
- * width of a tab's corner, which is a slip away from every click that merely
- * switches tabs, and the owner decided on 2026-08-20 that a live conversation
- * is worth a question. A conversation already over is not: that cross only
- * takes a tab away.
+ * end, and Escape backs out of it. Where they were not -- a menu on a tree row,
+ * the cross on a tab of the DRAWN strip -- they are asked here. The acceptance
+ * run found that cross ending a live conversation on a single click at a target
+ * the width of a tab's corner, which is a slip away from every click that merely
+ * switches tabs, and the owner decided on 2026-08-20 that a live conversation is
+ * worth a question. A conversation already over is not: that cross only takes a
+ * tab away.
+ *
+ * **"OUR STRIP" IS TWO DIFFERENT THINGS, and this block used to say it as if it
+ * were one -- which is how the owner came to read it as covering his cross.**
+ * The DRAWN strip is `ui/terminal-strip.ts`: tabs we paint inside our own
+ * webview, and the only cross in the build that reaches this command
+ * (`executeCommand(CLOSE_TERMINAL_COMMAND)`). It exists under
+ * `gripterm.terminal.engine: own` and nowhere else. The other is
+ * `VsCodeEditorStrip` -- `gripterm.launch.location: group`, which is the
+ * DEFAULT -- a group of the editor area whose tabs are the EDITOR'S, drawn by
+ * the workbench, closed by the workbench. That is the strip the owner was
+ * looking at.
+ *
+ * **On that road there is no dialog before the fact, and there cannot be.** The
+ * editor closes the terminal and tells us afterwards, through
+ * `onDidCloseTerminal` and `TerminalLifecycleService._noteDeliberateClose`.
+ * Nothing in `packages/extension` turns that gesture into
+ * `CLOSE_TERMINAL_COMMAND`, and nothing can: the platform raises no event
+ * before the close for anybody to answer. The owner reported the gap on
+ * 2026-08-27 -- "нажимаю на таб закрытия терминала - нет сообщения
+ * предупреждения" -- and it was a defect of this sentence as much as of the
+ * build, because the sentence had claimed the road was covered.
+ *
+ * **What is on that road now: a question AFTER the fact** (owner's decision,
+ * 2026-08-27; `ui/closing-offer.ts` and `closedInTheEditorOffer`). The record is
+ * stamped closed as it always was, and then the person is offered two named
+ * buttons -- `Bring It Back`, which takes the close off the record, and `End It
+ * For Good`, which writes `person` and lets the sweep have it. Ignoring the
+ * offer is not an answer and leaves the record exactly as it is. The price is
+ * the owner's own: five tabs closed at once are five questions, and folding
+ * them into one was left undone on purpose.
+ *
+ * **What is NOT promised, and it is somebody else's setting.**
+ * `terminal.integrated.confirmOnKill` defaults to `editor` and asks only when
+ * the terminal `hasChildProcesses` -- a condition we neither set nor can read.
+ * Both halves were read out of the shipped workbench of VS CODE 1.135.0 on
+ * 2026-08-27 (`default:"editor"`, and
+ * `(e==="editor"||e==="always")&&this._terminalInstance?.hasChildProcesses`).
+ * **The fork the owner works in was not measured**, and the report is his, so
+ * nothing here says what Cursor does with either. This build relies on none of
+ * it: the offer above is ours and stands whatever that setting says.
  *
  * It answers `true` when the record was closed, because the strip must not take
  * a tab away from a person who said no.

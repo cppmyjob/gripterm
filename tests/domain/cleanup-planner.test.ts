@@ -406,7 +406,15 @@ describe('deciding what may be taken out of the store without asking', () => {
    *
    * Three of them here because one would pass on the old rule by accident: what
    * separates the two hands is not how many went at once -- there is no signal
-   * for that, measured -- but which act the build actually witnessed.
+   * for that, measured twice now, `exitStatus.reason` on 2026-08-24 and
+   * `onDidChangeTabs` on 2026-08-27, which fires once per tab five milliseconds
+   * apart -- but which act the build actually witnessed.
+   *
+   * **RE-EXAMINED AND KEPT on 2026-08-27**, when the owner asked for a record
+   * they had closed with the cross to be gone after a restart. Flipping the rule
+   * would have granted that and handed this keystroke the store along with it.
+   * What was done instead is a question: a close in the editor is ASKED about,
+   * and only the answer writes `person`.
    */
   it('leaves every conversation the editor took away, however many went at once', () => {
     const gesture = [

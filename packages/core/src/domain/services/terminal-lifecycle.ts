@@ -41,6 +41,23 @@ export interface TerminalLifecycleOptions {
    * no directory to write beside.
    */
   readonly trace?: LaunchTrace;
+  /**
+   * Told when a terminal was closed IN THE EDITOR and this service stamped the
+   * record for it -- so that somebody can ask the person what they meant
+   * (owner's decision, 2026-08-27; see `closedInTheEditorOffer`).
+   *
+   * A callback rather than an answer, because the answer arrives long after
+   * this call: it is a notification a person may never look at, and a service
+   * that awaited one would hold a close open until they did.
+   *
+   * The entry handed over is the record AS STAMPED. Whoever answers must read
+   * it again before writing -- between the offer and the press it may have been
+   * deleted, reopened, or taken over by another window.
+   *
+   * Optional, and silence is a legitimate composition: the contract suites and
+   * a window with no notifications to give have nobody to ask.
+   */
+  readonly closedInTheEditor?: (entry: TerminalEntry) => void;
 }
 
 /** What a new terminal needs that is not the same for all of them. */
@@ -384,12 +401,17 @@ export class TerminalLifecycleService implements Disposable {
    * declare every terminal rubbish at the first restart. `reason` is the field
    * that separates them, and it was there all along (A29).
    *
-   * **What `reason` does NOT separate, measured 2026-08-24:** the cross on one
-   * tab from `workbench.action.closeAllEditors`, which wears the same word and
-   * takes every conversation in the window with it. Both still stop a record
-   * coming back by itself; only this one, the one a person reached through our
-   * own list, is allowed to feed the sweep that empties the store unasked. That
-   * is what the `ClosedBy` argument carries.
+   * **What `reason` does NOT separate, measured 2026-08-24 and again on
+   * 2026-08-27:** the cross on one tab from `workbench.action.closeAllEditors`,
+   * which wears the same word and takes every conversation in the window with
+   * it. `window.tabGroups.onDidChangeTabs` does not separate them either -- it
+   * fires once per tab, five milliseconds apart, which is the shape of a person
+   * closing two tabs by hand. Both still stop a record coming back by itself;
+   * only this one, the one a person reached through our own list, is allowed to
+   * feed the sweep that empties the store unasked. That is what the `ClosedBy`
+   * argument carries -- and what the offer in `_noteDeliberateClose` lets a
+   * person change afterwards, since asking is the only thing that establishes
+   * what the editor's one word will not.
    */
   public close(terminalId: TerminalId): void {
     const entry = this._options.registry.get(terminalId);
@@ -602,7 +624,13 @@ export class TerminalLifecycleService implements Disposable {
     if (entry === undefined) {
       return;
     }
-    this._options.registry.amend(entry.withClosed(this._options.clock.now(), 'editor'));
+    // Read BEFORE the amend, because the amend is what makes it false: the
+    // offer is about a close that happened just now, and `withClosed` is
+    // idempotent -- a record already closed is one somebody has already been
+    // asked about, or one they closed through our own list.
+    const wasOpen = entry.closedAt === null;
+    const closed = entry.withClosed(this._options.clock.now(), 'editor');
+    this._options.registry.amend(closed);
     /*
      * The sentence says less than it used to, because this build knows less
      * than it claimed to. The editor reports one word for the cross on a tab
@@ -612,6 +640,16 @@ export class TerminalLifecycleService implements Disposable {
     this._options.logger.info('a terminal went away in the editor, so its record will not come back by itself', {
       terminalId: terminalId.value,
     });
+    /*
+     * AFTER the record is written and the line is in the log, and that order is
+     * the rule rather than the order it was typed in: whoever is told will put a
+     * question on the screen and may be answered before this method returns, and
+     * an answer that reached the registry first would be overwritten by the
+     * close it was answering.
+     */
+    if (wasOpen) {
+      this._options.closedInTheEditor?.(closed);
+    }
   }
 
   /**

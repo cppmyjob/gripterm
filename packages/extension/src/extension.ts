@@ -103,6 +103,7 @@ import { registerRestoreFromTrash } from './commands/restore-from-trash';
 import { registerCloseTerminal } from './commands/close-terminal';
 import { registerDeleteTerminal } from './commands/delete-terminal';
 import { registerShowRecord } from './commands/show-record';
+import { offerToBringItBack } from './ui/closing-offer';
 import { registerResumeTerminal } from './commands/resume-terminal';
 import { registerStartOver } from './commands/start-over';
 import { registerFocusTerminal } from './commands/focus-terminal';
@@ -836,6 +837,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     // the window, and the question a person asks the next morning is about the
     // window that is gone (owner, 2026-08-23 -- see `LaunchTrace`).
     trace: new FileLaunchTrace({ layout: storage, clock, logger }),
+    // The cross on the editor's own tab has no dialog in front of it and cannot
+    // have one -- the platform raises no event before the close. So the question
+    // comes after it (owner's decision, 2026-08-27; see `offerToBringItBack`).
+    closedInTheEditor: (entry) => {
+      offerToBringItBack(registry, logger, entry);
+    },
   });
   context.subscriptions.push(lifecycle);
 

@@ -352,6 +352,37 @@ describe('presentTerminal lays the owner\'s liveness over the stored state', () 
     expect(new Set([...overlays, ...states]).size).toBe(overlays.length + states.length);
   });
 
+  /*
+   * The owner, testing the build on 2026-08-27: "остаётся запись window - not
+   * answering". The row they were looking at was a conversation THEY had ended
+   * -- it had said `ended` before the restart -- and after it the row was named
+   * after the window instead. A window that is silent says nothing about a
+   * conversation that is over: there is no process to be out of touch with, and
+   * nothing about this row that a heartbeat coming back would change.
+   */
+  it.each(['dead', 'unknown'] as const)(
+    'leaves a record the person closed under its own name when its window is %s',
+    (liveness) => {
+      const closed = makeEntry({
+        closedAt: new Date(CREATED_AT.getTime() + 1000),
+        observed: ObservedState.create({
+          state: 'ended',
+          lastEventAt: OBSERVED_AT,
+          currentTool: null,
+          lastAssistantMessage: null,
+          cost: null,
+          contextWindow: null,
+          pid: null,
+        }),
+      });
+
+      const shown = presentTerminal(closed, { liveness });
+
+      expect(shown.state).toBe<TerminalState>('ended');
+      expect(shown.contextValue).toBe(CONTEXT_OVER);
+    }
+  );
+
   it('says nothing about detachment when the owner is live', () => {
     expect(presentTerminal(inState('working'), { liveness: 'live' }).state).toBe<TerminalState>('working');
   });

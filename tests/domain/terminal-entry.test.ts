@@ -347,6 +347,50 @@ describe('withClosed', () => {
   });
 });
 
+describe('closedForGood', () => {
+  /*
+   * The owner's decision of 2026-08-27, and the half of it that lands on the
+   * record. A close in the editor cannot be told from `closeAllEditors`
+   * (measured twice, see `ClosedBy`), so the build stops guessing and asks; and
+   * a person who answers "for good" has said exactly what our own Close says.
+   * From that moment the record is `person` and the sweep may have it.
+   */
+  it('moves the hand to the person, and leaves the close where it was', () => {
+    const closed = makeEntry().withClosed(CLOSED_AT, 'editor');
+
+    const forGood = closed.closedForGood();
+
+    expect(forGood.closedBy).toBe('person');
+    expect(forGood.closedAt).toStrictEqual(CLOSED_AT);
+  });
+
+  it('keeps everything else about the record', () => {
+    const closed = makeEntry().withClosed(CLOSED_AT, 'editor');
+
+    const forGood = closed.closedForGood();
+
+    expect(forGood.terminalId.equals(closed.terminalId)).toBe(true);
+    expect(forGood.metadata).toBe(closed.metadata);
+    expect(forGood.observed).toBe(closed.observed);
+    expect(forGood.revision).toBe(closed.revision);
+  });
+
+  it('answers itself when the record was never closed', () => {
+    // Nothing to confirm: a record with no close on it is not a record anybody
+    // was offered this about, and inventing a `closedAt` here would be this
+    // class deciding when a terminal ended.
+    const open = makeEntry();
+
+    expect(open.closedForGood()).toBe(open);
+  });
+
+  it('answers itself when the person had already closed it themselves', () => {
+    const closed = makeEntry().withClosed(CLOSED_AT, 'person');
+
+    expect(closed.closedForGood()).toBe(closed);
+  });
+});
+
 describe('reopened', () => {
   /*
    * M2.23. `closedAt` is the one field in this aggregate that records an

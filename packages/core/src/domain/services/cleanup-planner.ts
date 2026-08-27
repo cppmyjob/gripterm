@@ -6,10 +6,12 @@ import type { TerminalEntry } from '../entities/terminal-entry';
 /**
  * Why a record may be taken out of the store.
  *
- * Two, and both are permanent states of the world rather than judgements about
- * what looks useful. Anything that might change tomorrow -- a window that is
- * asleep, a project nobody has open right now, a CLI that could not be asked --
- * is not on this list, and the absence is the design.
+ * Three, and every one of them is a permanent state of the world rather than a
+ * judgement about what looks useful. Anything that might change tomorrow -- a
+ * window that is asleep, a project nobody has open right now, a CLI that could
+ * not be asked -- is not on this list, and the absence is the design.
+ *
+ * (It said "two" until 2026-08-27, and had said so since the third was added.)
  */
 export type CleanupReason =
   /** A person closed its terminal THROUGH OUR LIST, and its window is gone. */
@@ -19,7 +21,8 @@ export type CleanupReason =
    *
    * A separate reason from `closed` because the editor says one word for two
    * acts -- see `ClosedBy` -- and this is the one where nobody established what
-   * the person meant.
+   * the person meant -- until they are asked, which is what
+   * `closedInTheEditorOffer` is for.
    */
   | 'closed-in-the-editor'
   /** Nothing was ever said in its conversation, and its window is gone. */
@@ -172,12 +175,14 @@ export function planCleanup(inputs: RestoreInputs): CleanupPlan {
  *
  * The boundary is the argument and not the count. `closed` is something the
  * person did to that terminal, with their own hand, on purpose: they have
- * already said it. `never-spoken` is the opposite kind of record -- a terminal
- * they may have named, written a task on, meant to come back to, and never got
- * to say anything in -- and a build that swept those on its own would be
- * deleting an intention rather than honouring one. Since 2026-08-21 it is more
- * than an intention: such a record is one a window will BRING BACK, so sweeping
- * it unasked would take away a terminal the person was about to get.
+ * already said it -- either through our own list, or by answering the offer a
+ * close in the editor now raises (`closedInTheEditorOffer`). `never-spoken` is
+ * the opposite kind of record -- a terminal they may have named, written a task
+ * on, meant to come back to, and never got to say anything in -- and a build
+ * that swept those on its own would be deleting an intention rather than
+ * honouring one. Since 2026-08-21 it is more than an intention: such a record is
+ * one a window will BRING BACK, so sweeping it unasked would take away a
+ * terminal the person was about to get.
  */
 const UNASKED: Readonly<Record<CleanupReason, boolean>> = {
   'closed': true,
@@ -194,6 +199,19 @@ const UNASKED: Readonly<Record<CleanupReason, boolean>> = {
    * what the owner asked for about the cross on a tab. What they no longer do
    * is leave the store while nobody is looking. A person who meant it sweeps
    * them from the cleanup command, reading the sentence above.
+   *
+   * **RE-EXAMINED 2026-08-27 AND KEPT, which is worth more than never having
+   * asked.** The owner reported that day that a record they had closed with the
+   * cross came back into the list after a restart, and asked for it to be gone.
+   * Flipping this line would have delivered that -- and would have handed
+   * `closeAllEditors` the whole store again, because the separating signal is
+   * not there: `exitStatus.reason` is `User` for both (A29), and
+   * `window.tabGroups.onDidChangeTabs` fires ONCE PER TAB for the bulk gesture,
+   * five milliseconds apart, which is the shape of a person closing two tabs by
+   * hand (measured 2026-08-27). The owner chose the other road on the same day:
+   * the build ASKS after the fact rather than guessing, and an answer of "for
+   * good" writes `person`, which is `closed` above. So this line stays `false`
+   * and the record's fate is settled by somebody who knows it.
    */
   'closed-in-the-editor': false,
   'never-spoken': false,

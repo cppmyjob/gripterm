@@ -28,6 +28,16 @@ const INITIAL_REVISION = 0;
  * both hands stop a record coming back by itself, and only `person` may feed
  * the sweep that moves records out of the store while nobody is looking. What
  * a misread costs is then one row a person did not want, and not a conversation.
+ *
+ * **AND SINCE 2026-08-27 THE GUESS HAS A WAY OUT: the build asks.** The owner
+ * reported that day that a record they closed with the cross was still in the
+ * list after a restart. Rather than let `editor` mean `person` -- which would
+ * let one `closeAllEditors` empty the store again, and there is still no signal
+ * separating the two -- a close in the editor raises an offer with two named
+ * buttons, and `End It For Good` moves the hand to `person` through
+ * `closedForGood()`. So this field is what the build WITNESSED until somebody
+ * who knows better says otherwise, and the value it holds afterwards is what
+ * they said.
  */
 export type ClosedBy = 'person' | 'editor';
 
@@ -395,12 +405,43 @@ export class TerminalEntry {
   }
 
   /**
+   * The person, asked about a close the EDITOR made, said they meant it.
+   *
+   * The other half of the offer `closedInTheEditorOffer` puts up, and the only
+   * thing in this build that moves `closedBy` after it is written. It is allowed
+   * for the same reason `reopened` is: the field records an intention, and until
+   * somebody is asked, the intention behind a close in the editor is not
+   * established -- one word covers the cross on a tab and every bulk gesture
+   * alike (see `ClosedBy`). An answer establishes it, and this writes down what
+   * was established.
+   *
+   * `closedAt` is left exactly where it was. The person is confirming WHAT they
+   * did, not when, and a build that restamped the moment here would move a
+   * record's close to whenever a toast happened to be pressed.
+   *
+   * Answers itself for a record with no close on it -- there is nothing to
+   * confirm, and inventing a `closedAt` would be this class deciding when a
+   * terminal ended -- and for one already closed by the person, which is the
+   * same answer arriving twice.
+   */
+  public closedForGood(): TerminalEntry {
+    const { closedAtMs, closedBy } = this._state;
+    return closedAtMs === null || closedBy === 'person'
+      ? this
+      : this._withState({ closedBy: 'person' });
+  }
+
+  /**
    * Idempotent: the first close wins, so a second one cannot move the timestamp
    * -- nor the hand it names.
    *
    * `by` is not decoration. Both hands write the same `closedAt` and mean the
    * same thing to the restore predicate, and only one of them may feed the
    * sweep that moves records out of the store unasked. See `ClosedBy`.
+   *
+   * The idempotence is about the CLOSE and not about the hand: a second close
+   * moves neither, and `closedForGood` moves the hand on purpose, because that
+   * one is not a close but a person answering for one.
    */
   public withClosed(at: Date, by: ClosedBy): TerminalEntry {
     if (this._state.closedAtMs !== null) {

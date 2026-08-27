@@ -56,10 +56,14 @@ export function chooseEngine(setting: TerminalEngine, mode: LaunchMode): EngineC
  * HEAR, and M3.14 measured that ours could not be heard: in Cursor the engine
  * fell back exactly as promised and the owner never saw a word of it. The cause
  * is the editor's, and it is measured rather than guessed --
- * `workbench.desktop.main.js` carries
- * `PURGE_TIMEOUT={[Info]:15e3,[Warning]:18e3,...}` and
+ * `workbench.desktop.main.js` carries a `PURGE_TIMEOUT` per severity and
  * `get sticky(){...e&&this._severity===Error...}`, so a warning toast is taken
- * off the screen after eighteen seconds and only an ERROR with buttons stays.
+ * off the screen after a few seconds and only an ERROR with buttons stays.
+ * **The numbers moved and this record had not**: it said 15e3 for Info and 18e3
+ * for Warning, and VS Code 1.135.0 carries `{Info:1e4, Warning:12e3,
+ * Error:15e3}` (re-measured 2026-08-27). The conclusion drawn from them stands;
+ * the figures are a fact about one build, so they are not quoted here twice --
+ * `ui/closing-offer.ts` carries them beside the one place they are acted on.
  * Ours is said from `activate`, which is the same moment a person is answering
  * the editor's question about trusting the folder. Eighteen seconds later it is
  * in the bell, and the bell is not a place anybody looks.

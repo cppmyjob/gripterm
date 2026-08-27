@@ -163,6 +163,13 @@ export {
   type TerminalExitCause,
 } from './domain/services/terminal-exit-verdict';
 export {
+  BRING_IT_BACK,
+  END_IT_FOR_GOOD,
+  answerAfterClosing,
+  closedInTheEditorOffer,
+  type EditorCloseAnswer,
+} from './domain/services/closed-in-the-editor';
+export {
   SCREEN_BUFFER_CEILING_CHARS,
   ScreenBuffer,
   type ScreenReplay,

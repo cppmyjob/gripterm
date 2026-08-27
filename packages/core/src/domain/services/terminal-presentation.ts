@@ -314,8 +314,25 @@ function contextValueFor(
  * is a second `claude --resume` on a conversation that already has one unless
  * the person has looked. Drawing them alike would ask for that risk without
  * mentioning it.
+ *
+ * **Neither is laid over a record the person CLOSED**, and that is the owner's
+ * report of 2026-08-27: "остаётся запись window - not answering". The row they
+ * were reading had said `ended` before the restart, and afterwards it was named
+ * after the window. Both overlays exist to price a next click -- adopt this, or
+ * resume it -- and a closed record has no such click: `isRestorable()` is false,
+ * so the row is `CONTEXT_OVER` under every liveness there is, and a heartbeat
+ * coming back would change nothing about it. What is left to say is what
+ * happened to the conversation, which is what the record already says.
+ *
+ * It is the CLOSE and not the state that lifts the overlay. A terminal whose
+ * process merely went (`ended`, `orphaned`) in a window that is now silent is
+ * still that window's to answer for, and `unreachable` is the honest word for
+ * it -- the window may come back and say something else.
  */
 function displayedState(entry: TerminalEntry, liveness: OwnerLiveness): TerminalState {
+  if (entry.closedAt !== null) {
+    return entry.observed.state;
+  }
   switch (liveness) {
     case 'live':
       return entry.observed.state;

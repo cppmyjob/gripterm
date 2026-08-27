@@ -81,13 +81,19 @@ function rowFor(gripterm: GriptermApi, terminalId: Entry['terminalId']): {
   readonly state: string;
   readonly contextValue: string;
   readonly closed: boolean;
+  readonly closedBy: string | null;
 } | null {
   const entry = gripterm.registry.list().find((one) => one.terminalId.equals(terminalId));
   if (entry === undefined) {
     return null;
   }
   const shown = presentTerminal(entry, { ours: gripterm.registry.knows(terminalId) });
-  return { state: shown.state, contextValue: shown.contextValue, closed: entry.closedAt !== null };
+  return {
+    state: shown.state,
+    contextValue: shown.contextValue,
+    closed: entry.closedAt !== null,
+    closedBy: entry.closedBy,
+  };
 }
 
 function recipeJson(now: number): string {
@@ -196,6 +202,26 @@ suite('the row a closed terminal leaves behind', () => {
       assert.ok(row, 'the record went away entirely, which is not what a close does');
       assert.equal(row.state, 'ended');
       assert.equal(row.closed, true, 'a terminal closed by the person was left restorable');
+      /*
+       * The hand, read off the record itself rather than inferred (Ш26,
+       * 2026-08-27). The owner's report of that day is about what happens to
+       * this record at the NEXT start, and what happens to it is decided by
+       * this word: `UNASKED` in `cleanup-planner.ts` is keyed on the reason
+       * this value produces. A build that quietly started writing `person`
+       * here -- or nothing at all -- would change the fate of every record
+       * closed on its tab with no test saying so.
+       *
+       * It is ALSO the one live check on the offer that now goes up on this
+       * road (`ui/closing-offer.ts`): this run presses nothing, so what is
+       * asserted here is the outcome of ignoring it -- the record stays exactly
+       * as the editor left it. The two PRESSED outcomes cannot be driven from a
+       * run; that file says so in as many words.
+       */
+      assert.equal(
+        row.closedBy,
+        'editor',
+        'the cross on the tab of the editor was not witnessed as the editor closing it'
+      );
       // The whole point: this is the value `Delete Record` is keyed on.
       assert.equal(row.contextValue, CONTEXT_OVER);
       assert.equal(lifecycle.discard(terminalId), 'discarded');

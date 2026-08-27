@@ -122,6 +122,8 @@ interface Stand {
   readonly commands: StubAgentCommands;
   readonly trace: RecordingTrace;
   readonly lifecycle: TerminalLifecycleService;
+  /** Every record the service offered to bring back, oldest first. See `closedInTheEditor`. */
+  readonly offered: readonly TerminalEntry[];
 }
 
 function stand(strategy: LaunchStrategy = new ProcessLaunchStrategy()): Stand {
@@ -136,6 +138,7 @@ function stand(strategy: LaunchStrategy = new ProcessLaunchStrategy()): Stand {
   const gateway = new InMemoryTerminalGateway();
   const commands = new StubAgentCommands();
   const trace = new RecordingTrace();
+  const offered: TerminalEntry[] = [];
   const lifecycle = new TerminalLifecycleService({
     registry,
     gateway,
@@ -146,8 +149,11 @@ function stand(strategy: LaunchStrategy = new ProcessLaunchStrategy()): Stand {
     owner: makeOwnerRef(),
     logger,
     trace,
+    closedInTheEditor: (entry) => {
+      offered.push(entry);
+    },
   });
-  return { clock, logger, registry, gateway, commands, trace, lifecycle };
+  return { clock, logger, registry, gateway, commands, trace, lifecycle, offered };
 }
 
 /**
@@ -791,8 +797,9 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
     readonly event: unknown;
     readonly closedAt: Date | null;
     readonly closedBy: string | null;
+    readonly offered: number;
   }> {
-    const { lifecycle, registry, gateway, logger } = stand();
+    const { lifecycle, registry, gateway, logger, offered } = stand();
     const entry = await lifecycle.launch(request());
     if (intent === 'resume') {
       // The first terminal is over, and the record is being restored -- which
@@ -812,6 +819,7 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
       event: closeEvents(logger).at(-1),
       closedAt: after?.closedAt ?? null,
       closedBy: after?.closedBy ?? null,
+      offered: offered.length,
     };
   }
 
@@ -958,6 +966,34 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
       closedAt: STARTED_AT,
       closedBy: 'editor',
     });
+  });
+
+  /*
+   * THE OWNER'S DECISION OF 2026-08-27, at the seam where it starts. There is no
+   * event before the editor's cross, so there can be no dialog before it; what
+   * there can be is an offer after it, and this is where the service asks for
+   * one. `closedInTheEditor` is where the extension hangs the notification.
+   */
+  it('offers the record back, because nobody asked the person before the editor closed it', async () => {
+    expect(await closing(undefined, 'launch', 'user')).toMatchObject({
+      closedBy: 'editor',
+      offered: 1,
+    });
+  });
+
+  /*
+   * And nowhere else, which is the half that keeps the offer bearable. A window
+   * closing takes every transient terminal with it -- a person who quits their
+   * editor would otherwise be met by one question per conversation on the way
+   * out, about a close they did not make.
+   */
+  it.each([
+    ['shutdown' as const, undefined],
+    ['process' as const, 0],
+    ['user' as const, 0],
+    ['extension' as const, undefined],
+  ])('says nothing when the close was %s with code %p', async (reason, code) => {
+    expect(await closing(code, 'launch', reason)).toMatchObject({ offered: 0 });
   });
 
   it('leaves the record restorable when the window took its terminals with it', async () => {
