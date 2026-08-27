@@ -277,6 +277,39 @@ export class VsCodeEditorStrip {
    */
   private _column: vscode.ViewColumn | null = null;
   /**
+   * Whether this window has ever taken a group of the editor area for its
+   * terminals. Set once and never unset.
+   *
+   * **What it is for, measured 2026-08-27 from the owner's report "закрываю
+   * файл - панель с терминалом максимизируется сама".** `_aloneInTheArea` --
+   * the trigger of the one rule that undoes that trap -- used to begin with
+   * `this._column !== null`, and the number is thrown away by design: `_kept()`
+   * lets go of it the moment it stops naming a group of nothing but our
+   * terminals, which a split above the strip is enough to cause. Nothing puts
+   * it back, either, because `_foundByItsTerminals` is reached only THROUGH
+   * `_kept()`, which answers `null` before it gets there. So one press of the
+   * maximise button from a renumbered window -- `standOnTheStrip` asks
+   * `_kept()` first -- left the repair unable to name the strip for the rest of
+   * the window's life, and the person's last file then took the whole editor
+   * area away with it. Reproduced in a real host that day; the log of the run
+   * shows the repair saying nothing at all, which is what "it declined" looks
+   * like from outside.
+   *
+   * So the trigger asks what it always meant to ask. The identity of the group
+   * is what is IN it -- the lone group of the area holding nothing but
+   * terminals -- and this field is only the answer to "is there a strip in this
+   * window at all", which is the same standard of evidence
+   * `_foundByItsTerminals` already works to.
+   *
+   * The price, named: in a window where this build once made a strip and the
+   * person is now alone in the editor area with a terminal editor of their own,
+   * the rule treats that group as the strip and puts a group above it. That is
+   * the same repair and the same trap -- the workbench locks a group holding a
+   * terminal editor by itself -- so what it costs them is an empty group they
+   * did not ask for, and it is the owner's to weigh.
+   */
+  private _everTookAGroup = false;
+  /**
    * One queue for every entrance, in place of the boolean that said "busy".
    *
    * See `OneTurnAtATime`: the boolean lost every wake-up that arrived while a
@@ -532,8 +565,11 @@ export class VsCodeEditorStrip {
       const column = vscode.window.tabGroups.activeTabGroup.viewColumn;
       this._column = column;
       // The terminal is going there whatever else is in it, so the number is
-      // held the same way as on every other path out of here.
+      // held the same way as on every other path out of here -- and so is the
+      // fact that this window has a strip, which is the only way out of here
+      // that does not go through `_tidyAround`.
       this._awaitingTheFirstTerminal = true;
+      this._everTookAGroup = true;
       this._logger.warn('the editor would not make a group for the terminals, so they are going into the one that is there', {
         column,
         attempts: SPLIT_ATTEMPTS,
@@ -584,6 +620,7 @@ export class VsCodeEditorStrip {
    */
   private async _tidyAround(strip: vscode.ViewColumn): Promise<vscode.ViewColumn> {
     this._column = strip;
+    this._everTookAGroup = true;
     // Every way here is over a group with NO TABS -- one just split off, or one
     // `_emptyRowBelow` found empty -- and the caller is about to put a terminal
     // in it. That is the whole of the exemption `_awaitingTheFirstTerminal`
@@ -1193,6 +1230,12 @@ export class VsCodeEditorStrip {
    * this runs the remembered number names nothing. The first build of this rule
    * compared the number and never fired.
    *
+   * The second build did not compare it and still ASKED FOR ONE, and that was
+   * the same trap wearing a smaller coat: the number is thrown away whenever it
+   * stops naming our group, and nothing puts it back. Measured 2026-08-27 --
+   * see `_everTookAGroup`, which is what the question about the number was
+   * really for.
+   *
    * A single EMPTY group is an editor area with nothing in it, which is how
    * every window starts and is nobody's problem.
    */
@@ -1203,7 +1246,7 @@ export class VsCodeEditorStrip {
       return false;
     }
     const held =
-      this._column !== null &&
+      this._everTookAGroup &&
       only.tabs.length > 0 &&
       only.tabs.every((tab) => tab.input instanceof vscode.TabInputTerminal);
     if (!held) {

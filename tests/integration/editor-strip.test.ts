@@ -1336,4 +1336,169 @@ suite('the strip of our own', () => {
     );
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
   });
+
+  /*
+   * The owner, 2026-08-27: "закрываю файл - панель с терминалом максимизируется
+   * сама". `_keepCompany` exists for exactly that and did not fire, and this is
+   * the sequence that stops it firing -- every step of it something a person
+   * does, and one of them the very button the same report is about.
+   *
+   * The strip is remembered by a NUMBER. When the number stops naming the strip
+   * -- a split above it renumbers everything after -- the next question asked of
+   * `_kept()` lets go of it, and `standOnTheStrip`, which the maximise button
+   * asks first, is one of those questions. From then on nothing puts the number
+   * back: `_foundByItsTerminals` is reached only THROUGH `_kept()`, which
+   * answers `null` before it gets there. So the person closes their last file,
+   * the editor takes the emptied group away, and the rule that would have put a
+   * group back above the terminals declines because it cannot name them.
+   */
+  test('keeps a group above the terminals after the strip has been renumbered under it', async () => {
+    const { gateway } = await api();
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+
+    const folder = await mkdtemp(join(os.tmpdir(), 'gripterm-renumbered-'));
+    const path = join(folder, 'paste-two-lines.txt');
+    await writeFile(path, 'the file the owner opened and then closed', 'utf8');
+    const file = await vscode.workspace.openTextDocument(path);
+    await vscode.window.showTextDocument(file, { viewColumn: vscode.ViewColumn.One });
+
+    const handle = await gateway.create({
+      terminalId: TERMINAL_ID,
+      name: 'gripterm-m224-renumbered',
+      cwd: os.tmpdir(),
+      env: {},
+      shellPath: null,
+      shellArgs: [],
+    });
+    try {
+      await waitFor('the terminal to get a tab', () => columnOf('gripterm-m224-renumbered') !== undefined);
+      // Into a local first: `assert.equal` narrows what it is handed, and a
+      // narrowed `tabGroups.all.length` makes every later reading of it a
+      // constant to the type checker -- which is how the linter came to call
+      // the wait below a comparison that is always false.
+      const stand = vscode.window.tabGroups.all.length;
+      assert.equal(stand, 2, `the stand is not a file and a strip: ${describeGroups()}`);
+
+      // The person splits the group their file is in, which renumbers ours.
+      await vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
+      await vscode.commands.executeCommand('workbench.action.splitEditorDown');
+      await waitFor(
+        `a third group to appear: ${describeGroups()}`,
+        () => vscode.window.tabGroups.all.length === 3
+      );
+
+      const mark = await markInTheLog();
+      // And then presses the button this same report is about, from their file.
+      await vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
+      await vscode.commands.executeCommand('gripterm.maximizeTerminals');
+
+      // The person closes their files, both of them, and the editor takes the
+      // emptied groups away by itself.
+      const closeTheFileInFront = async (): Promise<void> => {
+        await vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
+        await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      };
+      await closeTheFileInFront();
+      await closeTheFileInFront();
+
+      const until = Date.now() + 12000;
+      while (vscode.window.tabGroups.all.length < 2 && Date.now() < until) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      assert.ok(
+        vscode.window.tabGroups.all.length > 1,
+        `the terminals were left alone in the editor area: ${describeGroups()}`
+          + ` | ${JSON.stringify(await saidSince(mark))}`
+      );
+    } finally {
+      handle.dispose();
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
+
+  /*
+   * The owner, 2026-08-27: "нет реакции на кнопку Maximise the Terminal".
+   *
+   * `workbench.action.toggleMaximizeEditorGroup` has nothing to maximise a
+   * group OVER when the editor area holds one group, and it says so the way
+   * every workbench command says everything -- by answering `undefined` and
+   * changing nothing. The command around it then wrote
+   * `the group holding the terminals was maximised or put back` regardless,
+   * which is the log asserting what it never checked (I.1) about the one
+   * question the person had.
+   *
+   * The stand is a single group holding a terminal AND a file, which is a
+   * state the strip's own repair leaves alone -- it is not a group of nothing
+   * but terminals -- so the window cannot move under the measurement.
+   */
+  test('says nothing was maximised when there was nothing to maximise', async () => {
+    // The whole object, not `said` destructured off it: `said` is a getter that
+    // answers with a copy, so a destructured one is a snapshot of the sentences
+    // this window had said before the button was pressed.
+    const gripterm = await api();
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    await waitFor('the editor area to be one empty group', () =>
+      vscode.window.tabGroups.all.length === 1 && vscode.window.tabGroups.all[0]?.tabs.length === 0);
+
+    const theirs = vscode.window.createTerminal({
+      name: 'a terminal the person made themselves',
+      location: { viewColumn: vscode.ViewColumn.One },
+    });
+    try {
+      await waitFor('the person`s own terminal to get a tab', () =>
+        columnOf('a terminal the person made themselves') !== undefined);
+      const file = await vscode.workspace.openTextDocument({
+        content: 'a file in the same group as the terminal',
+        language: 'plaintext',
+      });
+      await vscode.window.showTextDocument(file, { viewColumn: vscode.ViewColumn.One });
+      theirs.show(false);
+      await waitFor(
+        `the terminal to be the tab in front: ${describeGroups()}`,
+        () => vscode.window.tabGroups.activeTabGroup.activeTab?.input instanceof vscode.TabInputTerminal
+      );
+      const area = vscode.window.tabGroups.all.length;
+      assert.equal(area, 1, `the editor area is not the one group this measures: ${describeGroups()}`);
+
+      const before = await layoutNow();
+      const mark = await markInTheLog();
+      const saidBefore = gripterm.said.length;
+      await vscode.commands.executeCommand('gripterm.maximizeTerminals');
+      const after = await layoutNow();
+
+      // The measurement itself: the editor really does nothing here. The day it
+      // starts doing something, this line is what says so.
+      assert.deepEqual(
+        after,
+        before,
+        `the editor maximised something after all: ${JSON.stringify(before)} -> ${JSON.stringify(after)}`
+      );
+
+      const wrote = await saidSince(mark);
+      assert.doesNotMatch(
+        wrote,
+        /was maximised or put back/,
+        `the log says the group was maximised, and the editor area never moved: ${JSON.stringify(wrote)}`
+      );
+      assert.match(
+        wrote,
+        /nothing to maximise|nothing was maximised/,
+        `the button did nothing and the log did not say so: ${JSON.stringify(wrote)}`
+      );
+
+      // And the person is told, which is the half of the complaint no log
+      // answers: from in front of the screen a button that declines and a
+      // button that is broken are the same button.
+      const sentences = gripterm.said.slice(saidBefore);
+      assert.ok(
+        sentences.some((sentence) => sentence.includes('nothing to maximise them over')),
+        `the button did nothing and the window said nothing: ${JSON.stringify(sentences)}`
+      );
+    } finally {
+      theirs.dispose();
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    }
+  });
 });

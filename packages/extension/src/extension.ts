@@ -1111,6 +1111,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
   context.subscriptions.push(
     registerMaximizeTerminals({
       standOnTheStrip: async () => (await held.strip?.standOnTheStrip()) ?? false,
+      // Through the announcer rather than through `say`, for the reason
+      // `restore-from-trash` is: a notification cannot be read back through the
+      // editor API, and this one is the whole of the answer to "the button did
+      // nothing" -- so the live suite has to be able to ask what was said.
+      announce: (message) => { announcer.say('info', message); },
       logger,
     })
   );
