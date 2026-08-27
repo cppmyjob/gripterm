@@ -1,0 +1,84 @@
+{
+  "what": "one scene, planted into a private CLAUDE_CONFIG_DIR and read back out of the real CLI",
+  "capturedAt": "2026-08-27T10:30:00.000Z",
+  "agent": "claude-code",
+  "build": "2.1.245",
+  "versionOutput": "2.1.245 (Claude Code)\n",
+  "planted": [
+    {
+      "sessionId": "7c9a1b2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d",
+      "cwd": "D:\\Projects\\Gripterm",
+      "startedAt": 1786500000000,
+      "kind": "interactive",
+      "name": "the-full-one",
+      "status": "busy"
+    },
+    {
+      "sessionId": "11111111-2222-4333-8444-000000000001",
+      "cwd": "D:\\Projects\\Gripterm",
+      "startedAt": 1786500000001,
+      "kind": "interactive"
+    },
+    {
+      "sessionId": "11111111-2222-4333-8444-000000000002",
+      "cwd": "?",
+      "startedAt": 0,
+      "kind": "interactive",
+      "name": "the-unknowing-one",
+      "status": "idle"
+    }
+  ],
+  "printed": "[\n  {\n    \"pid\": 22812,\n    \"cwd\": \"?\",\n    \"kind\": \"interactive\",\n    \"startedAt\": 0,\n    \"sessionId\": \"11111111-2222-4333-8444-000000000002\",\n    \"name\": \"the-unknowing-one\",\n    \"status\": \"idle\"\n  },\n  {\n    \"pid\": 16616,\n    \"cwd\": \"D:\\\\Projects\\\\Gripterm\",\n    \"kind\": \"interactive\",\n    \"startedAt\": 1786500000000,\n    \"sessionId\": \"7c9a1b2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d\",\n    \"name\": \"the-full-one\",\n    \"status\": \"busy\"\n  },\n  {\n    \"pid\": 25080,\n    \"cwd\": \"D:\\\\Projects\\\\Gripterm\",\n    \"kind\": \"interactive\",\n    \"startedAt\": 1786500000001,\n    \"sessionId\": \"11111111-2222-4333-8444-000000000001\"\n  }\n]\n",
+  "recording": {
+    "agent": "a recording of claude-code",
+    "build": "2.1.245",
+    "capturedAt": "2026-08-27T10:30:00.000Z",
+    "running": {
+      "kind": "listed",
+      "agents": [
+        {
+          "sessionId": "7c9a1b2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d",
+          "pid": 16616,
+          "cwd": "D:\\Projects\\Gripterm",
+          "kind": "interactive",
+          "startedAt": 1786500000000,
+          "name": "the-full-one",
+          "status": "busy"
+        },
+        {
+          "sessionId": "11111111-2222-4333-8444-000000000001",
+          "pid": 25080,
+          "cwd": "D:\\Projects\\Gripterm",
+          "kind": "interactive",
+          "startedAt": 1786500000001,
+          "name": null,
+          "status": null
+        },
+        {
+          "sessionId": "11111111-2222-4333-8444-000000000002",
+          "pid": 22812,
+          "cwd": null,
+          "kind": "interactive",
+          "startedAt": null,
+          "name": "the-unknowing-one",
+          "status": "idle"
+        }
+      ],
+      "skipped": 0
+    },
+    "transcripts": {
+      "kind": "indexed",
+      "sessionIds": [
+        "7c9a1b2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d",
+        "11111111-2222-4333-8444-000000000001",
+        "11111111-2222-4333-8444-000000000002"
+      ],
+      "skipped": 0
+    }
+  },
+  "pids": [
+    16616,
+    25080,
+    22812
+  ]
+}

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { homedir, uptime } from 'node:os';
 import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import {
   AnnouncingJournal,
@@ -39,13 +40,14 @@ import {
   TerminalLifecycleService,
   TerminalMetadataService,
   TerminalStateMachine,
+  RECORDING_VARIABLE,
   TerminalTabNamer,
   TrashStore,
   claudeRenameCommand,
   claudeSessionsDirectory,
   claudeSettingsLocations,
+  claudeCodeAgent,
   claudeTranscriptsDirectory,
-  describeCliVersion,
   endOwnTerminals,
   findExecutable,
   forgottenNotice,
@@ -56,14 +58,14 @@ import {
   ownerRefFor,
   planRestore,
   planUnaskedCleanup,
-  sendKillSignal,
-  sendSignalZero,
-  probeVersionOutput,
-  readAgentListing,
+  readAgentRecording,
   readClaudeSessionName,
   readClaudeSettings,
-  readTranscriptIndex,
+  recordedAgent,
+  refuseToReplay,
   restoreNotice,
+  sendKillSignal,
+  sendSignalZero,
   reviewHookPolicies,
   shellKindFor,
   TerminalId,
@@ -78,9 +80,11 @@ import type {
   ForwarderScript,
   LaunchLocation,
   LaunchMode,
+  LaunchReadiness,
   LaunchStrategy,
   ListeningAddress,
   Logger,
+  ObservedAgent,
   OwnerIdentity,
   OwnerPresence,
   RestoreInputs,
@@ -773,6 +777,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     async () => await listen({ token, registry, logger, journal: events })
   );
   const cliPath = await ledger.measure('findingTheCli', async () => await findCli(logger));
+  const readiness = launchReadiness({ cliName: CLAUDE_CLI, cliPath, address });
+  /*
+   * WHICH AGENT this window is observing, decided ONCE (Ш4б).
+   *
+   * Until 2026-08-27 the three questions about an agent that is not ours to
+   * start -- what is running, which conversations have a transcript, which build
+   * is this -- were three functions named by hand at five call sites, each of
+   * them `claude`'s. `AgentCommandFactory` had been a port since decision №34,
+   * so the LAUNCH side was already a choice; the OBSERVING side was not, and
+   * "we have a port" was a sentence rather than a fact.
+   *
+   * It is one object because the three answers must come from ONE installation.
+   * A roster from one agent beside a transcript index from another produces
+   * `no-transcript` for conversations that are perfectly resumable, and the
+   * answer to `no-transcript` is a NEW conversation in the same record -- a
+   * person's history quietly replaced.
+   */
+  const agent = observedAgentFor({ cliPath, readiness, storeDir: storageChoice.path, logger });
   /*
    * Which BUILD of `claude` this is -- started here and awaited at the very
    * bottom (Ш11, then Ш23).
@@ -795,13 +817,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
    * once, at the end. Its own failures are already values rather than throws --
    * see `probeVersionOutput` -- so there is no rejection here to lose.
    */
-  const cliVersion = versionOfCli(cliPath, logger);
+  const cliVersion = versionOfAgent(agent, logger);
   const forwarder = await ledger.measure(
     'findingTheForwarder',
     async () => await findForwarder(context, logger)
   );
-
-  const readiness = launchReadiness({ cliName: CLAUDE_CLI, cliPath, address });
 
   const lifecycle = new TerminalLifecycleService({
     registry,
@@ -847,10 +867,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
       registry,
       presence: shared.presence,
       self: identity.ownerId,
-      readAgents: async () =>
-        readiness.kind === 'refused'
-          ? { kind: 'unavailable', reason: readiness.reason }
-          : await readAgentListing(readiness.cliPath, AGENT_LISTING_TIMEOUT_MS),
+      readAgents: async () => await agent.roster.list(),
       isRunning: (pid) => isProcessThere(pid, sendSignalZero),
       // First-hand, and it outranks the pid: the gateway either has a terminal
       // for that record or it does not. See `_lostItsProcess`, where the
@@ -1063,19 +1080,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
            * minus these two, and the three numbers never overlap.
            */
           readTranscripts: async () =>
-            await ledger.measure('theTranscriptIndex', async () =>
-              await readTranscriptIndex(
-                claudeTranscriptsDirectory({
-                  platform: process.platform,
-                  home: homedir(),
-                  configDir: process.env.CLAUDE_CONFIG_DIR,
-                })
-              )),
+            await ledger.measure('theTranscriptIndex', async () => await agent.transcripts.index()),
           readAgents: async () =>
-            await ledger.measure('theAgentListing', async () =>
-              readiness.kind === 'refused'
-                ? { kind: 'unavailable', reason: readiness.reason }
-                : await readAgentListing(readiness.cliPath, AGENT_LISTING_TIMEOUT_MS)),
+            await ledger.measure('theAgentListing', async () => await agent.roster.list()),
           // Both from one instant, because the boot rule subtracts one from the
           // other (`precedesBoot`).
           nowMs: Date.now(),
@@ -1975,19 +1982,103 @@ async function findCli(logger: Logger): Promise<string | null> {
   return path;
 }
 
-/** Which build it is -- established by running it, never by reading a file. */
-async function versionOfCli(path: string | null, logger: Logger): Promise<string | null> {
-  if (path === null) {
-    return null;
-  }
-  const report = describeCliVersion(await probeVersionOutput(path, VERSION_TIMEOUT_MS));
-  const details = { path, message: report.message };
+/**
+ * Which build it is -- asked of the agent rather than of `claude` by name.
+ *
+ * The sentence a person reads comes from the implementation now, which is why
+ * neither this function nor the log line below spells the product's name any
+ * more: an agent that is not Claude Code would have said "Claude Code is the
+ * build this was measured against" about itself.
+ */
+async function versionOfAgent(agent: ObservedAgent, logger: Logger): Promise<string | null> {
+  const report = await agent.build.describe();
+  const details = { agent: agent.name, message: report.message };
   if (report.level === 'warn') {
-    logger.warn('the installed Claude Code is not the build this was measured against', details);
+    logger.warn('the installed agent is not the build this was measured against', details);
   } else {
-    logger.info('Claude Code is the build this was measured against', details);
+    logger.info('the installed agent is the build this was measured against', details);
   }
   return report.version;
+}
+
+/**
+ * WHICH agent this window observes: the real one, or a recording of one.
+ *
+ * **The recording is not a fake `claude`, and this is where the difference is
+ * spent.** It is a second implementation of the three ports above, so choosing
+ * it is one branch here and nothing anywhere else. The day there is a Codex it
+ * arrives the same way, and this function grows a third arm rather than the rest
+ * of the file growing a second reader.
+ *
+ * **Why anybody would ask for one.** A measurement. `claude agents --json` costs
+ * 702-5353 ms on an unchanged tree over the 34 activations this repository has
+ * recorded, so a repair worth less than a second cannot be seen under it (Ш23
+ * stopped exactly there and said so). A window replaying a recording spawns
+ * nothing, and what is left in the number is our own work.
+ *
+ * **Two guards, and neither is a courtesy.** A recording answers "nothing is
+ * running", which is the sentence that PERMITS a restore, so it is refused over
+ * the store a person keeps their terminals in (`refuseToReplay`); and a window
+ * that is replaying says so in a warning on every activation, because a window
+ * whose answers came out of a file must not look like one that asked.
+ */
+function observedAgentFor(parts: {
+  readonly cliPath: string | null;
+  readonly readiness: LaunchReadiness;
+  readonly storeDir: string;
+  readonly logger: Logger;
+}): ObservedAgent {
+  const { cliPath, readiness, storeDir, logger } = parts;
+  const real = claudeCodeAgent({
+    cli: readiness.kind === 'refused'
+      ? { kind: 'refused', reason: readiness.reason }
+      : { kind: 'ready', path: readiness.cliPath },
+    transcriptsDir: claudeTranscriptsDirectory({
+      platform: process.platform,
+      home: homedir(),
+      configDir: process.env.CLAUDE_CONFIG_DIR,
+    }),
+    listingTimeoutMs: AGENT_LISTING_TIMEOUT_MS,
+    versionTimeoutMs: VERSION_TIMEOUT_MS,
+  });
+  const asked = process.env[RECORDING_VARIABLE];
+  if (asked === undefined || asked === '') {
+    return real;
+  }
+  const refusal = refuseToReplay({ storeDir, home: homedir() });
+  if (refusal !== null) {
+    logger.warn(refusal, { [RECORDING_VARIABLE]: asked, cliPath });
+    return real;
+  }
+  let recording: ReturnType<typeof readAgentRecording> = null;
+  try {
+    recording = readAgentRecording(JSON.parse(readFileSync(asked, 'utf8')));
+  } catch (cause: unknown) {
+    logger.warn('the recording this window was told to replay could not be read, so the real agent was asked', {
+      [RECORDING_VARIABLE]: asked,
+      cause,
+    });
+    return real;
+  }
+  if (recording === null) {
+    logger.warn('the recording this window was told to replay is not one, so the real agent was asked', {
+      [RECORDING_VARIABLE]: asked,
+    });
+    return real;
+  }
+  // Said every time and as a warning: nothing below this line asks the machine
+  // anything, and a log that did not say so would be a log about a window that
+  // never existed.
+  logger.warn('this window is not asking an agent anything: it is replaying a recording', {
+    [RECORDING_VARIABLE]: asked,
+    build: recording.build,
+    capturedAt: recording.capturedAt,
+    storeDir,
+  });
+  // The real signal 0, because the invariant of `AgentRoster` has to hold for
+  // this implementation too: a recorded pid that nothing is running as must not
+  // be answered as a live conversation.
+  return recordedAgent(recording, (pid) => isProcessThere(pid, sendSignalZero));
 }
 
 /**

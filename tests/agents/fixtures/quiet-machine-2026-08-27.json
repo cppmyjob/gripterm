@@ -1,0 +1,18 @@
+{
+  "what": "a machine with no agent running and nothing ever said in any conversation -- the scene every stand run has actually met",
+  "why": "Point GRIPTERM_AGENT_RECORDING at this file and a window answers the three observation questions from here instead of spawning `claude` three times. It is what the measurement of Ш4б was taken through: `claude agents --json` costs 702-5353 ms on an unchanged tree, which is three to ten times any repair worth making, so nothing about the cost of a start could be shown until the spawns were gone.",
+  "faithful": "Not an idealisation. A stand run types nothing into its terminals, so its conversations leave no transcript and its `claude` processes die with the sitting -- an empty roster and an empty index is what the real ports answer there, at a cost of several seconds.",
+  "agent": "a recording of a quiet machine",
+  "build": "2.1.245",
+  "capturedAt": "2026-08-27T10:30:00.000Z",
+  "running": {
+    "kind": "listed",
+    "agents": [],
+    "skipped": 0
+  },
+  "transcripts": {
+    "kind": "indexed",
+    "sessionIds": [],
+    "skipped": 0
+  }
+}

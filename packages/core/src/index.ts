@@ -262,6 +262,27 @@ export {
   type DirectoryReader,
 } from './infrastructure/transcript-index';
 export { agentListingFrom, readAgentListing } from './infrastructure/cli-agents';
+export {
+  CLAUDE_CODE,
+  claudeCodeAgent,
+  type ClaudeCodeAgentParams,
+  type CliLocation,
+} from './infrastructure/agents/claude-code-agent';
+export type { AgentRoster } from './domain/ports/agent-roster';
+export type { ConversationTranscripts } from './domain/ports/conversation-transcripts';
+export type { AgentBuild, AgentBuildReport } from './domain/ports/agent-build';
+export type { ObservedAgent } from './domain/ports/observed-agent';
+export {
+  readAgentRecording,
+  recordedAgent,
+  type AgentRecording,
+  type ProcessIsThere,
+} from './domain/agents/recorded/recorded-agent';
+export {
+  RECORDING_VARIABLE,
+  refuseToReplay,
+  type ReplayRequest,
+} from './domain/agents/recorded/replaying';
 export { readClaudeSessionName } from './infrastructure/claude-session-name';
 export {
   gatherRestoreInputs,
