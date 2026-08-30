@@ -161,16 +161,56 @@ export function readLaunchLocation(logger: Logger): LaunchLocation {
  * and the record is stamped from the gateway that answered rather than from here.
  */
 /**
- * Whether a terminal of our own may reach the Claude Code extension of this
- * editor -- `gripterm.terminal.ideChannel`, off unless somebody says otherwise.
+ * Whether an agent in a terminal of our own may open the channel to the Claude
+ * Code extension of this editor BY ITSELF -- `gripterm.terminal.ideChannel`, off
+ * unless somebody says otherwise.
  *
- * **Both sides of it were measured on 2026-08-20, by hand, in a real window.**
- * ON, the agent is handed the file that is open and the text selected in it --
- * asked which file and what selection, it named both. The price is that the
- * editor's own terminal takes the focus from our panel on every prompt sent, and
- * that only ONE agent gets the channel however many are running: the CLI says so
- * itself. The owner refused to pay the focus by default, and this is that
- * decision written where the setting is read.
+ * **By itself, and nothing wider than that.** What the value becomes is
+ * `CLAUDE_CODE_AUTO_CONNECT_IDE=false` when it is off (`ideChannelEnv`), and that
+ * name governs the CLI's own unasked attempt and no other route to the channel.
+ * Measured 2026-08-30: with this setting OFF, `/ide` typed by hand connected all
+ * the same, and the agent named the file that was open and the line that was
+ * selected -- the token was minted for that run, so neither could be guessed. So
+ * this boolean is not permission to reach the extension. A person has that at
+ * either value, and the doc this replaced said otherwise for ten days.
+ *
+ * **And the attempt it does govern was not seen happening at all.** The same
+ * measurement raised eight windows -- both editors, both values of this setting,
+ * against a Claude Code extension that was installed, live and activated -- and
+ * `/ide` at the start showed `None` as the current choice every time. On CLI
+ * 2.1.245 with extension 2.1.251 this setting therefore changes nothing that can
+ * be observed. It is left standing exactly as it is: what to do with a setting
+ * that governs nothing is the owner's to decide, and the question is with him.
+ *
+ * **What that measurement does not cover, said here rather than discovered.** It
+ * ran against a copy of the extension the run installed into a directory of its
+ * own, because the windows our runs open do not register Claude Code at all.
+ * Whether an ordinary installation behaves the same is NOT established.
+ *
+ * **What an open channel costs.** The agent is handed the file that is open and
+ * the text selected in it (2026-08-20, and again 2026-08-30). And only ONE agent
+ * gets the channel however many are running -- a second terminal is told
+ * `Failed to connect` while the first keeps what it has, and in VS Code the CLI
+ * says it in words: "Only one Claude Code instance can be connected to VS Code
+ * at a time" (2026-08-20, held on 2026-08-30).
+ *
+ * **The cost the default was chosen for is the one that did not come back, and
+ * that belongs here, beside the decision it was the ground of.** What the owner
+ * refused to pay was the FOCUS, seen 2026-08-20 by hand in VS Code: the editor's
+ * own terminal took the focus from our panel on every prompt sent. On 2026-08-30
+ * an instrument went looking for it again and did not find it in Cursor -- 163
+ * samples over 25 s after a prompt was sent on an open channel, 162 and 155 in
+ * the other two arms, and not one watched field moved, while the positive
+ * control moved every one of them (`vscode.window.createTerminal(...).show(false)`
+ * drove `panelVisible` true to false and `focusedHere` to false in both
+ * editors). The connection itself was watched the same way -- 72, 69 and 79
+ * samples in Cursor -- and moved nothing; the connection was watched in VS Code
+ * too, and moved nothing there either. What was NOT watched is SENDING
+ * in VS Code, which is precisely the editor and the moment the 2026-08-20
+ * sighting is about: the message budget ran out first. So the price is refuted
+ * where it was looked for, unmeasured where it was seen, and withdrawn nowhere.
+ * The default stays `false`: that is the owner's decision and his to revisit --
+ * but whoever revisits it should know that its ground did not come back.
  *
  * Anything that is not exactly `true` leaves it off, the same rule the journal's
  * content switch follows: a setting we cannot read is not permission.

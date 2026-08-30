@@ -88,8 +88,9 @@ export class LaunchCommandBuilder {
 }
 
 /**
- * The variables a running Claude Code session exports to whatever it starts,
- * every one of them removed from the terminals we open.
+ * Nine variables a running Claude Code session exports to whatever it starts,
+ * every one of THESE removed from the terminals we open. Nine, and not the
+ * whole set: the difference is measured, and it is written out below.
  *
  * WHY, measured (A28, 2026-08-13). A person who types `code .` inside a Claude
  * Code terminal gives their editor that session's environment, and every
@@ -104,6 +105,26 @@ export class LaunchCommandBuilder {
  * each of them NAMES ANOTHER RUN -- its pid, its session id, its IDE channel,
  * its binary, its env file, its project -- and a terminal of ours is not that
  * run's child. The CLI sets the ones it wants for its own children itself.
+ *
+ * **This is not all of them, and that is measured rather than feared.** The
+ * first sentence here used to read "the variables a running Claude Code session
+ * exports", which promised the whole set and no longer holds. Measured
+ * 2026-08-30 (Ш29): a session of CLI 2.1.245 also exports
+ * `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN` and
+ * `CLAUDE_CODE_BRIDGE_SESSION_ID`, and not one of the three is on this list. By
+ * the reason given just above they would belong -- each of them names another
+ * run -- so the list has stopped agreeing with its own rationale, and it is said
+ * here rather than papered over. That run had a copy of the Claude Code
+ * extension installed into a directory of its own, so whether an ordinary
+ * session exports the same three is NOT established either.
+ *
+ * **Why they are not simply added.** What inheriting them costs has not been
+ * measured. The one name here whose harm IS measured is
+ * `CLAUDE_CODE_CHILD_SESSION`, isolated by A28 above; the other eight were put
+ * here by resemblance, and three more by resemblance would be a guess about a
+ * CLI nobody has run this build against. So the list is left as it is and the
+ * gap is named: the measurement is owed, and until it exists this doc promises
+ * nine names rather than a set.
  *
  * What is deliberately NOT here: `CLAUDE_CONFIG_DIR`, which chooses the profile
  * a person is logged into, `CLAUDE_EFFORT`, and everything `ANTHROPIC_*`. Those

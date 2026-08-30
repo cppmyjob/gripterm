@@ -62,11 +62,14 @@ export interface PtyTerminalGatewayOptions {
   readonly editor: EditorIdentity;
   readonly logger: Logger;
   /**
-   * Whether the agent may reach the Claude Code extension of this editor.
+   * Whether the agent may open the channel to the Claude Code extension of
+   * this editor UNASKED.
    *
    * The person's answer, carried from `gripterm.terminal.ideChannel` and handed
    * to the rule that builds the environment, where both sides of the trade are
-   * written down.
+   * written down. Not whether the channel can be reached at all: a `/ide` typed
+   * by hand raises it at either value, measured 2026-08-30, and `ideChannelEnv`
+   * carries that measurement and what it does not cover.
    */
   readonly ideChannel: boolean;
   /**

@@ -36,13 +36,18 @@
  * credential prompt). Both are losses of the engine, not omissions of this rule,
  * and both are named in the plan's register (§7.2).
  *
- * **What the missing port turned out NOT to cost, measured 2026-08-20.** The
- * channel to the Claude Code extension is not lost with it: the CLI finds the
- * extension by the lock files in `~/.claude/ide/` and connects without any port
- * from us. That channel is now a decision rather than an accident -- see
- * `ideChannelEnv` under `domain/agents/claude-code/`, which turns it off unless
- * the person asks. The NAME that carries the decision lives there and not here:
- * this rule takes `agentEnv` and never looks inside it.
+ * **What the missing port turned out NOT to cost, measured 2026-08-20 and
+ * again 2026-08-30.** The channel to the Claude Code extension is not lost with
+ * it: the CLI finds the extension by the lock files in `~/.claude/ide/` and
+ * connects without any port from us. On CLI 2.1.245 it does that only when a
+ * person asks -- `/ide` -- and never by itself, at either value of
+ * `gripterm.terminal.ideChannel`. So what `ideChannelEnv` under
+ * `domain/agents/claude-code/` decides is narrower than the channel: whether
+ * the CLI may connect UNASKED, which is all that name governs and all this
+ * build has ever touched. The NAME that carries the decision lives there and
+ * not here: this rule takes `agentEnv` and never looks inside it, and the
+ * measurement, its versions and what it does not cover are written beside the
+ * name.
  */
 
 /**

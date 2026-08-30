@@ -38,6 +38,33 @@ import { join, resolve } from 'node:path';
  * of the three files instead, which is weaker, and is said here in those words
  * rather than left to look like coverage.
  *
+ * `may reach the Claude Code extension` is the third of them, and it is not here
+ * for the same reason (2026-08-30). Three files described
+ * `gripterm.terminal.ideChannel` in exactly those words and a fourth in the same
+ * words reordered; all four were wrong, because the setting governs the UNASKED
+ * connection alone. But the words themselves are TRUE of a channel a person
+ * raised by hand with `/ide`, which on CLI 2.1.245 is the only way that channel
+ * was seen coming up at all -- so forbidding them would forbid the correction
+ * along with the claim. What is listed below is the narrower thing the manifest
+ * and the README said instead, which has no true reading in any redaction.
+ *
+ * The FOCUS PRICE of that same channel is the fourth, added the same day, and it
+ * is the clearest case of all for why this list is not the only tool here. What
+ * was written was `takes the focus away from the Gripterm panel every time you
+ * send a prompt` -- and on 2026-08-20 that is what the owner saw, by hand, in
+ * VS Code. Ш29 went looking for it again on 2026-08-30 with an instrument and
+ * could NOT find it in Cursor: 163 samples over 25 s after a prompt was sent on
+ * an open channel, 162 and 155 in the other two arms, nothing moving, against a
+ * positive control that moved every field it watched. In VS Code only the
+ * CONNECTING half was watched, and it moved nothing; SENDING in VS Code -- the
+ * very editor and moment of the sighting -- was not watched at all, the message
+ * budget having run out. So the sentence is REFUTED WHERE IT WAS LOOKED FOR and
+ * NOT WITHDRAWN, and a repository-wide ban on the words would forbid the true
+ * 2026-08-20 record along with the false present tense. What is checked instead
+ * is narrower and is below: in the two texts a person OUTSIDE this repository
+ * reads, that price may not be written in the present tense, and where it is
+ * written at all it carries the day it was seen.
+ *
  * **`gate/allowed-red.json` still carries both of them** (2026-08-25). It is the
  * owner's file, an admission of redness nobody but the owner may edit, and the
  * gate prints its opening block on every full run. That is an open item for the
@@ -67,6 +94,26 @@ interface RefutedClaim {
 }
 
 /**
+ * One measurement, quoted by the two entries it refutes.
+ *
+ * The claim was written twice in two spellings, which is exactly the way the
+ * first sentence in this register spread, so both spellings are listed and the
+ * reason is written once rather than copied and left to drift.
+ */
+const IDE_CHANNEL_REFUTATION =
+  'Ш29, 2026-08-30, thirteen windows raised across both editors: the setting closes nothing. With ' +
+  '`gripterm.terminal.ideChannel: false` a `/ide` typed by hand connected anyway, and the agent named the file ' +
+  'that was open and the line that was selected -- the token was minted for that run, so neither could be ' +
+  'guessed. The other half is worse: with the setting ON the channel did not come up by itself either. `/ide` at ' +
+  'the start of eight windows -- both editors, both positions of the setting -- showed `None` as the current ' +
+  'choice, against a Claude Code extension that was installed, live and activated. What the setting really ' +
+  'governs is `CLAUDE_CODE_AUTO_CONNECT_IDE`, which is auto-connection and nothing else, and CLI 2.1.245 with ' +
+  'extension 2.1.251 performs none. THE CAVEAT TRAVELS WITH THE FACT: the measurement ran against a copy of the ' +
+  'extension the run installed into a directory of its own, because the windows our runs open do not register ' +
+  'Claude Code at all -- whether an ordinary installation behaves the same is NOT established. Versions: CLI ' +
+  '2.1.245, extension 2.1.251, VS Code 1.135.0, Cursor 3.17.19.';
+
+/**
  * Every sentence measured false, with the measurement that did it.
  *
  * The reason travels with the rule on purpose. A bare blacklist tells whoever
@@ -94,6 +141,17 @@ const REFUTED: readonly RefutedClaim[] = [
       '0 of 10 (12 launches of 12 under `--classic`, 6 of 6 with a folder and no flag). Written out in ' +
       '`.vscode-test.mjs`, `tools/cursor-workbench.js`, `tests/cursor/workbench.test.ts` and ' +
       '`tests/cursor/new-group-below.js`.',
+  },
+  {
+    said: 'off unless you turn on gripterm.terminal.ideChannel',
+    refutedBy: IDE_CHANNEL_REFUTATION,
+  },
+  {
+    // The same claim in the README`s markdown, which the plain spelling above
+    // does not match: the setting`s name is in backticks there, and this rule
+    // reads substrings and not prose.
+    said: 'off unless you turn on `gripterm.terminal.ideChannel`',
+    refutedBy: IDE_CHANNEL_REFUTATION,
   },
 ];
 
@@ -152,6 +210,53 @@ function theCursorLiveRecord(): string {
   return to === -1 ? text.slice(from) : text.slice(from, to);
 }
 
+/**
+ * The manifest's own description of `gripterm.terminal.ideChannel`.
+ *
+ * The settings UI of the editor is where this sentence is read by somebody who
+ * has never opened this repository, which is why it is checked and the five
+ * source comments carrying the same price are not. It THROWS when the key is
+ * gone, for the reason `theCursorLiveRecord` gives: an absent input that reads
+ * like a clean measurement is how this repository last talked itself into a
+ * fact nobody had checked.
+ */
+function theIdeChannelSetting(): string {
+  const manifest = JSON.parse(
+    readFileSync(join(REPO, 'packages', 'extension', 'package.json'), 'utf8')
+  ) as { contributes: { configuration: { properties: Record<string, { markdownDescription?: string }> } } };
+  const described = manifest.contributes.configuration.properties['gripterm.terminal.ideChannel'];
+  if (described?.markdownDescription === undefined) {
+    throw new Error('the manifest no longer describes gripterm.terminal.ideChannel -- this rule is about that description, and cannot read one that is not there');
+  }
+  return described.markdownDescription;
+}
+
+/**
+ * The README row that says what an agent loses under the own engine.
+ *
+ * Sliced from one row to the next, the same crude way and in the same safe
+ * direction as `theCursorLiveRecord`: a price written into some other row is not
+ * seen here, and a row that has been renamed throws rather than answering an
+ * empty string.
+ */
+function theReadmeRowAboutTheChannel(): string {
+  const text = readFileSync(join(REPO, 'README.md'), 'utf8');
+  const from = text.indexOf('| What other extensions add to a terminal |');
+  if (from === -1) {
+    throw new Error('README.md has no row named `What other extensions add to a terminal` -- this rule reads one, and cannot read one that is not there');
+  }
+  const to = text.indexOf('| History |', from);
+  return to === -1 ? text.slice(from) : text.slice(from, to);
+}
+
+/** Where that channel is described to somebody who will never read this code. */
+function theTextsAPersonReads(): Readonly<Record<string, string>> {
+  return {
+    'packages/extension/package.json': theIdeChannelSetting(),
+    'README.md': theReadmeRowAboutTheChannel(),
+  };
+}
+
 describe('a claim this repository measured false', () => {
   it('is written nowhere in it', () => {
     expect(whereTheyStillStand(filesOfTheRepository())).toStrictEqual([]);
@@ -179,6 +284,27 @@ describe('a claim this repository measured false', () => {
     const record = theCursorLiveRecord();
     expect(record).not.toContain('The second is the owner`s to answer and was open on');
     expect(record).toContain('the ordinary window is the one he works in');
+  });
+
+  it('does not charge a person the focus price in the present tense, the once it was looked for again having failed to find it', () => {
+    // Named rather than counted, and in two assertions rather than one, because
+    // the two failures read differently: a present tense that outlived its
+    // re-measurement, and a price quoted with no day attached to it.
+    const texts = Object.entries(theTextsAPersonReads());
+
+    // The present tense is what makes it false: as a fact of today it was looked
+    // for on 2026-08-30 and not found where anybody looked.
+    expect(texts.filter(([, text]) => text.includes('takes the focus')).map(([where]) => where)).toEqual([]);
+
+    // And a price without its date cannot be checked by the next reader at all.
+    // Conditional on purpose: a text that stops mentioning the focus owes no
+    // date, because a later measurement may withdraw the price outright -- what
+    // this refuses is the quotation without the day, not the silence.
+    expect(
+      texts
+        .filter(([, text]) => text.includes('focus') && !text.includes('2026-08-20'))
+        .map(([where]) => where)
+    ).toEqual([]);
   });
 
   it('is looked for over a repository this reader can really see, so that neither rule above is about an empty list', () => {

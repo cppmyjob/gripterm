@@ -37,8 +37,11 @@ export interface TerminalGatewayParams {
   readonly extensionPath: string;
   readonly editor: EditorIdentity;
   /**
-   * What `gripterm.terminal.ideChannel` says: may the agent reach the Claude
-   * Code extension of this editor.
+   * What `gripterm.terminal.ideChannel` says: may the agent open the channel to
+   * the Claude Code extension of this editor UNASKED. It does not decide
+   * whether the channel can be reached -- a `/ide` typed by hand raises it at
+   * either value, measured 2026-08-30 -- and `ideChannelEnv` carries the rest
+   * of that measurement.
    *
    * Read here rather than deeper because it belongs to the engine question in
    * every way that matters -- only a terminal of our own has to decide it. The

@@ -311,14 +311,19 @@ suite('the own engine: the environment it hands the agent', () => {
        * And with that one, the CLI would go looking for the Claude Code
        * extension by the lock files in `~/.claude/ide/` -- measured by hand
        * 2026-08-20, in a real window, where it found it and connected. The
-       * channel works; the price is the editor's own terminal taking the focus
-       * from our panel on every prompt, and the owner's decision that day was
-       * off by default. This is that decision reaching a process.
+       * channel works; the price the owner refused that day was the editor's own
+       * terminal taking the focus from our panel on every prompt sent. On
+       * 2026-08-30 an instrument looked for that price again and did not find it
+       * in Cursor, on connecting or on sending; sending in VS Code was not
+       * watched, so it is refuted where it was looked for and withdrawn nowhere.
+       * The decision stands and this is that decision reaching a process -- and
+       * what the name really governs is the UNASKED connection, which is why
+       * `ideChannelEnv` and not this suite carries both measurements.
        */
       assert.equal(
         written.CLAUDE_CODE_AUTO_CONNECT_IDE,
         'false',
-        'the agent was left free to connect to the other extension, focus and all'
+        'the agent was left free to connect itself to the other extension'
       );
       assert.equal(written.TERM_PROGRAM_VERSION, vscode.version);
       assert.equal(written.COLORTERM, 'truecolor');
