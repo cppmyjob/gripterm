@@ -204,11 +204,28 @@ function suitesUnderOwn() {
  * the window's settings, and until it was written there every suite ran against
  * `~/.gripterm` -- the store belonging to whoever owns this machine.
  *
- * The second run also gets the engine, and by setting rather than by hand:
+ * Both runs also NAME THEIR ENGINE, and by setting rather than by hand:
  * `gripterm.terminal.engine` takes effect when the window starts, so an engine
  * cannot be switched inside a running suite, and a window that read the setting
- * is the only window that proves the setting works. `engine-in-effect.test.js`
- * asserts from inside that the engine which answered is the one asked for.
+ * is the only window that proves the setting works. `pty-engine.test.ts` asserts
+ * from inside that the engine which answered is the one asked for.
+ *
+ * That sentence named `engine-in-effect.test.js` until 2026-08-30 and there has
+ * never been a file of that name. The assertion it describes is real and is in
+ * `pty-engine.test.ts`; only the address was invented. `named-tests-exist.test.ts`
+ * did not catch it, and could not: it reads names ending `.test.ts` and
+ * `.test.mjs`, and a suite named by its COMPILED `.js` name goes past it. The
+ * name is written in its source form here so that this one, at least, is held.
+ *
+ * Until 2026-08-30 only the SECOND run named one. The first lived on whatever
+ * the manifest defaulted to, which was `editor`, and that is a coincidence
+ * rather than a choice: the day the owner moved the default to `own` this run
+ * would have gone on being green while measuring the other engine, and every
+ * suite here whose subject IS the editor's engine -- the strip among the
+ * editors, the tabs drawn on it, the group that goes with its last terminal --
+ * would have stopped measuring anything, with nothing red to say so.
+ * `tests/every-run-names-its-engine.test.ts` now holds every run of ours to
+ * saying which engine it is about.
  */
 
 // Before anything is launched, and not as a courtesy: a host given a bundle
@@ -244,7 +261,11 @@ export default defineConfig([
     files: 'out/tests/integration/**/*.test.js',
     extensionDevelopmentPath: 'packages/extension',
     version: 'stable',
-    launchArgs: [`--user-data-dir=${hostUserData('integration')}`],
+    launchArgs: [
+      // `editor`, and pinned rather than inherited: this is the run where the
+      // editor's engine is the SUBJECT, and a default is not a subject.
+      `--user-data-dir=${hostUserData('integration', { 'gripterm.terminal.engine': 'editor' })}`,
+    ],
     mocha: { timeout: TIMEOUT_MS },
   },
   {

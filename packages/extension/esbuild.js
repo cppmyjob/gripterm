@@ -185,7 +185,9 @@ function ptyPackageDir() {
       'node-pty is not installed, so this bundle would ship without the addon the `own` engine ' +
       'loads. Run `pnpm install`. The build stops here rather than carrying on: an extension ' +
       'packaged without the copy still starts, and every window that asked for ' +
-      '`gripterm.terminal.engine: own` silently gets a terminal made by the editor instead.',
+      '`gripterm.terminal.engine: own` silently gets a terminal made by the editor instead -- ' +
+      'which since 2026-08-30 is every window whose owner has not chosen `editor`, because ' +
+      '`own` is now the default.',
       { cause }
     );
   }

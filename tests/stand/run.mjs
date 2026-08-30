@@ -333,6 +333,18 @@ function prepare() {
   }
 
   const userData = hostUserData(LABEL, {
+    // `editor`, and the pin is what makes the nine points mean anything. What
+    // this stand counts is EDITOR GROUPS over several sittings -- 2, 2, 4, 5, 6,
+    // 7, 8 of them on 2026-08-23 -- and under `gripterm.terminal.engine: own`
+    // there are no groups of ours to count: that engine has one place of its
+    // own, the Gripterm panel, and `gripterm.launch.location` does not reach it.
+    // Until 2026-08-30 nothing was set here and the run lived on the manifest's
+    // default, which was `editor` by coincidence rather than by choice; the day
+    // the owner moved that default to `own` this stand would have gone green
+    // over a window with no staircase in it because it had no groups at all.
+    // Not a promise that the other engine needs no stand -- it is that nobody
+    // has written one, and this line is where a reader finds that out.
+    'gripterm.terminal.engine': 'editor',
     'security.workspace.trust.enabled': false,
     'telemetry.telemetryLevel': 'off',
     'update.mode': 'none',

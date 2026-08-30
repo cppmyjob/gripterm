@@ -84,6 +84,13 @@ export interface CreateTerminalEntryParams {
    * those. Reading silence as `own` would point it at a `claude` that outlives
    * the extension host by design (M2.16). Reading it as `editor` costs a process
    * that is not cleaned up; reading it the other way costs a conversation.
+   *
+   * NOT the same default as the SETTING's, and since 2026-08-30 they disagree on
+   * purpose: `gripterm.terminal.engine` defaults to `own` from that day, and
+   * this one does not follow it and must not. That default is a guess about a
+   * window nobody has configured; this one is the reading of SILENCE in a record
+   * written before this field existed, where the only safe direction is the one
+   * that kills nothing.
    */
   readonly engine?: TerminalEngine;
   /**

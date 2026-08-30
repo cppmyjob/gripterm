@@ -485,6 +485,12 @@ describe('the aggregate as a whole', () => {
  * before this field existed says nothing, and reading nothing as `own` would
  * point the killer at terminals it must not touch. The safe answer to "which
  * engine was it" is the one that kills nothing.
+ *
+ * It is NOT the setting's default and stopped matching it on 2026-08-30, when
+ * the owner moved `gripterm.terminal.engine` to `own`. The two are different
+ * questions -- what a window with no preference gets, and what a record with no
+ * field meant -- and this suite is the one that keeps the second from being
+ * "corrected" into the first.
  */
 describe('TerminalEntry: the engine that made it', () => {
   it('says editor when nobody said otherwise', () => {

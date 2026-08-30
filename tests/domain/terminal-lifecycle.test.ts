@@ -1021,8 +1021,10 @@ describe('TerminalLifecycleService reads a terminal that went away', () => {
    * The half of A29 that makes `reason` alone the WRONG rule, measured
    * 2026-08-13 in a real editor.
    *
-   * A terminal in the EDITOR AREA -- which is this build's default
-   * (`gripterm.launch.location`) -- reports a process exiting on its own as
+   * A terminal in the EDITOR AREA -- where `gripterm.launch.location` puts one
+   * by default, though since 2026-08-30 that setting reaches only the windows
+   * that chose `gripterm.terminal.engine: editor` -- reports a process exiting
+   * on its own as
    * `user`, because the editor tab closing is what the platform sees. The same
    * process in the panel reports `process`. So `user` does not mean "a person
    * did this"; what it means is "this went through the editor's own close path",

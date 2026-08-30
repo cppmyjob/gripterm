@@ -44,26 +44,45 @@ const DEFAULT_LAUNCH_MODE: LaunchMode = 'process';
 const DEFAULT_LAUNCH_LOCATION: LaunchLocation = 'group';
 
 /**
- * `editor`, and the measurements of M3.1-M3.12 are why it stays that way -- the
- * owner's decision of 2026-08-20 (M3.13).
+ * `own` -- the owner's decision of 2026-08-30, and it OVERRIDES his own decision
+ * of 2026-08-20 (M3.13) that this stay `editor`.
  *
- * Not because the other engine is unfinished: it makes terminals, brings them
- * back after a restart and draws them beside what is known about them. Because
- * of what a person would lose without having asked for it.
+ * **What changed is the evidence, not the argument.** M3.13 was paid for with a
+ * loss: an `environmentVariableCollection` belonging to another extension
+ * reaches the terminals the EDITOR makes and cannot reach a pty of ours
+ * (2026-08-20, A42), so a terminal of ours under `editor` carries the Claude
+ * Code extension's `CLAUDE_CODE_SSE_PORT` and the editor's `GIT_ASKPASS`, and
+ * under `own` the stable API exposes only our own collection. The heaviest half
+ * of that -- the CHANNEL to the Claude Code extension -- did not survive
+ * re-measurement on 2026-08-30: the CLI finds that extension by itself and needs
+ * no port from us, so the channel is reachable under `own` after all. What the
+ * loss really costs is written out in `readIdeChannel` below, measurement by
+ * measurement, including the parts of it that are still standing.
  *
- * An `environmentVariableCollection` belonging to another extension reaches the
- * terminals the EDITOR makes and cannot reach a pty of ours -- measured
- * 2026-08-20 (A42): a terminal of ours under this engine carries the Claude Code
- * extension's `CLAUDE_CODE_SSE_PORT` and the editor's `GIT_ASKPASS`, and under
- * `own` neither is gettable, because the stable API exposes only our own
- * collection. node-pty carries no Linux build at all, so `own` there is a
- * fallback and nothing else. And the acceptance a person has to walk by hand is
- * finished in one editor of the two.
+ * **What the turn costs, named to the owner before he took it and accepted.**
+ * On Linux there is no prebuilt addon, so `own` falls back to `editor` out loud
+ * -- and that now happens to people who configured nothing. `gripterm.launch.mode:
+ * shell` is refused by this engine and falls back the same way. The channel to
+ * the Claude Code extension comes up only by hand (`/ide`) and only one agent
+ * holds it. The acceptance a person walks by hand has never once been walked
+ * under `own`, and `tests/acceptance/run.mjs` therefore pins `editor` and says
+ * so as a debt. `gripterm.launch.location` does not reach this engine at all, so
+ * its default now applies to nobody who has not chosen `editor`.
  *
- * Changing this is four lines and a test. The default is not the direction the
- * work is going; it is the direction the loss is.
+ * **`editor` is not going anywhere.** It is the way back, whole (O5), it is what
+ * both refusals above fall back TO, and the strip in the editor area it draws is
+ * the owner's undo if this turn does not hold.
+ *
+ * **This used to say "changing this is four lines and a test", and that was
+ * false.** Measured 2026-08-30: four of our own runs -- the `integration` label,
+ * the stand, the eyes and the acceptance run -- pinned no engine whatever and
+ * lived on whatever this line said. Moving it without pinning them first would
+ * have carried three of them onto the other engine while they went on printing
+ * green about subjects that had stopped existing. What made it four lines was
+ * that nobody had looked. `tests/every-run-names-its-engine.test.ts` is what
+ * stops the next person paying that price again.
  */
-const DEFAULT_TERMINAL_ENGINE: TerminalEngine = 'editor';
+const DEFAULT_TERMINAL_ENGINE: TerminalEngine = 'own';
 
 /**
  * Which states get a notification, as the person configured them.
@@ -151,9 +170,11 @@ export function readLaunchLocation(logger: Logger): LaunchLocation {
  * Same rule as the two above -- an unreadable value falls back AND says so -- and
  * it matters more here than anywhere else in this file: this setting decides
  * whether a conversation runs inside the editor's own terminal or inside a
- * process of ours, and the two are ended by different machinery. A typo that
- * silently meant `editor` would be discovered by a person wondering why the
- * screen they configured never appeared.
+ * process of ours, and the two are ended by different machinery. A typo falls
+ * back to the DEFAULT, which since 2026-08-30 is `own`: somebody who wrote
+ * `editor` with a capital letter gets a terminal in the Gripterm panel and none
+ * of the editor tab they were asking for, which is why the value that could not
+ * be read is named in the log rather than swallowed.
  *
  * What is asked for is not necessarily what answers: `own` with
  * `gripterm.launch.mode: shell` is refused, and `own` on a build whose native
@@ -209,8 +230,13 @@ export function readLaunchLocation(logger: Logger): LaunchLocation {
  * in VS Code, which is precisely the editor and the moment the 2026-08-20
  * sighting is about: the message budget ran out first. So the price is refuted
  * where it was looked for, unmeasured where it was seen, and withdrawn nowhere.
- * The default stays `false`: that is the owner's decision and his to revisit --
- * but whoever revisits it should know that its ground did not come back.
+ * The default of THIS setting -- `gripterm.terminal.ideChannel` -- stays
+ * `false`: that is the owner's decision and his to revisit. It is named in full
+ * here because the file now holds two decisions about defaults that the same
+ * measurement bears on, and the OTHER one moved: `DEFAULT_TERMINAL_ENGINE` above
+ * went to `own` on 2026-08-30 partly on the strength of the paragraph you are
+ * reading. Whoever revisits this one should know that its ground did not come
+ * back either.
  *
  * Anything that is not exactly `true` leaves it off, the same rule the journal's
  * content switch follows: a setting we cannot read is not permission.

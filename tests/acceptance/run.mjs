@@ -245,6 +245,22 @@ function prepare() {
         // `application` scope: a workspace file would be ignored, which is why
         // the whole run carries a user data directory of its own.
         'gripterm.storage.path': STORE,
+        // `editor`, AND THIS IS A DEBT, written here rather than in a document
+        // nobody opens while reading this file.
+        //
+        // П2 and О3 have never been walked under `gripterm.terminal.engine:
+        // own`, not once. Until 2026-08-30 this run set no engine at all and
+        // took the manifest's default, which was `editor`; on that day the owner
+        // moved the default to `own`, and a run that went on setting nothing
+        // would have spent a real turn of his account measuring an engine it has
+        // no evidence about, under the name of an acceptance that passed.
+        //
+        // So the engine is pinned to the one this acceptance was actually walked
+        // on. What is NOT here is coverage of the other one: teaching this run
+        // `own` costs real turns and needs its own decision, and it is Ш32. The
+        // day that happens, this comment is what says the old pin was a debt and
+        // not a preference.
+        'gripterm.terminal.engine': 'editor',
         'security.workspace.trust.enabled': false,
         'window.restoreWindows': 'none',
         'telemetry.telemetryLevel': 'off',

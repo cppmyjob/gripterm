@@ -48,9 +48,14 @@ import type { Logger, SessionRegistry, TerminalEntry } from '@gripterm/core';
  * a suite cannot answer `showInformationMessage`: M3.13 measured that replacing
  * `vscode.window` from a run does not reach the object this bundle calls, which
  * is why `ui/ask.ts` exists for the one modal a run drives. The live suite pins
- * the DEFAULT instead -- a close in the editor with nobody pressing anything
- * leaves the record `closedBy: 'editor'` (`closing-a-terminal.test.ts`) -- so
- * the outcome most people get is measured and the two pressed ones are not.
+ * the UNPRESSED outcome instead -- a close in the editor with nobody pressing
+ * anything leaves the record `closedBy: 'editor'`
+ * (`closing-a-terminal.test.ts`) -- so one outcome of the three is measured and
+ * the two pressed ones are not. This used to say "the outcome most people get",
+ * and that stopped being true on 2026-08-30: `gripterm.terminal.engine` now
+ * defaults to `own`, where there is no editor tab for anybody to close, and
+ * that suite is excluded from the run under that engine for exactly this
+ * reason. Which outcome most people get is now UNMEASURED.
  * REMOVED WHEN: this offer goes through a seam of ours the way the modal does.
  *
  * **The record is read again before it is written.** Between the offer going up

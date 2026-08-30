@@ -719,6 +719,14 @@ function prepare() {
   }
 
   return hostUserData(LABEL, {
+    // `editor`, for the reason the stand pins it: what the eyes LOOK AT is drawn
+    // in the editor area -- the decoration on a tab, the colour of it, the strip
+    // those tabs sit in -- and a terminal of our own engine has no editor tab to
+    // draw on. Until 2026-08-30 nothing was set here and this run inherited the
+    // manifest's default; when the owner moved that default to `own` the eyes
+    // would have kept reporting a look nobody could see, over a window whose tabs
+    // were not there to be coloured.
+    'gripterm.terminal.engine': 'editor',
     'security.workspace.trust.enabled': false,
     'telemetry.telemetryLevel': 'off',
     'update.mode': 'none',

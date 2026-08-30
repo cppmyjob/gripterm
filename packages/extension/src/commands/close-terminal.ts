@@ -47,10 +47,14 @@ const CONFIRM = 'End Conversation';
  * webview, and the only cross in the build that reaches this command
  * (`executeCommand(CLOSE_TERMINAL_COMMAND)`). It exists under
  * `gripterm.terminal.engine: own` and nowhere else. The other is
- * `VsCodeEditorStrip` -- `gripterm.launch.location: group`, which is the
- * DEFAULT -- a group of the editor area whose tabs are the EDITOR'S, drawn by
+ * `VsCodeEditorStrip` -- `gripterm.launch.location: group`, the default of that
+ * setting -- a group of the editor area whose tabs are the EDITOR'S, drawn by
  * the workbench, closed by the workbench. That is the strip the owner was
- * looking at.
+ * looking at. Since 2026-08-30 it is no longer what a window with no settings
+ * gets: `gripterm.terminal.engine` defaults to `own`, which does not read
+ * `gripterm.launch.location` at all, so reaching this strip now takes choosing
+ * `editor`. What the owner was looking at is still there; it is one setting
+ * further away.
  *
  * **On that road there is no dialog before the fact, and there cannot be.** The
  * editor closes the terminal and tells us afterwards, through

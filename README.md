@@ -31,14 +31,21 @@ the behaviour the extension relies on. Check yours with `claude --version`.
 
 ## Which engine makes the terminal
 
-`gripterm.terminal.engine` chooses, and the default is **`editor`**.
+`gripterm.terminal.engine` chooses, and the default is **`own`**.
+
+The default moved from `editor` to `own` on 2026-08-30. If you have configured
+nothing, your agents now come up in the Gripterm panel rather than among your
+editors, and `gripterm.launch.location` no longer reaches them — that setting
+applies to the `editor` engine and to nothing else. Set
+`gripterm.terminal.engine` to `editor` to have the old arrangement back; it is
+kept whole, and it is what `own` falls back to when it cannot run.
 
 | | `editor` | `own` |
 |---|---|---|
 | Who makes the terminal | the editor | Gripterm |
 | Where the agent is | wherever `gripterm.launch.location` says: a group of the editor area, an editor tab, or the terminal panel | in the Gripterm panel: the terminal on the left, what is known about it on the right, and a strip of tabs when there are several |
-| Platforms | wherever the editor runs | Windows and macOS. On Linux there is no prebuilt native addon to load, so the editor makes the terminal instead and the log says so |
-| `gripterm.launch.mode: shell` | yes | refused the same way: the editor makes the terminal and the log says so |
+| Platforms | wherever the editor runs | Windows and macOS. On Linux there is no prebuilt native addon to load, so the editor makes the terminal instead — said to you in a notification naming the setting, and to the log with the cause |
+| `gripterm.launch.mode: shell` | yes | refused: the editor makes the terminal instead, said to you in a notification naming both settings, and to the log |
 | What other extensions add to a terminal | reaches the agent: the channel from the Claude Code extension to the CLI, the git askpass of the editor | mostly does not: it arrives through a mechanism the editor applies to its own terminals, and no extension can read another one. The Claude Code channel is the exception — the CLI finds that extension by itself, with no port from us — but you raise it by hand, with `/ide` in the agent. Measured 2026-08-30 on Claude Code CLI 2.1.245, which is newer than the version pinned above, so it says nothing about that one: no agent raised it unasked, at either value of `gripterm.terminal.ideChannel`, which is the setting that governs the unasked attempt and nothing else (that measurement used a copy of the extension installed by a test run rather than an ordinary installation, so yours may behave differently). While the channel is up the agent is handed the file you have open and the text you have selected, and only one agent holds the channel however many are running. There was a third thing, and it is now in doubt: on 2026-08-20, in VS Code, the editor's own terminal took the focus away from the Gripterm panel on every prompt sent — on 2026-08-30 that could not be reproduced in Cursor, on connecting or on sending, and in VS Code only connecting was re-checked |
 | History | the editor's own scrollback | 1000 lines, and less if the panel was destroyed and redrawn |
 | Search over the history | the editor's | not built |

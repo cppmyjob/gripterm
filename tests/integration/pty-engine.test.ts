@@ -640,7 +640,7 @@ suite('the own engine: the fallback a person has to be able to hear', () => {
 
     assert.equal(
       manifest.contributes.configuration.properties['gripterm.terminal.engine']?.default,
-      'editor',
+      'own',
       'the default engine moved without the manifest saying so'
     );
   });

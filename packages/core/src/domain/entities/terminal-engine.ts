@@ -5,10 +5,14 @@
  * screen and the tab, and we hold a handle. `own` is a pty of ours, whose bytes
  * we carry to a screen we draw (M3).
  *
- * `editor` is the default and stays the way back, whole (O5). Under it a
- * `claude` outlives the death of the extension host -- measured in M2.16, 102
- * seconds of observation -- and that is the property no step of M3 is allowed to
- * touch.
+ * `editor` was the default until 2026-08-30, when the owner moved it to `own`
+ * and overrode his own decision of 2026-08-20 (M3.13). It stays the WAY BACK,
+ * whole (O5), and that is a stronger job than being the default was: both of
+ * `own`'s refusals -- no prebuilt addon on Linux, and
+ * `gripterm.launch.mode: shell` -- fall back to it, and since the move those
+ * fallbacks reach people who configured nothing. Under it a `claude` outlives
+ * the death of the extension host -- measured in M2.16, 102 seconds of
+ * observation -- and that is the property no step of M3 is allowed to touch.
  *
  * Stored per TERMINAL rather than derived from the setting, because the setting
  * says what was asked for and this says what happened. The two part company on
