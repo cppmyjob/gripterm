@@ -175,12 +175,12 @@ class Presence implements OwnerPresence {
 
 function decodable(name: string, liveness: 'live' | 'dead' | 'unknown'): OwnerSurvey {
   const identity: OwnerIdentity = makeOwnerIdentity(name);
-  return { name, fileName: `${name}.json`, identity, liveness };
+  return { name, fileName: `${name}.json`, identity, heartbeatAt: HEARD_AT, liveness };
 }
 
 /** A file in `owners/` that could not be read -- so nothing about its window is established. */
 function unreadable(name: string): OwnerSurvey {
-  return { name, fileName: `${name}.json`, identity: null, liveness: 'unknown' };
+  return { name, fileName: `${name}.json`, identity: null, heartbeatAt: null, liveness: 'unknown' };
 }
 
 function observedAs(

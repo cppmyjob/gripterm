@@ -39,6 +39,7 @@
  */
 
 import { execFileSync, spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -526,7 +527,74 @@ async function sitting(number, terminalId, sessionId) {
 
 
 /**
- * О1, with the restore in play: the runner is killed and Claude Code carries on.
+ * Where the CLI said it keeps a conversation, taken from the journal this store
+ * already holds. The same reading `p2-first-window.test.ts` makes, from outside
+ * a host.
+ */
+function transcriptOf(terminalId) {
+  for (const line of journal(terminalId)) {
+    const path = line.body?.transcript_path;
+    if (typeof path === 'string') {
+      return path;
+    }
+  }
+  return null;
+}
+
+/**
+ * A record closed by a person's own hand, put into the store while the О1 window
+ * is up.
+ *
+ * **What it is for.** О1 under our own engine asks four things of a host that
+ * dies, and the fourth is the one that is not about rescue: a terminal the
+ * person closed THEMSELVES must not come back. The other three are about the
+ * conversation П2 left; this one needs a record nobody wants back, and the О1
+ * window is an INSTALLED editor with no test host in it, so there is no hand
+ * inside it to close a terminal with.
+ *
+ * **It is a COPY, not a second spelling of the format.** The record this run's
+ * own product wrote is read back off the disk and four fields of it are moved:
+ * the two ids, so it is a different terminal on a different conversation, and
+ * the pair a close writes. Everything else -- the owner, the folder, the launch,
+ * the schema -- is whatever the build under test put there, so this cannot drift
+ * from the format the way a hand-written fixture would. `closedBy: 'person'` is
+ * the point of the whole thing: it is the one hand whose closes a window may act
+ * on without asking (`UNASKED` in `cleanup-planner.ts`).
+ *
+ * Its owner is left exactly as copied -- the window that is about to be killed --
+ * because that is the case the criterion describes: the person closed it in the
+ * window whose host then died.
+ */
+function plantARecordClosedByHand(terminalId) {
+  const record = JSON.parse(readFileSync(join(STORE, 'terminals', terminalId, 'record.json'), 'utf8'));
+  const planted = {
+    ...record,
+    terminalId: randomUUID(),
+    sessionId: randomUUID(),
+    sessionIdHistory: [],
+    metadata: { ...record.metadata, displayName: 'closed by hand', task: null, notes: [] },
+    closedAt: Date.now(),
+    closedBy: 'person',
+    revision: 1,
+  };
+  const dir = join(STORE, 'terminals', planted.terminalId);
+  mkdirSync(dir, { recursive: true });
+  // The snapshot too, and with the process taken out of it: a terminal somebody
+  // closed has no `claude` behind it, and a pid copied from a live one would be
+  // the one field of this record that is a lie.
+  const observed = JSON.parse(readFileSync(join(STORE, 'terminals', terminalId, 'observed.json'), 'utf8'));
+  writeFileSync(
+    join(dir, 'observed.json'),
+    JSON.stringify({ ...observed, state: 'ended', pid: null }, null, 2),
+    'utf8'
+  );
+  writeFileSync(join(dir, 'record.json'), JSON.stringify(planted, null, 2), 'utf8');
+  return planted;
+}
+
+/**
+ * О1, and it has TWO HEADS, because the two engines put the terminal in
+ * different processes.
  *
  * M1.15 measured this without a restore, on a terminal a person had started. The
  * plan asks for it again here for the reason it gives: in M1 there is no restore,
@@ -534,15 +602,37 @@ async function sitting(number, terminalId, sessionId) {
  * a SECOND `claude` on a conversation the first one is still holding.
  *
  * The extension host is killed rather than the whole editor, because that is the
- * shape of the failure: the pty belongs to the editor, so the terminal lives on
- * while the runner behind it is gone.
+ * shape of the failure the criterion is about.
+ *
+ * **Under `editor`, as written and without exceptions.** That terminal belongs
+ * to the editor and its `claude` is a child of the pty host, so a killed runner
+ * means our hooks knock at a dead address -- and a non-2xx or a timeout on a
+ * hook is a NON-BLOCKING error for the CLI. The agent carries on, in the same
+ * process, on the same conversation.
+ *
+ * **Under `own` that letter is UNMEETABLE, and structurally so.** We make the
+ * terminal, and its pty lives inside our own extension host. Kill the host and
+ * the agent goes with it: what is lost is not the address of a hook but the
+ * process itself. Owner's refinement, 2026-08-31, and what it requires under
+ * `own` instead is exactly О1's former meaning rather than a smaller one -- the
+ * death of our host must not cost the person a conversation. Namely: the record
+ * and the transcript are whole; at the next activation the conversation comes
+ * back through `--resume` ON THE SAME SESSION, with the task and the notes; no
+ * duplicates appear; and a terminal the person closed THEMSELVES does not come
+ * back. What О1 does NOT promise under `own` is the turn the agent was making in
+ * that second.
+ *
+ * The first walk under `own` was 2026-08-31 and it went red on the `editor`
+ * head -- `claude=gone`, and a NEW pid on the SAME conversation. That reading is
+ * the four points above passing, presented against the wrong criterion.
  *
  * THE EXTENSION IS INSTALLED FOR THIS ONE, and that is not tidiness. Measured
  * 2026-08-13: in a development host (`--extensionDevelopmentPath`) killing the
  * extension host takes the terminal's `claude` with it within seven seconds,
  * while the same kill against the same build INSTALLED leaves it running for as
  * long as it was watched. О1 is a promise about what a person has installed, so
- * that is the configuration it is measured in.
+ * that is the configuration it is measured in. Under `own` the same kill takes
+ * the agent either way, which is the point.
  */
 async function killTheRunner(terminalId, sessionId) {
   const before = journal(terminalId).length;
@@ -572,10 +662,25 @@ async function killTheRunner(terminalId, sessionId) {
 
   const running = runningHere();
   const claudePid = running[0]?.pid ?? null;
+  const transcript = transcriptOf(terminalId);
+  // Only under `own`: the fourth point is one only that head asks, and putting a
+  // record nobody wants back into the store of a run measuring the other head
+  // would change what that run measures.
+  const closedByHand = ENGINE === 'own' ? plantARecordClosedByHand(terminalId) : null;
   console.log('--- О1: the runner is killed while a restored conversation is running');
   console.log(`  the build          : installed, not a development host`);
+  console.log(
+    `  the criterion      : ${ENGINE === 'own'
+      ? 'the four points of the refinement of 2026-08-31'
+      : 'the same process on the same conversation'}`
+  );
   console.log(`  running before     : ${JSON.stringify(running.map((one) => `${one.sessionId} pid=${one.pid}`))}`);
+  console.log(`  transcript         : ${String(transcript)}`);
+  if (closedByHand !== null) {
+    console.log(`  closed by hand     : terminal ${closedByHand.terminalId}, conversation ${closedByHand.sessionId}`);
+  }
 
+  const sinceTheKill = journal(terminalId).length;
   const hosts = runnerPids();
   if (hosts.length === 0) {
     throw new Error('no runner to kill: the store has no presence file');
@@ -604,17 +709,95 @@ async function killTheRunner(terminalId, sessionId) {
     && after.length === 1
     && after[0].sessionId === sessionId
     && after[0].pid === claudePid;
+  const [record] = records().filter((one) => one.id === terminalId);
+  const resumed = journal(terminalId)
+    .slice(sinceTheKill)
+    .find((one) => one.body?.hook_event_name === 'SessionStart');
   console.log(`  the same process still holds the same conversation: ${String(sameOne)}`);
   console.log(`  records in store   : ${records().length}`);
-  for (const line of extensionLog().filter((one) => /bring|restor|adopt/iu.test(one))) {
+  console.log(
+    `  after the kill     : ${resumed === undefined
+      ? 'no SessionStart at all'
+      : `SessionStart source ${String(resumed.body?.source)}`}`
+  );
+  for (const line of extensionLog().filter((one) => /bring|restor|adopt|goodbye/iu.test(one))) {
     console.log(`  log                : ${line}`);
+  }
+
+  const failures = ENGINE === 'own'
+    ? theFourPoints({ sessionId, record, transcript, resumed, after, closedByHand })
+    : sameOne
+      ? []
+      : ['killing the runner did not leave the same process on the same conversation'];
+  for (const failure of failures) {
+    console.log(`  NOT MET            : ${failure}`);
   }
 
   closeEditors();
   await until('the О1 window to close', () => (editorProcesses().length === 0 ? true : null), CLOSES_WITHIN_MS);
   const leftBehind = runningHere();
   console.log(`  running after close: ${leftBehind.length === 0 ? 'none' : JSON.stringify(leftBehind.map((one) => one.sessionId))}`);
-  return { sameOne, count: records().length, leftBehind: leftBehind.length };
+  return { failures, count: records().length, leftBehind: leftBehind.length };
+}
+
+/**
+ * О1 under our own engine, one point at a time and named after the sentence it
+ * comes from.
+ *
+ * Nothing here is weaker than the head it stands beside. "The conversation came
+ * back somehow" would be: it is the SAME session, with the task and the notes
+ * still on it, exactly one of it, and the record the person threw away still
+ * gone. Each of those four is a way for a rescue to be worth nothing, and each
+ * has a line of its own so that a red run says WHICH.
+ */
+function theFourPoints(seen) {
+  const { sessionId, record, transcript, resumed, after, closedByHand } = seen;
+  const failures = [];
+
+  // 1. The record and the transcript are whole.
+  if (record === undefined) {
+    failures.push('the killed runner left no record at all');
+  } else {
+    if (record.record.sessionId !== sessionId) {
+      failures.push(`the record names ${record.record.sessionId} rather than the conversation it had`);
+    }
+    if (record.record.metadata.task === null || record.record.metadata.notes.length !== 1) {
+      failures.push('the killed runner cost the record its task or its note');
+    }
+  }
+  if (transcript === null) {
+    failures.push('no hook ever said where the transcript would be, so nothing could have been resumed');
+  } else if (!existsSync(transcript)) {
+    failures.push(`the transcript at ${transcript} is gone, so the conversation cannot be resumed`);
+  }
+
+  // 2. The conversation comes back through `--resume`, on the same session.
+  if (resumed === undefined) {
+    failures.push('the conversation never came back after the runner was killed');
+  } else if (String(resumed.body?.source) !== 'resume') {
+    failures.push(`the conversation came back as ${String(resumed.body?.source)} rather than a resume`);
+  }
+
+  // 3. No duplicates.
+  if (after.length !== 1) {
+    failures.push(`${String(after.length)} conversations are running after the kill, expected exactly one`);
+  } else if (after[0].sessionId !== sessionId) {
+    failures.push(`what is running is ${after[0].sessionId} rather than the conversation that was there`);
+  }
+
+  // 4. What the person closed themselves did not come back.
+  if (closedByHand === null) {
+    failures.push('nothing was closed by hand, so the fourth point of О1 was never asked');
+  } else {
+    if (after.some((one) => one.sessionId === closedByHand.sessionId)) {
+      failures.push('the conversation the person closed themselves was started again');
+    }
+    const [back] = records().filter((one) => one.id === closedByHand.terminalId);
+    if (back !== undefined && back.record.closedAt === null) {
+      failures.push('the record the person closed themselves was reopened by the restart');
+    }
+  }
+  return failures;
 }
 
 // --- the run -----------------------------------------------------------------
@@ -733,8 +916,8 @@ for (const [name, sat] of [['second', second], ['third', third]]) {
   }
 }
 
-if (!o1.sameOne) {
-  failures.push('killing the runner did not leave the same process on the same conversation');
+for (const failure of o1.failures) {
+  failures.push(failure);
 }
 if (o1.count !== 1) {
   failures.push(`killing the runner left ${o1.count} records`);

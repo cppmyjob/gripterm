@@ -87,6 +87,23 @@ const LOGS_DIRECTORY = 'logs';
 const TRASH_SWEEP_FILE = 'trash-sweep.json';
 
 /**
+ * The running total of starts that came up after a run which left no goodbye
+ * (Ш33).
+ *
+ * In the base beside `trash-sweep.json`, and for the same two reasons that one
+ * is: it is one fact about the whole store rather than about any terminal in it,
+ * and the schema version does not move for it -- an older build has no name for
+ * this file and ignores it, which costs that build nothing at all, because
+ * nothing in the store is read through it.
+ *
+ * Named for what it counts and not for what the count might mean. What a run
+ * that left no goodbye WAS -- our host ending on its own, or a person ending the
+ * editor from the task manager -- is exactly what this build cannot establish,
+ * and a file name is the last place to put a guess a person will then quote.
+ */
+const NO_GOODBYE_FILE = 'runs-without-a-goodbye.json';
+
+/**
  * What an owner id may look like once it is a file name.
  *
  * Lowercase only, and that is the point rather than an oversight: Windows and
@@ -182,6 +199,11 @@ export class StorageLayout {
 
   public get logsDir(): string {
     return join(this._baseDir, LOGS_DIRECTORY);
+  }
+
+  /** Holds how many starts came up after a run that left no goodbye. See `NO_GOODBYE_FILE`. */
+  public get noGoodbyeFile(): string {
+    return join(this._baseDir, NO_GOODBYE_FILE);
   }
 
   /** Throws `ValidationError` on an id that would not be safe as a file name. */

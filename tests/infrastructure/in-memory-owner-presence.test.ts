@@ -26,7 +26,7 @@ describe('after announcing', () => {
 
     await expect(presence.livenessOf(US.ownerId)).resolves.toBe('live');
     await expect(presence.survey()).resolves.toStrictEqual([
-      { name: US.ownerId.value, fileName: US.ownerId.value, identity: US, liveness: 'live' },
+      { name: US.ownerId.value, fileName: US.ownerId.value, identity: US, heartbeatAt: null, liveness: 'live' },
     ]);
     await expect(presence.heartbeat()).resolves.toBeUndefined();
   });

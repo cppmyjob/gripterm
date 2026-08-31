@@ -77,6 +77,18 @@ export interface OwnerSurvey {
   readonly fileName: string;
   /** `null` when the file did not decode. */
   readonly identity: OwnerIdentity | null;
+  /**
+   * When the file says its window last spoke, and `null` for one that did not
+   * decode.
+   *
+   * Beside `liveness` rather than folded into it, because the two answer
+   * different questions and one of them cannot be recovered from the other:
+   * `dead` is reached by two rules -- a beat older than the boot, or no process
+   * at that pid -- and telling those apart is the whole of
+   * `runsThatLeftNoGoodbye`. Without the moment, a reboot and a run that ended
+   * hard are the same row.
+   */
+  readonly heartbeatAt: Date | null;
   /** The same verdict `livenessOf` gives, and `unknown` for a file that did not decode. */
   readonly liveness: OwnerLiveness;
 }

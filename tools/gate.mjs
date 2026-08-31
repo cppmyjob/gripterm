@@ -458,10 +458,17 @@ const MISSING = [
       'repository`s beliefs about Claude Code rather than Claude Code; the head of `fake-claude.mjs` lists ' +
       'what it does not do at all. The run against the real thing is owed and dated in ' +
       '`tests/acceptance/against-the-real-cli.json`, and `tests/fake-claude.test.ts` -- which IS in this ' +
-      'gate -- goes red when it is overdue. Two findings from the first walk under `own`: О1 is RED there ' +
-      'and green under `editor` (our own engine keeps the pty inside the extension host, so killing the ' +
-      'runner takes the agent with it, and the restart resumes the conversation in a NEW process), and ' +
-      '`rename from the CLI` cannot run under `own` at all, its subject being an editor terminal.',
+      'gate -- goes red when it is overdue. Two findings from the first walk under `own`, 2026-08-31, and ' +
+      'the first of them has since been ANSWERED rather than left standing here: О1 was RED there and green ' +
+      'under `editor`, because our own engine keeps the pty inside the extension host, so killing the runner ' +
+      'takes the agent with it and the restart resumes the conversation in a NEW process. The owner refined ' +
+      'О1 BY ENGINE that same day, and the assertion is two-headed now (`killTheRunner` and `theFourPoints` ' +
+      'in `tests/acceptance/run.mjs`): under `editor` the same process on the same conversation, as written; ' +
+      'under `own` the record and the transcript whole, the conversation back through `--resume` on the SAME ' +
+      'session with its task and its notes, no duplicates, and a terminal the person closed THEMSELVES still ' +
+      'gone. MEASURED AFTER THAT CHANGE, both heads green: 185 s under `own`, 210 s under `editor`. The ' +
+      'second finding stands: `rename from the CLI` cannot run under `own` at all, its subject being an ' +
+      'editor terminal.',
   },
 ];
 

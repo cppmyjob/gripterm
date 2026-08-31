@@ -508,6 +508,23 @@ describe('surveying the windows on this machine', () => {
     }
   });
 
+  it('carries the moment each file was last written, which `dead` alone cannot say', async () => {
+    // The reason the row has a moment at all: `dead` is reached by two rules --
+    // a beat older than the boot, or no process at that pid -- and the counter
+    // of runs that left no goodbye exists to tell those two apart. Without this
+    // field a reboot and a run that ended hard are the same row.
+    const beat = new Date(NOW.getTime() - 30_000);
+    await writeOwnerFile(MINE, documentFor(NOW));
+    await writeOwnerFile('window-that-closed', documentFor(beat, 4242, 'window-that-closed'));
+
+    const surveyed = await presenceOf({ probe: goneFor(4242) }).survey();
+
+    expect(surveyed.map((row) => [row.name, row.heartbeatAt?.getTime() ?? null])).toStrictEqual([
+      [MINE, NOW.getTime()],
+      ['window-that-closed', beat.getTime()],
+    ]);
+  });
+
   it('applies the boot rule here too: a heartbeat older than the boot is dead at any pid', async () => {
     // The pid is this very process, so the probe cannot be what settles it.
     await writeOwnerFile(MINE, documentFor(new Date(NOW.getTime() - BOOTED_HOURS_AGO_S * 1000 - 1)));

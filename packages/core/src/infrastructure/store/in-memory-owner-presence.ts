@@ -58,11 +58,19 @@ export class InMemoryOwnerPresence implements OwnerPresence {
     // a base with no medium still has to answer the same shape. It is never
     // used to reach anything -- `collect` below refuses this row, and there is
     // no other.
+    //
+    // The beat is `null` for the reason `heartbeat()` refreshes nothing here: a
+    // heartbeat is a message to readers in other processes, and this base has
+    // none. `null` is what the port says a row with no readable moment carries,
+    // and the one reader of the moment leaves such a row alone -- which is the
+    // true answer, since the only window this base knows about is the live one
+    // asking.
     return [
       {
         name: identity.ownerId.value,
         fileName: identity.ownerId.value,
         identity,
+        heartbeatAt: null,
         liveness: 'live',
       },
     ];

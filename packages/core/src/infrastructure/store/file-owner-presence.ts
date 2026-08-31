@@ -199,6 +199,7 @@ export class FileOwnerPresence implements OwnerPresence {
           name,
           fileName,
           identity: read.record.identity,
+          heartbeatAt: read.record.heartbeatAt,
           liveness: this._verdict(read.record)[0],
         });
         continue;
@@ -207,7 +208,7 @@ export class FileOwnerPresence implements OwnerPresence {
         path,
         reason: read.reason,
       });
-      rows.push({ name, fileName, identity: null, liveness: 'unknown' });
+      rows.push({ name, fileName, identity: null, heartbeatAt: null, liveness: 'unknown' });
     }
     return rows;
   }

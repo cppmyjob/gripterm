@@ -19,6 +19,7 @@ import {
   HookEventParser,
   HookEventServer,
   LogRelay,
+  NoGoodbyeTally,
   ObservabilityWatch,
   DEFAULT_RECONCILE_INTERVAL_MS,
   OwnerHeartbeat,
@@ -64,6 +65,7 @@ import {
   recordedAgent,
   refuseToReplay,
   restoreNotice,
+  runsThatLeftNoGoodbye,
   sendKillSignal,
   sendSignalZero,
   reviewHookPolicies,
@@ -1255,6 +1257,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<Gripte
     });
   });
 
+  /*
+   * How many times this store has been opened after a run that left no goodbye
+   * (Ш33).
+   *
+   * BEFORE the sweep and after the restore, and both halves of that are load
+   * bearing. The sweep COLLECTS the presence files of windows it has established
+   * are gone, so a count taken after it would find the evidence carried off;
+   * the restore is what answers the other half of the question -- whether the
+   * conversations that run was holding came back.
+   */
+  if (shared !== null) {
+    await ledger.measure('countingRunsWithoutAGoodbye', async () => {
+      await countRunsThatLeftNoGoodbye({
+        owners: shared.presence,
+        world,
+        registry,
+        self: identity.ownerId,
+        tally: new NoGoodbyeTally({ layout: storage, logger }),
+        clock,
+        logger,
+      });
+    });
+  }
+
   // After the restore, not before: a sweep that ran first would look at records
   // this window is about to adopt and start, and the first thing it would find
   // is that their processes are gone -- which they are, for another second.
@@ -1505,6 +1531,94 @@ async function bringTerminalsBack(parts: {
   } catch (cause: unknown) {
     logger.error('this window could not bring its terminals back', { cause });
     return { kind: 'failed', reason: String(cause) };
+  }
+}
+
+/**
+ * How many times this store has been opened after a run that left no goodbye,
+ * and what that run was holding when it went (Ш33).
+ *
+ * **Why the product counts this itself.** О1 was first walked under our own
+ * engine on 2026-08-31 and went red: under that engine a terminal's pty lives
+ * inside this very extension host, so killing the host takes the agent with it.
+ * The acceptance gets there BY killing it -- a blow, not an observation -- and
+ * how often a run ends that way on a person's own machine is known by nobody.
+ * The editor's own logs would say, and they are not ours to read. So the
+ * measurement is made here, where the evidence already is.
+ *
+ * **The one thing this must never be read as.** Not "the extension host fell
+ * over". A person who ends the editor from the task manager leaves exactly the
+ * file counted here, and so does every other hard end; nothing in this build can
+ * tell them apart. The sentence written to the log is therefore the whole of
+ * what two comparisons support and not a syllable more -- a run left no goodbye,
+ * and the machine did not restart in between.
+ *
+ * **What it costs a start.** One `readdir` of `owners/` and one small read per
+ * file in it, which on an ordinary machine is this window's own. The count file
+ * is touched only by a start that found something new, so the ordinary start
+ * does not open it at all. The whole of it is timed as
+ * `countingRunsWithoutAGoodbye` in the breakdown every start prints, so the
+ * price is a number a person can read rather than a claim made here.
+ *
+ * A failure is swallowed, and deliberately: this is an instrument bolted onto a
+ * start, and an instrument that can stop a person's window from opening is worse
+ * than no instrument.
+ */
+async function countRunsThatLeftNoGoodbye(parts: {
+  readonly owners: OwnerPresence;
+  /** The records as they were read BEFORE the restore -- from the store, not from memory. */
+  readonly world: MachineSurvey;
+  /** Asked after the restore, which is the only way to say whether they came back. */
+  readonly registry: SessionRegistry;
+  readonly self: OwnerId;
+  readonly tally: NoGoodbyeTally;
+  readonly clock: SystemClock;
+  readonly logger: Logger;
+}): Promise<void> {
+  const { owners, world, registry, self, tally, clock, logger } = parts;
+  if (world.kind === 'unread') {
+    return;
+  }
+  try {
+    const at = clock.now();
+    const survey = await owners.survey();
+    const found = runsThatLeftNoGoodbye({
+      survey,
+      self: self.value,
+      // Both terms of the boot rule from one instant, as everywhere else it is read.
+      nowMs: at.getTime(),
+      uptimeSeconds: uptime(),
+    });
+    const added = await tally.count(found, new Set(survey.map((row) => row.name)), at);
+    if (added === null) {
+      return;
+    }
+    const here = new Set(registry.own().map((entry) => entry.terminalId.value));
+    for (const run of added.counted) {
+      // From the store as this start read it, and not from anything this window
+      // remembers: the run being counted is one this window never met.
+      const held = world.inputs.entries.filter(
+        (entry) => entry.owner.ownerId.value === run.ownerId && entry.closedAt === null
+      );
+      // One line per run and not one per start, because the two numbers a person
+      // would want -- what it was holding, and how much of that is back -- are
+      // about the run. The two totals are the START's, so two lines out of one
+      // start carry the same pair.
+      logger.warn(
+        'this window started after a run that did not say goodbye, and the machine did not restart in between',
+        {
+          theRun: run.ownerId,
+          itsLastSignOfLife: new Date(run.heartbeatAtMs).toISOString(),
+          itsOpenConversations: held.length,
+          ofThoseThisWindowHasBack: held.filter((entry) => here.has(entry.terminalId.value)).length,
+          theirTerminals: held.map((entry) => entry.terminalId.value),
+          startsAfterARunLikeThis: added.totals.starts,
+          runsLikeThisSoFar: added.totals.runs,
+        }
+      );
+    }
+  } catch (cause: unknown) {
+    logger.warn('this window could not count the runs that did not say goodbye', { cause });
   }
 }
 

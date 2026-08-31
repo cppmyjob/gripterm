@@ -19,6 +19,14 @@ export type { AgentListing, AgentRecord } from './domain/entities/agent-record';
 export type { TranscriptIndex } from './domain/entities/transcript-index';
 
 export { precedesBoot } from './domain/services/boot-window';
+export {
+  readPreviousRun,
+  runsThatLeftNoGoodbye,
+  type LeftoverRun,
+  type LeftoverRunInputs,
+  type PreviousRunEvidence,
+  type PreviousRunReading,
+} from './domain/services/runs-without-a-goodbye';
 
 export {
   DEFAULT_RECONCILE_INTERVAL_MS,
@@ -365,6 +373,13 @@ export {
   type SweepFailure,
   type SweepOutcome,
 } from './infrastructure/store/storage-cleaner';
+export {
+  NoGoodbyeTally,
+  type NoGoodbyeCount,
+  type NoGoodbyeDocument,
+  type NoGoodbyeTallyOptions,
+  type NoGoodbyeTotals,
+} from './infrastructure/store/no-goodbye-tally';
 export {
   moveAtomic,
   writeAtomic,
