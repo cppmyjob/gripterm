@@ -77,9 +77,10 @@
  * colour and row order, which are the product's own drawing and not the agent's
  * -- and if none does, taking the acceptance's pair, the double in front on PATH
  * with `CLAUDE_CONFIG_DIR` moved beside it. That decision is made by LOOKING at
- * two runs, which needs windows, which is why it was not made on 2026-08-31
- * along with the packaging run. `tests/every-run-says-whose-claude-it-starts.test.ts`
- * is what keeps this paragraph from being deleted instead of acted on.
+ * two runs, which needs windows, which is why it was not made on 2026-08-31,
+ * when this declaration was written.
+ * `tests/every-run-says-whose-claude-it-starts.test.ts` is what keeps this
+ * paragraph from being deleted instead of acted on.
  *
  * **What it closes.** Only windows that did not exist when it started. The pids
  * are taken before the window is launched and the difference is what gets

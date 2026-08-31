@@ -16,32 +16,48 @@
  *   3. its own store and its own project folder, both temporary, so nothing this
  *      run makes lands near the person's own records.
  *
- * WHO ANSWERS AS `claude`, and what it costs. By default nobody real:
- * `GRIPTERM_VSIX_AGENT` is `fake` and the agent is the double of
- * `tests/acceptance/fake-claude/`, built by the same `build.mjs` the acceptance
- * builds it with. It spends nothing, needs no account, and keeps its session
- * files and transcripts in a `CLAUDE_CONFIG_DIR` inside this run's own
- * directory. It needs the C# compiler of the .NET Framework, which is what
- * `build.mjs` refuses without.
+ * WHO ANSWERS AS `claude`, and what each answer costs. Both prices are here,
+ * because a reader choosing between them needs both.
  *
- * WHAT THAT CORRECTED, 2026-08-31. Until that day this run had no choice in it
- * and always started a REAL `claude`, with no `CLAUDE_CONFIG_DIR` of its own --
- * so every packaging run laid a conversation in the profile of whoever ran it,
- * which is a person's own store and not a temporary one. The head of this file
- * said as much ("it costs a conversation in the CLI's own store") and nothing
- * was done about it: Ш32 had taken the real CLI off the acceptance's default
- * path and off nothing else.
+ * A REAL AGENT IN THE DEFAULT PROFILE, AND WHY:
  *
- * `GRIPTERM_VSIX_AGENT=real` is the run this used to be, kept reachable by name
- * rather than deleted. `CLAUDE_CONFIG_DIR` is deliberately NOT set in that mode,
- * because a real CLI has to run in the profile its person is logged into -- so
- * that mode still costs one conversation in that person's own store, and it is
- * asked for by name. Nothing is typed at the agent either way, so neither mode
- * costs tokens.
+ * `GRIPTERM_VSIX_AGENT` defaults to `real`, so an ordinary run of this file
+ * starts the CLI a person actually uses. It is the only run in this repository
+ * where a REAL Claude Code meets a REAL installed archive -- every other run
+ * that starts a real CLI loads the extension out of `packages/extension`, which
+ * is the tree this one exists not to test. The double cannot stand in for either
+ * half: it is a small node script behind a launcher, so a green from it says
+ * that the packaged addon can put SOME process on a pty and nothing about the
+ * program the acceptance line names. Two further reasons it cannot simply be
+ * pointed here: `CLAUDE_CONFIG_DIR` moves the whole user level, so a profile of
+ * this run's own is a profile with NO ACCOUNT LOGGED INTO IT, and the double
+ * draws no interface at all.
  *
- * WHAT THE DOUBLE COSTS IN EVIDENCE is not written here but at the check that
- * pays for it: `tests/vsix/index.ts`, `the button a person presses brings a
- * terminal up`.
+ * WHERE IT WRITES: `~/.claude`, the profile of whoever ran it -- ONE session
+ * file, from ONE terminal, and no transcript, because nothing is ever typed at
+ * the agent. That is the whole price: one empty conversation, no tokens. It is
+ * paid rarely and never behind anybody's back -- `pnpm test:vsix` is in no gate
+ * and in no push hook, it is typed by hand, and the run says which agent it is
+ * using in its first step and again in its last line.
+ *
+ * WHAT WOULD LIFT IT: `GRIPTERM_VSIX_AGENT=fake`, which is reachable by name and
+ * fully built -- the double of `tests/acceptance/fake-claude/`, from the same
+ * `build.mjs` the acceptance uses, put in front of the real CLI on PATH with
+ * `CLAUDE_CONFIG_DIR` moved into this run's own directory, and refused by
+ * `index.ts` if the substitution did not take effect. It costs nothing and
+ * touches no profile. WHAT IT DOES NOT BUY is the sentence above, and
+ * `index.ts` says so at the check that pays for it.
+ *
+ * THE DAY THIS WAS DECIDED BOTH WAYS, 2026-08-31, kept because a record of one
+ * afternoon's reversal is cheaper than making the argument twice. The default
+ * moved to `fake` in the morning, to stop this run leaving a conversation in a
+ * person's store. The exchange was the wrong way round and the owner reversed it
+ * the same day: the leak here is rare and manual, while the runs that leak on
+ * every full gate -- the stand, eight conversations a run -- were untouched, and
+ * paying for that with the only measurement of a real CLI against a real archive
+ * bought a clean spoon and threw away the thermometer. What survives from the
+ * morning is everything except the default: the switch, the double, the moved
+ * profile, and the refusal in `index.ts`.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -74,14 +90,20 @@ const CLAUDE_CONFIG = join(BASE, 'claude-config');
 /**
  * Who answers as `claude`.
  *
- * `fake` is the default because it is the one that costs nothing and touches
- * nobody's profile; `real` is the run that establishes what the double cannot
- * (see the head of this file, and the check in `index.ts` that names the
- * difference). The name and the two values are the acceptance's,
- * `GRIPTERM_ACCEPTANCE_AGENT`, deliberately: one idea should not have two
- * spellings across two runs a person reads on the same afternoon.
+ * `real` is the default, and the whole argument for that is in the head of this
+ * file: this is the one run where a real CLI meets a real installed archive, and
+ * a double cannot stand in for either half of that sentence. `fake` is reachable
+ * by name and costs nothing.
+ *
+ * The name and the two values are the acceptance's, `GRIPTERM_ACCEPTANCE_AGENT`,
+ * deliberately: one idea should not have two spellings across two runs a person
+ * reads on the same afternoon. What DIFFERS is which way each falls back, and
+ * that difference is the point rather than an inconsistency -- the acceptance
+ * runs four editor windows in a gate-sized loop and the double is what made it
+ * affordable; this one is typed by hand, occasionally, and buys the evidence
+ * nothing else buys.
  */
-const AGENT = process.env.GRIPTERM_VSIX_AGENT ?? 'fake';
+const AGENT = process.env.GRIPTERM_VSIX_AGENT ?? 'real';
 
 if (AGENT !== 'fake' && AGENT !== 'real') {
   throw new Error(`GRIPTERM_VSIX_AGENT is '${AGENT}', and there are two: fake, real`);

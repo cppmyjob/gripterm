@@ -452,15 +452,20 @@ const MISSING = [
       'double in `tests/acceptance/fake-claude/` (step Ш32). What keeps it out of this gate is time and ' +
       'somebody`s desktop -- measured that day, 201 s under the `own` engine and 212 s under `editor`, four ' +
       'editor windows apiece, against a full gate already at 7 to 9 minutes under a ten-minute ceiling. ' +
-      '`pnpm run test:vsix` NO LONGER starts a real `claude` either, and until 2026-08-31 this record said ' +
-      'it did -- correctly, and for one day past the fix. Ш32 had taught the double to the acceptance run ' +
-      'and to nothing else, so every packaging run went on leaving a conversation in the person`s own store; ' +
-      'it now takes the same double, chosen by `GRIPTERM_VSIX_AGENT`, which defaults to `fake` and moves ' +
-      '`CLAUDE_CONFIG_DIR` into the run`s own directory. WHAT THAT COST IN EVIDENCE is named where it is ' +
-      'paid, in `tests/vsix/index.ts`: the check `the button a person presses brings a terminal up` no ' +
-      'longer establishes that the installed archive brings up CLAUDE CODE, only that it brings up A ' +
-      'PROCESS, and `GRIPTERM_VSIX_AGENT=real` is what puts the stronger sentence back. WHAT IS STILL ' +
-      'UNCHANGED: this stage is not in the gate, for the same time-and-desktop reason as the acceptance. ' +
+      '`pnpm run test:vsix` DOES start a real `claude`, on purpose, and this record was briefly wrong ' +
+      'about it in both directions on 2026-08-31 -- it is kept rather than tidied, because the reversal is ' +
+      'the argument. Ш32 taught the double to the acceptance run and to nothing else, so the packaging run ' +
+      'went on leaving a conversation in the person`s own store; it was then given the same double and ' +
+      'defaulted to it, and this record said so for one revision. The owner reversed that the same day. THE ' +
+      'EXCHANGE WAS THE WRONG WAY ROUND: the packaging run is typed by hand and is in no gate and no push ' +
+      'hook, so its leak is one empty conversation, rarely -- while the stand leaks EIGHT on every full ' +
+      'gate and was untouched. Paying for the rare leak with the only measurement of a real Claude Code ' +
+      'against a real installed archive was washing the spoon, keeping the pot, and throwing out the ' +
+      'thermometer. So `GRIPTERM_VSIX_AGENT` defaults to `real`, and `fake` -- the double on PATH with ' +
+      '`CLAUDE_CONFIG_DIR` moved and a refusal in `tests/vsix/index.ts` if the substitution missed -- is ' +
+      'reachable by name for when the archive rather than the agent is the question. WHAT EACH IS WORTH is ' +
+      'written at the check that pays for it, in `tests/vsix/index.ts`. WHAT IS STILL TRUE EITHER WAY: this ' +
+      'stage is not in the gate, for the same time-and-desktop reason as the acceptance. ' +
       'WHAT A GREEN FROM THE ACCEPTANCE RUN IS WORTH is bounded by the double, which is this ' +
       'repository`s beliefs about Claude Code rather than Claude Code; the head of `fake-claude.mjs` lists ' +
       'what it does not do at all. The run against the real thing is owed and dated in ' +

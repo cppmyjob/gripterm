@@ -23,9 +23,9 @@
  * ones that merely start one on their way to something else, and pointing the
  * second group at the double of `tests/acceptance/fake-claude/`. That is a
  * division of the integration set, it needs the set RUN to be believed, and it
- * was therefore not done on 2026-08-31 alongside the packaging run, which needed
- * no division. `tests/every-run-says-whose-claude-it-starts.test.ts` is what
- * stops this paragraph from being deleted instead of acted on.
+ * was therefore not done on 2026-08-31, when this declaration was written.
+ * `tests/every-run-says-whose-claude-it-starts.test.ts` is what stops this
+ * paragraph from being deleted instead of acted on.
  */
 
 import { defineConfig } from '@vscode/test-cli';

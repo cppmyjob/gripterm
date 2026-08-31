@@ -20,18 +20,25 @@ import { join } from 'node:path';
  * **What is asserted, and it is deliberately not "nobody starts a real one".**
  * Some of these runs NEED a real CLI: the suites in `.vscode-test.mjs` whose
  * subject IS the CLI cannot be pointed at a double at all. So the rule is about
- * SILENCE rather than about the CLI. Each run answers in one of three ways:
+ * SILENCE rather than about the CLI. Each run answers in one of two ways:
  *
- *   1. it puts the double of `tests/acceptance/fake-claude/` in front of the
- *      real one on PATH (`buildFakeClaude`), or
- *   2. it moves `CLAUDE_CONFIG_DIR` into a directory of its own, so whatever
- *      answers as `claude` keeps its records there, or
- *   3. it declares, in its own text, that it starts a real agent in the default
- *      profile, why it has to, and where that profile is.
+ *   1. it DEFAULTS to the double of `tests/acceptance/fake-claude/` -- the
+ *      double built and put in front of the real CLI on PATH, its records moved
+ *      out of the person's profile by `CLAUDE_CONFIG_DIR`, and the run's own
+ *      switch falling back to it when nobody chose; or
+ *   2. it declares, in its own text, that it starts a real agent in the default
+ *      profile, why it has to, where that profile is, and what would lift it.
  *
- * Saying nothing is the failure. The three answers are not ranked here: which
- * one a run should give is a judgement about that run, and this file only
- * refuses to let a run avoid making it.
+ * Saying nothing is the failure. The two answers are not ranked: which one a run
+ * should give is a judgement about that run and about what its green is worth,
+ * and this file only refuses to let a run avoid making it. The judgement can go
+ * either way and has: on 2026-08-31 the packaging run was moved to the double
+ * and then moved BACK the same day, by the owner, once the exchange was laid out
+ * -- it is the one run where a real CLI meets a real installed archive, it costs
+ * one empty conversation, and it is started by hand and never by a gate. This
+ * file was green before that reversal and after it, which is the shape it is
+ * meant to have: it is not an argument for the double, it is a refusal of
+ * silence.
  *
  * **Which runs are listed, and why exactly these.** Every run of ours that can
  * reach `gripterm.newTerminal` or `lifecycle.launch` and therefore start
@@ -50,14 +57,13 @@ import { join } from 'node:path';
  *
  * **What this does NOT promise, and it is the larger half.**
  *
- *   * That the line is REACHED. `tests/acceptance/run.mjs` and
- *     `tests/vsix/run.mjs` both set `CLAUDE_CONFIG_DIR` only in their `fake`
- *     mode, and both leave it unset under `...AGENT=real` deliberately, because
- *     a real CLI has to run in the profile its person is logged into. This file
- *     reads the assignment and cannot tell which branch a run took. It is about
- *     the DEFAULT being silent; a real agent reached by name is a person's
- *     choice, made out loud.
- *   * That a declaration is TRUE. Option 3 is a sentence, and a sentence is only
+ *   * That the line is REACHED. Both runs with a switch set `CLAUDE_CONFIG_DIR`
+ *     only in their `fake` mode and leave it unset under `...AGENT=real`
+ *     deliberately, because a real CLI has to run in the profile its person is
+ *     logged into. This file reads the assignment and the FALLBACK, and cannot
+ *     tell which branch a given run took on a given day. A real agent reached by
+ *     name is a person's choice, made out loud, and none of this is about that.
+ *   * That a declaration is TRUE. Answer 2 is a sentence, and a sentence is only
  *     worth the person who wrote it. What it buys is that the sentence exists
  *     where the run is, so the next reader of that runner learns the price
  *     before paying it instead of after.
@@ -67,6 +73,20 @@ const REPO = join(__dirname, '..');
 
 /** The double, put in front of the real CLI on PATH. `tests/acceptance/fake-claude/build.mjs` is what makes it. */
 const PUTS_THE_DOUBLE_ON_THE_PATH = /buildFakeClaude\s*\(/u;
+
+/**
+ * A run's own agent switch, and WHICH AGENT IT FALLS BACK TO when nobody chose.
+ *
+ * This is the reader the whole file turns on, and it was not in the first
+ * writing of it. That was a defect rather than a simplification, and it was
+ * caught the same day by the thing it would have excused: for one revision on
+ * 2026-08-31 `tests/vsix/run.mjs` carried every line of the double's machinery
+ * -- `buildFakeClaude`, the PATH, the moved profile -- and DEFAULTED to a real
+ * `claude` all the same. A guard that reads the MACHINERY passes that run. A
+ * guard that reads the DEFAULT does not, and the default is the only thing a
+ * person who types `pnpm test:vsix` ever gets.
+ */
+const FALLS_BACK_TO = /_AGENT\s*\?\?\s*'(\w+)'/u;
 
 /**
  * The CLI's whole user level, moved into a directory of the run's own.
@@ -193,20 +213,38 @@ function reasonIn(text: string): string {
   return paragraph.join(' ');
 }
 
-/** The answers a run gives, in the order they are listed above. A run may give more than one. */
+/** Which agent a run gets when nobody named one, or null when it has no switch at all. */
+function defaultAgentOf(text: string): string | null {
+  return FALLS_BACK_TO.exec(text)?.[1] ?? null;
+}
+
+/**
+ * The two answers, and why they are two rather than the three a reader might
+ * expect from the list at the head of this file.
+ *
+ * "Moves `CLAUDE_CONFIG_DIR`" is not an answer on its own and cannot be. Moving
+ * that variable hands the run a profile with no account logged into it, so it is
+ * only ever HALF of the first answer -- the half that keeps the double's records
+ * out of a person's own store. A run that moved it and still started a real CLI
+ * would have bought nothing and broken the CLI. Both halves are therefore
+ * required together, with the default, or the run declares.
+ */
 const ANSWERS = [
-  { name: 'the double', given: (text: string) => PUTS_THE_DOUBLE_ON_THE_PATH.test(text) },
-  { name: 'a profile directory of its own', given: (text: string) => MOVES_THE_PROFILE.test(text) },
+  {
+    name: 'the double by default',
+    given: (text: string) =>
+      defaultAgentOf(text) === 'fake'
+      && PUTS_THE_DOUBLE_ON_THE_PATH.test(text)
+      && MOVES_THE_PROFILE.test(text),
+  },
   { name: 'a declaration', given: (text: string) => text.includes(MARKER) },
 ] as const;
 
 /**
  * Every answer a run gives, and not the first one it gives.
  *
- * The two runs that use the double set `CLAUDE_CONFIG_DIR` beside it -- one
- * variable is what makes the double findable AND keeps its records out of a
- * person's profile -- so a reader that stopped at the first hit would report
- * that nothing in this repository ever moves a profile.
+ * A run is free to give both: one that defaults to the double and still keeps a
+ * `real` mode reachable by name has something worth declaring about that mode.
  */
 function answersOf(file: string): readonly string[] {
   const text = textOf(file);

@@ -43,7 +43,7 @@ const EXTENSIONS_DIR = process.env.GRIPTERM_VSIX_EXTENSIONS;
  * environment: the answer to "is a real CLI about to be started" has to be the
  * one the run acted on, not a second guess at it.
  */
-const AGENT = process.env.GRIPTERM_VSIX_AGENT ?? 'fake';
+const AGENT = process.env.GRIPTERM_VSIX_AGENT ?? 'real';
 const DOUBLE = process.env.GRIPTERM_VSIX_DOUBLE ?? '';
 
 const EXTENSION_ID = 'gripterm-placeholder.gripterm';
@@ -284,42 +284,43 @@ const CHECKS: readonly Check[] = [
        * archive. Nothing is typed at it, so it costs no tokens either way.
        *
        * ================================================================
-       * WHAT THIS CHECK STOPPED ESTABLISHING ON 2026-08-31
+       * WHAT THIS CHECK ESTABLISHES, AND WHAT IT COSTS TO ESTABLISH IT
        * ================================================================
        *
-       * It is a real loss and not a rewording, so it is written here rather than
-       * only in a report nobody will read beside the code.
+       * BY DEFAULT -- `GRIPTERM_VSIX_AGENT=real` -- it establishes the
+       * acceptance line whole: an extension installed from the archive brings up
+       * THE PROGRAM A PERSON USES. The command runs, the composed lifecycle
+       * answers, a pty is made by the addon out of the unpacked archive, a real
+       * `claude` is spawned on it, the record is given that process's pid, and
+       * the pid is running. This is the only place in the repository where a
+       * real CLI meets a real installed archive: every other run that starts a
+       * real one loads `packages/extension`, which is the tree this run exists
+       * not to test.
        *
-       * UNTIL that day the agent here was a real `claude`, and this check
-       * established that an extension installed from the archive brings up THE
-       * PROGRAM A PERSON USES. It established that at a price nobody had chosen:
-       * this run never moved `CLAUDE_CONFIG_DIR`, so the conversation went into
-       * the profile of whoever ran it -- their own store, on every packaging run.
+       * WHAT THAT COSTS: one conversation in the profile of whoever ran it, and
+       * no tokens, because nothing is typed at the agent. The head of `run.mjs`
+       * carries that as a declaration -- what it is, where it writes, and what
+       * would lift it.
        *
-       * SINCE that day, under `GRIPTERM_VSIX_AGENT=fake`, which is the default,
-       * it establishes that the installed extension brings up A PROCESS: the
-       * command runs, the composed lifecycle answers, a pty is made by the addon
-       * out of the unpacked archive, something is spawned on it, the record is
-       * given that process's pid, and the pid is running. Nothing below says the
-       * thing on that pty was Claude Code, because it was not: it was the double
-       * of `tests/acceptance/fake-claude/`, which has no model, no account, no
-       * interface of any kind and no `/ide` channel. "A terminal came up with
-       * Claude Code in it" is no longer measured by any run that does not cost a
-       * conversation.
+       * UNDER `GRIPTERM_VSIX_AGENT=fake` it establishes something WEAKER, and
+       * the weaker sentence is written out rather than left to be inferred: that
+       * the installed extension brings up A PROCESS. Nothing below would say the
+       * thing on that pty was Claude Code, because it would not be -- it would be
+       * the double of `tests/acceptance/fake-claude/`, which has no model, no
+       * account, no interface of any kind and no `/ide` channel. That mode costs
+       * nothing and touches no profile, and it is the right one to run when what
+       * is being checked is the four checks ABOVE this one: the tree the code
+       * answered from, the copy of node-pty, which engine answered, and an addon
+       * moving real bytes through a real pty. None of those involves an agent.
        *
-       * THE CONDITION UNDER WHICH THE TRADE HOLDS. That the SUBJECT of this run
-       * is the ARCHIVE and not the agent. The four checks before this one are the
-       * subject -- the tree the code answered from, the copy of node-pty, which
-       * engine answered, and an addon out of the unpacked directory moving real
-       * bytes through a real pty -- and not one of them involves an agent. This
-       * last check is here for the last link of the chain, "and then a terminal
-       * comes up", and a process is enough to tell that link whole from broken.
-       * The day this run's subject becomes what the agent DOES, the trade is off.
-       *
-       * WHEN IT IS LIFTED. `GRIPTERM_VSIX_AGENT=real` is the check as it was, in
-       * the profile its person is logged into, and it is the only run that puts
-       * the first sentence back. Whether the double still resembles the CLI at
-       * all is a separate debt and already has a keeper:
+       * WHY THE DEFAULT IS THE EXPENSIVE ONE, decided 2026-08-31 after being
+       * decided the other way earlier the same day. This run is typed by hand and
+       * is in no gate and no push hook, so its price is paid rarely and on
+       * purpose; the runs that start a real CLI on every full gate are elsewhere
+       * and are declared where they are. Making this one cheap would have saved
+       * little and would have left the acceptance line of M3.12 measured by
+       * nothing at all. Whether the double still resembles the CLI is a separate
+       * debt with a keeper of its own:
        * `tests/acceptance/against-the-real-cli.json`, which goes red in the unit
        * suite when nobody has paid it for long enough.
        */
@@ -395,7 +396,8 @@ export async function run(): Promise<void> {
   console.log(
     AGENT === 'fake'
       ? `the agent is the double in ${DOUBLE} -- the last check is about a process, not about Claude Code\n`
-      : 'the agent is a real `claude`, in the profile of whoever is running this\n'
+      : 'the agent is a real `claude` -- this run costs one empty conversation in the profile of'
+        + ' whoever is running it, and that is what buys the last check\n'
   );
   const failures: string[] = [];
   for (const check of CHECKS) {
