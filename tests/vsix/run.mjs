@@ -13,11 +13,35 @@
  *   2. its own `--extensions-dir`. Installing into the shared `.vscode-test`
  *      profile would leave an installed Gripterm sitting beside the development
  *      one in every ordinary integration run afterwards.
- *   3. its own store and its own project folder, both temporary, so a real
- *      `claude` started here writes nowhere near the person's own records.
+ *   3. its own store and its own project folder, both temporary, so nothing this
+ *      run makes lands near the person's own records.
  *
- * Nothing is typed at the agent: it costs a conversation in the CLI's own store
- * and no tokens.
+ * WHO ANSWERS AS `claude`, and what it costs. By default nobody real:
+ * `GRIPTERM_VSIX_AGENT` is `fake` and the agent is the double of
+ * `tests/acceptance/fake-claude/`, built by the same `build.mjs` the acceptance
+ * builds it with. It spends nothing, needs no account, and keeps its session
+ * files and transcripts in a `CLAUDE_CONFIG_DIR` inside this run's own
+ * directory. It needs the C# compiler of the .NET Framework, which is what
+ * `build.mjs` refuses without.
+ *
+ * WHAT THAT CORRECTED, 2026-08-31. Until that day this run had no choice in it
+ * and always started a REAL `claude`, with no `CLAUDE_CONFIG_DIR` of its own --
+ * so every packaging run laid a conversation in the profile of whoever ran it,
+ * which is a person's own store and not a temporary one. The head of this file
+ * said as much ("it costs a conversation in the CLI's own store") and nothing
+ * was done about it: Ш32 had taken the real CLI off the acceptance's default
+ * path and off nothing else.
+ *
+ * `GRIPTERM_VSIX_AGENT=real` is the run this used to be, kept reachable by name
+ * rather than deleted. `CLAUDE_CONFIG_DIR` is deliberately NOT set in that mode,
+ * because a real CLI has to run in the profile its person is logged into -- so
+ * that mode still costs one conversation in that person's own store, and it is
+ * asked for by name. Nothing is typed at the agent either way, so neither mode
+ * costs tokens.
+ *
+ * WHAT THE DOUBLE COSTS IN EVIDENCE is not written here but at the check that
+ * pays for it: `tests/vsix/index.ts`, `the button a person presses brings a
+ * terminal up`.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -26,6 +50,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { downloadAndUnzipVSCode, runTests, runVSCodeCommand } from '@vscode/test-electron';
+import { buildFakeClaude } from '../acceptance/fake-claude/build.mjs';
 
 const REPO = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const EXTENSION = join(REPO, 'packages', 'extension');
@@ -34,6 +59,33 @@ const EXTENSIONS = join(BASE, 'extensions');
 const USER_DATA = join(BASE, 'user-data');
 const STORE = join(BASE, 'store');
 const PROJECT = join(BASE, 'project');
+
+/**
+ * Where the agent keeps what it keeps: session files and transcripts.
+ *
+ * Only used in the `fake` mode, and for the reason `tests/acceptance/run.mjs`
+ * states beside its own copy of this line: `CLAUDE_CONFIG_DIR` MOVES the CLI's
+ * whole user level rather than adding to it [binary 2.1.228, quoted in
+ * `settings-locations.ts`]. Pointing it here is what keeps a run of the double
+ * out of a person's own profile. In the `real` mode it is left alone.
+ */
+const CLAUDE_CONFIG = join(BASE, 'claude-config');
+
+/**
+ * Who answers as `claude`.
+ *
+ * `fake` is the default because it is the one that costs nothing and touches
+ * nobody's profile; `real` is the run that establishes what the double cannot
+ * (see the head of this file, and the check in `index.ts` that names the
+ * difference). The name and the two values are the acceptance's,
+ * `GRIPTERM_ACCEPTANCE_AGENT`, deliberately: one idea should not have two
+ * spellings across two runs a person reads on the same afternoon.
+ */
+const AGENT = process.env.GRIPTERM_VSIX_AGENT ?? 'fake';
+
+if (AGENT !== 'fake' && AGENT !== 'real') {
+  throw new Error(`GRIPTERM_VSIX_AGENT is '${AGENT}', and there are two: fake, real`);
+}
 
 /*
  * `@vscode/test-electron` spawns the CLI through a shell on Windows (CVE-2024-27980)
@@ -104,16 +156,57 @@ function unpacked() {
   return join(EXTENSIONS, directories[0]);
 }
 
+/**
+ * Puts the double where `claude` would be, and says so.
+ *
+ * The whole substitution is one directory in front of PATH, and it is the
+ * acceptance's, line for line: `findExecutable` is what this build uses to find
+ * `claude`, it walks PATH in order, and the editor this run launches inherits
+ * this process's environment -- `@vscode/test-electron` spawns it with
+ * `Object.assign({}, process.env, extensionTestsEnv)`.
+ *
+ * `CLAUDE_CONFIG_DIR` goes with it and does two jobs, again as it does there: it
+ * tells the double where to keep its session files, and it keeps a run of it out
+ * of the profile of whoever is logged in.
+ *
+ * @returns {string|null} where the double was put, or null when the agent is real
+ */
+function putTheDoubleOnThePath() {
+  if (AGENT === 'real') {
+    return null;
+  }
+  const where = buildFakeClaude();
+  process.env.PATH = `${where};${process.env.PATH ?? ''}`;
+  process.env.CLAUDE_CONFIG_DIR = CLAUDE_CONFIG;
+  // The interpreter by absolute path: the launcher starts `node` on the double,
+  // and a bare `node` on the PATH a terminal inherits is not guaranteed (C5-2).
+  process.env.GRIPTERM_FAKE_CLAUDE_NODE = process.execPath;
+  return where;
+}
+
 async function main() {
   step('a clean temporary profile, store and project');
   rmSync(BASE, { recursive: true, force: true });
   for (const directory of [EXTENSIONS, USER_DATA, STORE, PROJECT]) {
     mkdirSync(directory, { recursive: true });
   }
+  if (AGENT === 'fake') {
+    // Only where it is used: in the `real` mode the agent's profile is the
+    // person's own, and an empty directory of ours beside it would read as one.
+    mkdirSync(CLAUDE_CONFIG, { recursive: true });
+  }
   // `gripterm.newTerminal` refuses without a folder open, and rightly: a Claude
   // Code session runs IN a project.
   writeFileSync(join(PROJECT, 'README.md'), 'A folder for the packaged extension to open a terminal in.\n', 'utf8');
   profile();
+
+  step(`who answers as \`claude\`: ${AGENT}`);
+  const double = putTheDoubleOnThePath();
+  console.log(
+    double === null
+      ? 'a real `claude`, in the profile of whoever is logged in -- this run costs one conversation there'
+      : `the double from ${double}, keeping its records in ${CLAUDE_CONFIG}`
+  );
 
   step('building and packaging');
   const vsix = packaged();
@@ -160,7 +253,16 @@ async function main() {
       '--disable-workspace-trust',
       PROJECT,
     ],
-    extensionTestsEnv: { GRIPTERM_VSIX_EXTENSIONS: EXTENSIONS },
+    extensionTestsEnv: {
+      GRIPTERM_VSIX_EXTENSIONS: EXTENSIONS,
+      // Which agent was chosen and where it was put, so the suite can REFUSE a
+      // run whose substitution did not take effect. Without these two the double
+      // failing to reach PATH would look exactly like the double working, and
+      // the run would go on measuring a real CLI in a person's own profile --
+      // silently, which is the whole defect this switch exists for.
+      GRIPTERM_VSIX_AGENT: AGENT,
+      GRIPTERM_VSIX_DOUBLE: double ?? '',
+    },
   });
 }
 
@@ -169,7 +271,14 @@ main()
     // Removed only when the run succeeded: a failure leaves the profile, the
     // store and the log where they can be read.
     rmSync(BASE, { recursive: true, force: true });
-    console.log('\nthe installed archive brought a terminal up; the temporary profile has been removed');
+    // The agent is named in the last line as well as the first, because this is
+    // the line a person reads as the answer: "a terminal came up" means one
+    // thing with a real CLI behind it and a weaker thing with the double, and a
+    // green that does not say which invites the stronger reading.
+    console.log(
+      `\nthe installed archive brought a terminal up, with the ${AGENT} agent behind it;` +
+        ' the temporary profile has been removed'
+    );
   })
   .catch((error) => {
     console.error(error);

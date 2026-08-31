@@ -1,3 +1,33 @@
+/*
+ * The runner config: three labels, three kinds of window, and the price of two
+ * of them, said out loud here because until 2026-08-31 nothing said it anywhere.
+ *
+ * A REAL AGENT IN THE DEFAULT PROFILE, AND WHY:
+ *
+ * the `integration` and `own` labels carry suites whose SUBJECT is the real CLI,
+ * and a double cannot be the subject of a suite about the thing it stands in
+ * for. `tests/integration/orphan-processes.test.ts` asks `claude agents --json`
+ * what the CLI itself counts as running; `pty-engine.test.ts` and
+ * `closing-a-terminal.test.ts` say in their own words that they are about a real
+ * one. So both labels start a real `claude`, once per terminal their suites
+ * open.
+ *
+ * WHERE IT WRITES: `~/.claude`, which is the profile of whoever ran the label.
+ * `CLAUDE_CONFIG_DIR` is what MOVES that profile rather than adding to it
+ * (measured out of the binary, quoted in `settings-locations.ts`), so pointing
+ * it at a directory of this run's own would hand these suites a CLI nobody is
+ * logged into -- which is why this file does not set it, and why saying so is
+ * the honest move rather than moving it.
+ *
+ * WHAT WOULD LIFT IT: telling the suites whose subject IS the CLI apart from the
+ * ones that merely start one on their way to something else, and pointing the
+ * second group at the double of `tests/acceptance/fake-claude/`. That is a
+ * division of the integration set, it needs the set RUN to be believed, and it
+ * was therefore not done on 2026-08-31 alongside the packaging run, which needed
+ * no division. `tests/every-run-says-whose-claude-it-starts.test.ts` is what
+ * stops this paragraph from being deleted instead of acted on.
+ */
+
 import { defineConfig } from '@vscode/test-cli';
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';

@@ -51,6 +51,36 @@
  * store it is about to hand over is not one of ours. The store the person who
  * owns this machine keeps their terminals in is never opened.
  *
+ * **What it DOES touch, and it is not our store.**
+ *
+ * A REAL AGENT IN THE DEFAULT PROFILE, AND WHY:
+ *
+ * every scene here is built by pressing `gripterm.newTerminal`, and each press
+ * starts whatever `claude` resolves to on PATH. It is still a real one because
+ * this organ exists to LOOK, and the double of `tests/acceptance/fake-claude/`
+ * says of itself, at length and first of all, that it "draws no interface --
+ * there is no prompt box, no spinner, no status line, no ANSI screen of any
+ * kind". A driver whose whole subject is what the workbench is drawing cannot
+ * take its screens from a program that draws nothing: the sightings would go on
+ * answering about tabs and rows, and every screenshot this run keeps for a
+ * person to read would be of an empty rectangle.
+ *
+ * WHERE IT WRITES: `~/.claude`, the profile of whoever ran the eyes -- one
+ * session file per terminal a scene makes. `CLAUDE_CONFIG_DIR` is what MOVES
+ * that profile rather than adding to it (quoted in `settings-locations.ts`);
+ * this run does not set it, and setting it alone would hand the terminals a CLI
+ * nobody is logged into, which draws a login prompt instead of a session and is
+ * a different picture again.
+ *
+ * WHAT WOULD LIFT IT: deciding, by looking at a run of each, whether any scene
+ * here needs a screen inside the terminal at all -- the sightings are about tab
+ * colour and row order, which are the product's own drawing and not the agent's
+ * -- and if none does, taking the acceptance's pair, the double in front on PATH
+ * with `CLAUDE_CONFIG_DIR` moved beside it. That decision is made by LOOKING at
+ * two runs, which needs windows, which is why it was not made on 2026-08-31
+ * along with the packaging run. `tests/every-run-says-whose-claude-it-starts.test.ts`
+ * is what keeps this paragraph from being deleted instead of acted on.
+ *
  * **What it closes.** Only windows that did not exist when it started. The pids
  * are taken before the window is launched and the difference is what gets
  * `CloseMainWindow()` -- never a kill by name, which would close the window the

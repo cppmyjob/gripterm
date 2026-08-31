@@ -22,6 +22,37 @@
  * machine keeps their terminals in is never opened, and the run refuses to start
  * if the path it is about to hand over is not one of ours.
  *
+ * **What it DOES touch, and it is not our store.**
+ *
+ * A REAL AGENT IN THE DEFAULT PROFILE, AND WHY:
+ *
+ * this run presses the button the owner presses -- `gripterm.newTerminal`, from
+ * `observer/extension.js` -- twice a sitting, four sittings, so eight terminals
+ * a run, each one starting whatever `claude` resolves to on PATH. That is a real
+ * CLI, and the reason it is still a real one is not that this run needs it: it
+ * is that swapping the agent under this stand changes what the stand MEASURES,
+ * and nothing has measured the new thing. `START_BUDGET` in
+ * `tests/stand/start-budget.ts` is a ceiling taken from sixteen sittings on this
+ * machine on 2026-08-26, and every one of those sittings started a real CLI in
+ * its terminals; putting the double underneath would leave a measured number
+ * standing over a run it was never measured on, which is a green that certifies
+ * nothing. Making that swap honestly means re-measuring the budget, and
+ * re-measuring it means opening windows.
+ *
+ * WHERE IT WRITES: `~/.claude`, the profile of whoever ran the stand -- eight
+ * session files a run, and that has been the cost of every green gate.
+ * `CLAUDE_CONFIG_DIR` is what MOVES that profile rather than adding to it
+ * (quoted in `settings-locations.ts`); this run does not set it, and setting it
+ * alone would only hand the terminals a CLI nobody is logged into.
+ *
+ * WHAT WOULD LIFT IT: one run of this stand against the double of
+ * `tests/acceptance/fake-claude/` -- the pair the acceptance uses, the double in
+ * front of the real CLI on PATH and `CLAUDE_CONFIG_DIR` moved beside it -- with
+ * the start budget re-measured from that run and the nine points of the verdict
+ * compared against a run of the same day. Until somebody has a machine to spend
+ * on that, this paragraph is the whole of what is being done about it, and
+ * `tests/every-run-says-whose-claude-it-starts.test.ts` is what keeps it here.
+ *
  * **What it closes.** Only windows that did not exist when it started. The pids
  * are taken before each sitting is launched and the difference is what gets
  * `CloseMainWindow()` -- not a filter on the command line, which breaks the day

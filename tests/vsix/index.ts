@@ -36,6 +36,16 @@ import type { GriptermApi } from '../../packages/extension/src/extension';
 /** Where `tests/vsix/run.mjs` installed the archive. The suite refuses to guess. */
 const EXTENSIONS_DIR = process.env.GRIPTERM_VSIX_EXTENSIONS;
 
+/**
+ * Who `run.mjs` chose to answer as `claude`, and where it put the double.
+ *
+ * Both come from the run rather than from this file's own reading of the
+ * environment: the answer to "is a real CLI about to be started" has to be the
+ * one the run acted on, not a second guess at it.
+ */
+const AGENT = process.env.GRIPTERM_VSIX_AGENT ?? 'fake';
+const DOUBLE = process.env.GRIPTERM_VSIX_DOUBLE ?? '';
+
 const EXTENSION_ID = 'gripterm-placeholder.gripterm';
 
 /** Everything a gateway said while it was under test, so a refusal can be read rather than assumed. */
@@ -270,14 +280,74 @@ const CHECKS: readonly Check[] = [
     run: async () => {
       /*
        * The acceptance line itself, taken by the path a person takes: the
-       * command, the composed lifecycle, the record, a real `claude` on a pty out
-       * of the archive. Nothing is typed at it, so it costs a conversation in the
-       * CLI's own store and no tokens -- and the store is the temporary one
-       * `run.mjs` made.
+       * command, the composed lifecycle, the record, an agent on a pty out of the
+       * archive. Nothing is typed at it, so it costs no tokens either way.
+       *
+       * ================================================================
+       * WHAT THIS CHECK STOPPED ESTABLISHING ON 2026-08-31
+       * ================================================================
+       *
+       * It is a real loss and not a rewording, so it is written here rather than
+       * only in a report nobody will read beside the code.
+       *
+       * UNTIL that day the agent here was a real `claude`, and this check
+       * established that an extension installed from the archive brings up THE
+       * PROGRAM A PERSON USES. It established that at a price nobody had chosen:
+       * this run never moved `CLAUDE_CONFIG_DIR`, so the conversation went into
+       * the profile of whoever ran it -- their own store, on every packaging run.
+       *
+       * SINCE that day, under `GRIPTERM_VSIX_AGENT=fake`, which is the default,
+       * it establishes that the installed extension brings up A PROCESS: the
+       * command runs, the composed lifecycle answers, a pty is made by the addon
+       * out of the unpacked archive, something is spawned on it, the record is
+       * given that process's pid, and the pid is running. Nothing below says the
+       * thing on that pty was Claude Code, because it was not: it was the double
+       * of `tests/acceptance/fake-claude/`, which has no model, no account, no
+       * interface of any kind and no `/ide` channel. "A terminal came up with
+       * Claude Code in it" is no longer measured by any run that does not cost a
+       * conversation.
+       *
+       * THE CONDITION UNDER WHICH THE TRADE HOLDS. That the SUBJECT of this run
+       * is the ARCHIVE and not the agent. The four checks before this one are the
+       * subject -- the tree the code answered from, the copy of node-pty, which
+       * engine answered, and an addon out of the unpacked directory moving real
+       * bytes through a real pty -- and not one of them involves an agent. This
+       * last check is here for the last link of the chain, "and then a terminal
+       * comes up", and a process is enough to tell that link whole from broken.
+       * The day this run's subject becomes what the agent DOES, the trade is off.
+       *
+       * WHEN IT IS LIFTED. `GRIPTERM_VSIX_AGENT=real` is the check as it was, in
+       * the profile its person is logged into, and it is the only run that puts
+       * the first sentence back. Whether the double still resembles the CLI at
+       * all is a separate debt and already has a keeper:
+       * `tests/acceptance/against-the-real-cli.json`, which goes red in the unit
+       * suite when nobody has paid it for long enough.
        */
       const gripterm = await api();
       const { registry, lifecycle, readiness } = gripterm;
-      assert.notEqual(readiness.cliPath, null, 'claude was not found on PATH, and this check starts a real one');
+      assert.notEqual(
+        readiness.cliPath,
+        null,
+        'nothing answering to `claude` was found on PATH, and this check starts whatever does'
+      );
+      /*
+       * That the substitution took effect, and not merely that it was asked for.
+       *
+       * `run.mjs` puts the double in front of the real CLI on PATH; if that
+       * failed -- a build that produced no `claude.exe`, an environment the
+       * editor did not inherit -- `findExecutable` would walk on and reach the
+       * real one, this check would pass exactly as it does now, and a run whose
+       * whole point is to stop touching a person's profile would be touching it
+       * in silence. That is the defect this switch exists for, so it is refused
+       * here rather than assumed away.
+       */
+      if (AGENT === 'fake') {
+        assert.ok(
+          DOUBLE !== '' && (readiness.cliPath ?? '').toLowerCase().startsWith(DOUBLE.toLowerCase()),
+          `the agent is the double and it was put in ${DOUBLE}, but this window resolved \`claude\` to ` +
+          `${String(readiness.cliPath)} -- which is a real CLI, in the profile of whoever ran this`
+        );
+      }
       const before = new Set(registry.own().map((entry) => entry.terminalId.value));
 
       await vscode.commands.executeCommand('gripterm.newTerminal');
@@ -319,7 +389,14 @@ const CHECKS: readonly Check[] = [
  * separate sittings.
  */
 export async function run(): Promise<void> {
-  console.log(`\nchecking the extension installed at ${String(EXTENSIONS_DIR)}\n`);
+  console.log(`\nchecking the extension installed at ${String(EXTENSIONS_DIR)}`);
+  // Which agent, on the line above the checks, for the reason `run.mjs` gives at
+  // its own last line: the last check means a different thing under each.
+  console.log(
+    AGENT === 'fake'
+      ? `the agent is the double in ${DOUBLE} -- the last check is about a process, not about Claude Code\n`
+      : 'the agent is a real `claude`, in the profile of whoever is running this\n'
+  );
   const failures: string[] = [];
   for (const check of CHECKS) {
     try {

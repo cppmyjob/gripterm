@@ -452,9 +452,16 @@ const MISSING = [
       'double in `tests/acceptance/fake-claude/` (step Ш32). What keeps it out of this gate is time and ' +
       'somebody`s desktop -- measured that day, 201 s under the `own` engine and 212 s under `editor`, four ' +
       'editor windows apiece, against a full gate already at 7 to 9 minutes under a ten-minute ceiling. ' +
-      '`pnpm run test:vsix` still starts a real `claude`: it spends no tokens, nothing being typed at it, but ' +
-      'it does leave a conversation in the person`s own store, and teaching it the double was not part of ' +
-      'that step. WHAT A GREEN FROM THE ACCEPTANCE RUN IS WORTH is bounded by the double, which is this ' +
+      '`pnpm run test:vsix` NO LONGER starts a real `claude` either, and until 2026-08-31 this record said ' +
+      'it did -- correctly, and for one day past the fix. Ш32 had taught the double to the acceptance run ' +
+      'and to nothing else, so every packaging run went on leaving a conversation in the person`s own store; ' +
+      'it now takes the same double, chosen by `GRIPTERM_VSIX_AGENT`, which defaults to `fake` and moves ' +
+      '`CLAUDE_CONFIG_DIR` into the run`s own directory. WHAT THAT COST IN EVIDENCE is named where it is ' +
+      'paid, in `tests/vsix/index.ts`: the check `the button a person presses brings a terminal up` no ' +
+      'longer establishes that the installed archive brings up CLAUDE CODE, only that it brings up A ' +
+      'PROCESS, and `GRIPTERM_VSIX_AGENT=real` is what puts the stronger sentence back. WHAT IS STILL ' +
+      'UNCHANGED: this stage is not in the gate, for the same time-and-desktop reason as the acceptance. ' +
+      'WHAT A GREEN FROM THE ACCEPTANCE RUN IS WORTH is bounded by the double, which is this ' +
       'repository`s beliefs about Claude Code rather than Claude Code; the head of `fake-claude.mjs` lists ' +
       'what it does not do at all. The run against the real thing is owed and dated in ' +
       '`tests/acceptance/against-the-real-cli.json`, and `tests/fake-claude.test.ts` -- which IS in this ' +
