@@ -17,6 +17,13 @@ import type { GriptermApi } from '../../packages/extension/src/extension';
  * No prompt is sent: `/clear` needs no turn to happen, and a run that spends
  * money to prove something it does not test would be spending it for the look
  * of it. The price is that the conversation left behind is an empty one.
+ *
+ * From Ш32 the agent is `tests/acceptance/fake-claude/` unless the runner was
+ * asked for a real one, so this suite normally spends nothing at all. What it
+ * checks against the double is our half -- the drift of a conversation under a
+ * record -- and the pair of reports it drives that half with is COPIED from A10
+ * rather than invented; the head of `fake-claude.mjs` says so beside the code
+ * that sends them.
  */
 
 const SETTLES_WITHIN_MS = 90_000;

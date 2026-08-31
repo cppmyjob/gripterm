@@ -447,8 +447,21 @@ const MISSING = [
   {
     name: 'acceptance',
     why:
-      '`pnpm run test:acceptance` and `pnpm run test:vsix`. They start a real `claude` and spend real ' +
-      'turns on the owner\'s account, so they are run by a person who meant to, not by a gate.',
+      '`pnpm run test:acceptance` and `pnpm run test:vsix`. THE REASON CHANGED ON 2026-08-31 and the old ' +
+      'one is no longer true: the acceptance run spends nothing by default, because its agent is now the ' +
+      'double in `tests/acceptance/fake-claude/` (step Ш32). What keeps it out of this gate is time and ' +
+      'somebody`s desktop -- measured that day, 201 s under the `own` engine and 212 s under `editor`, four ' +
+      'editor windows apiece, against a full gate already at 7 to 9 minutes under a ten-minute ceiling. ' +
+      '`pnpm run test:vsix` still starts a real `claude`: it spends no tokens, nothing being typed at it, but ' +
+      'it does leave a conversation in the person`s own store, and teaching it the double was not part of ' +
+      'that step. WHAT A GREEN FROM THE ACCEPTANCE RUN IS WORTH is bounded by the double, which is this ' +
+      'repository`s beliefs about Claude Code rather than Claude Code; the head of `fake-claude.mjs` lists ' +
+      'what it does not do at all. The run against the real thing is owed and dated in ' +
+      '`tests/acceptance/against-the-real-cli.json`, and `tests/fake-claude.test.ts` -- which IS in this ' +
+      'gate -- goes red when it is overdue. Two findings from the first walk under `own`: О1 is RED there ' +
+      'and green under `editor` (our own engine keeps the pty inside the extension host, so killing the ' +
+      'runner takes the agent with it, and the restart resumes the conversation in a NEW process), and ' +
+      '`rename from the CLI` cannot run under `own` at all, its subject being an editor terminal.',
   },
 ];
 

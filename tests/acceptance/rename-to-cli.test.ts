@@ -19,6 +19,15 @@ import type { GriptermApi } from '../../packages/extension/src/extension';
  * carries the row's name before anybody renames anything.
  *
  * No prompt is sent. `/rename` is a local command, so this costs no turn.
+ *
+ * From Ш32 the conversation is normally held by `tests/acceptance/fake-claude/`,
+ * and the session file this reads is one the double wrote. That the file is
+ * NAMED after the pid, carries `name`, and carries no `nameSource` once a person
+ * has chosen the name, are all measurements of the real CLI (M2.19 and
+ * 2026-08-13 against 2.1.228) that the double copies rather than invents -- and
+ * `CLAUDE_CONFIG_DIR`, which is what puts the double's file where this looks for
+ * the CLI's, is moved into the run's own directory by the runner so that neither
+ * side goes near a person's profile.
  */
 
 const SETTLES_WITHIN_MS = 90_000;

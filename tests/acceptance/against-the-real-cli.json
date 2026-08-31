@@ -1,0 +1,34 @@
+{
+  "what": [
+    "When the four acceptance suites were last put to a REAL `claude`, and the day this repository stops believing that they still would pass.",
+    "",
+    "WHY THIS FILE EXISTS. From Ш32 those suites run against `tests/acceptance/fake-claude/`, a double built out of what this repository believes about Claude Code. Nothing in a run against the double can check that belief: a wrong guess in the double becomes a green test that certifies the guess, and a green test that certifies a guess is worse than no test, because it reads as cover. The only instrument that checks the belief is the real CLI, and running it spends the owner's money -- so it is not automated, it is OWED, and this file is the debt.",
+    "",
+    "WHAT MAKES IT IMPOSSIBLE TO FORGET. `tests/fake-claude.test.ts` reads this file and goes red when the debt is overdue. That suite is in the UNIT run, which is in `gate:fast`, which is what `tools/pre-push.sh` runs -- so the day this expires, nothing leaves the machine until somebody deals with it. The form is `gate/allowed-red.json`'s, deliberately: an admission with a name on it, a reason, and a day it stops working.",
+    "",
+    "WHAT THE OWNER HAS TO DO, when it goes red. Run the four suites against the real CLI, by hand, on a machine logged into an account they mean to spend:",
+    "",
+    "    $env:GRIPTERM_ACCEPTANCE = 'yes'; $env:GRIPTERM_ACCEPTANCE_AGENT = 'real'; pnpm test:acceptance",
+    "",
+    "and again with $env:GRIPTERM_ACCEPTANCE_ENGINE = 'own'. What it costs is one turn on the account for П2 and one `--resume` per sitting after it; `rename` and П3 spend nothing. Then write the day, the CLI build it ran against, the engines, and the verdict into `lastRun` below, and set `grace` to null.",
+    "",
+    "WHAT TO DO IF IT DISAGREES WITH THE DOUBLE. The disagreement is the finding, and it is worth more than the run. Every behaviour the double copies is listed in the header of `fake-claude.mjs` with the measurement it came from; a suite that passes against the real CLI and fails against the double, or the other way round, names the belief that moved. Correct the double, not the suite.",
+    "",
+    "WHAT `lastRun: null` MEANS. That the Ш32 executor did not establish it. The step was forbidden to start a real `claude` even once -- the whole point of it was to stop spending the owner's account -- so it could not run the suites against one, and it does not know when anybody last did. A date invented here would have been the exact defect this file exists to prevent, so the field is null and the grace below carries the pressure instead."
+  ],
+  "lastRun": {
+    "on": null,
+    "cliVersion": null,
+    "engines": [],
+    "verdict": null,
+    "by": null
+  },
+  "maxAgeDays": 30,
+  "whyThatMany": "Thirty days, and it is measured rather than chosen for roundness: this repository's own notes carry `claude` moving from 2.1.224 to 2.1.245 between 2026-08-10 and 2026-08-27, which is twenty-one patch builds in seventeen days. Against a CLI moving at that rate a belief a month old is already about a build nobody is running. Longer would make the check decorative; shorter would make it a chore that gets its date pushed instead of its run done.",
+  "grace": {
+    "until": "2026-09-14",
+    "allowedBy": "the Ш32 executor, 2026-08-31",
+    "ratifiedBy": null,
+    "why": "The double was built on 2026-08-31 and has never been compared with the thing it doubles. Two weeks is the room the executor took to let the owner schedule a paid run at a time of their choosing rather than the moment they next push. `ratifiedBy: null` means what it means in `gate/allowed-red.json`: nobody but the agent that wrote this line has agreed to it, and the owner has not been asked."
+  }
+}

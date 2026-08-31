@@ -71,7 +71,14 @@ const ENGINES = new Set(['editor', 'own']);
 const RUNS = [
   { what: 'the stand', file: join('tests', 'stand', 'run.mjs'), pins: 1 },
   { what: 'the eyes', file: join('tests', 'eyes', 'run.mjs'), pins: 1 },
-  { what: 'the acceptance run', file: join('tests', 'acceptance', 'run.mjs'), pins: 1 },
+  // TWO, and the second one is the whole of Ш32. Until 2026-08-31 this run was
+  // pinned to `editor` with a comment calling that a debt: walking it under `own`
+  // as well cost real turns of the owner's account, so it had never been done.
+  // The double in `tests/acceptance/fake-claude/` removed the price, and the run
+  // now writes a profile for each engine and chooses between them with
+  // `GRIPTERM_ACCEPTANCE_ENGINE`. Both spellings are literal in that file so that
+  // this reader can see them; one window still gets one engine.
+  { what: 'the acceptance run', file: join('tests', 'acceptance', 'run.mjs'), pins: 2 },
   { what: 'the VSIX run', file: join('tests', 'vsix', 'run.mjs'), pins: 1 },
 ] as const;
 
@@ -123,7 +130,7 @@ describe('a run that opens a window with the product in it', () => {
     expect([...silent, ...unsaid]).toStrictEqual([]);
   });
 
-  it('names it exactly once per run, so that two lines cannot disagree about one window', () => {
+  it('names as many engines as it walks, so that two lines cannot disagree about one window', () => {
     const miscounted = RUNS.filter(({ file, pins }) => enginesPinnedIn(file).length !== pins).map(
       ({ what, file, pins }) => `${what} (${file}) pins ${enginesPinnedIn(file).length}, not ${pins}`
     );

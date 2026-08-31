@@ -10,10 +10,20 @@ import type { GriptermApi } from '../../packages/extension/src/extension';
  * writes down what it is for, and closes the editor.
  *
  * This suite is NOT part of `test:integration`, and the separation is the point.
- * It starts a real `claude`, spends a real turn on the person's account, and
- * leaves a real conversation behind. What it does NOT touch is the person's
- * store: the runner points `gripterm.storage.directory` at a directory of its
- * own, and this suite refuses to run if that did not take effect.
+ * It leaves a real conversation behind, and -- when the runner was asked for a
+ * real agent -- it starts a real `claude` and spends a real turn on the person's
+ * account. What it does NOT touch is the person's store: the runner points
+ * `gripterm.storage.directory` at a directory of its own, and this suite refuses
+ * to run if that did not take effect.
+ *
+ * **WHAT THE PROMPT AND THE ANSWER ARE WORTH depends on who answered**, and from
+ * Ш32 the default is nobody: `tests/acceptance/fake-claude/` is a double of this
+ * repository's beliefs about Claude Code, and its answer to a prompt is the
+ * prompt echoed back. Against it, `assert.match(..., ANSWER)` below establishes
+ * that a message travelled from the agent to the row -- and nothing at all about
+ * an agent having produced one. The head of `fake-claude.mjs` lists everything
+ * else this suite stops testing when the double is answering; the debt of running
+ * it against the real thing is `tests/acceptance/against-the-real-cli.json`.
  *
  * The second sitting is a separate process on purpose -- "closes the editor
  * completely" cannot be simulated inside one host -- and it is NOT a suite. A

@@ -55,8 +55,12 @@ module.exports = {
   // Two exclusions, and both are deliberate. `tests/integration` imports the
   // 'vscode' module, which exists only inside a running Extension Host; it
   // belongs to `pnpm test:integration` (@vscode/test-cli). `tests/acceptance`
-  // does the same AND starts a real `claude` that spends a real turn, so it
-  // belongs to `pnpm test:acceptance` and to nothing that runs by itself.
+  // does the same AND opens editor windows on somebody's desktop -- and, when it
+  // is asked for a real agent rather than the double of Ш32, spends a real turn
+  // -- so it belongs to `pnpm test:acceptance` and to nothing that runs by
+  // itself. `tests/fake-claude.test.ts`, which is what tests that double, is
+  // deliberately NOT under that directory and does run here: it needs no editor
+  // and no agent, only a socket and a `node`.
   testMatch: ['<rootDir>/tests/**/*.test.ts'],
   testPathIgnorePatterns: [
     '/node_modules/',

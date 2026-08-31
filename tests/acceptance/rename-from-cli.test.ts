@@ -16,6 +16,17 @@ import type { GriptermApi } from '../../packages/extension/src/extension';
  * can pass with any of those wrong.
  *
  * No prompt is sent. `/rename` is a local command, so this costs no turn.
+ *
+ * **IT RUNS ONLY UNDER THE EDITOR'S ENGINE, and that was found by running it**
+ * (2026-08-31, the first time this acceptance was walked under `own` at all). Two
+ * of the four seams above are the EDITOR's -- `window.terminals`,
+ * `window.activeTerminal` and the `name` drawn on a tab -- and a terminal our own
+ * engine makes has none of them, so this failed on its third line with "the
+ * editor has no terminal called project". `tests/acceptance/run.mjs` excludes it
+ * under `own` by name, the way `.vscode-test.mjs` excludes `terminal-rename.test.ts`
+ * for the same reason. What is LOST by that is the half of M2.17 which is not the
+ * editor's at all -- `/rename` typed inside the terminal reaching the ROW and the
+ * record -- and nothing walks that under `own` today.
  */
 
 const SETTLES_WITHIN_MS = 90_000;

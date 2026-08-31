@@ -17,10 +17,25 @@
  *      that nobody asked for it;
  *   3. the same again, which is О3.
  *
- * What it costs, said out loud: one real turn on the person's account in the
- * first sitting, and one `--resume` per sitting after it. What it does NOT touch
- * is the person's store -- everything lives under a temporary directory, and the
- * first sitting refuses to run if that did not take effect.
+ * WHAT IT COSTS, said out loud, and it depends on WHO answers as `claude`.
+ *
+ * By default nobody does: `GRIPTERM_ACCEPTANCE_AGENT` is `fake` and the agent is
+ * `fake-claude/`, a double of our own beliefs about Claude Code that spends
+ * nothing and needs no account (Ш32). Read the head of `fake-claude.mjs` before
+ * believing a green run: it names, one by one, what the double does NOT do, and a
+ * suite that never exercises a behaviour proves nothing about it.
+ *
+ * With `GRIPTERM_ACCEPTANCE_AGENT=real` the run is what it always was: a real
+ * `claude`, one real turn on the person's account in the first sitting, and one
+ * `--resume` per sitting after it. That is the run this repository owes the
+ * double, and `tests/acceptance/against-the-real-cli.json` is the debt -- it goes
+ * red in the unit suite when nobody has paid it for long enough.
+ *
+ * What NEITHER mode touches is the person's store: everything lives under a
+ * temporary directory, and the first sitting refuses to run if that did not take
+ * effect. In the `fake` mode the same is true of the CLI's own profile --
+ * `CLAUDE_CONFIG_DIR` is moved into the run's directory, so no session file and no
+ * transcript of this run goes near a real one.
  */
 
 import { execFileSync, spawn } from 'node:child_process';
@@ -28,6 +43,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
+import { buildFakeClaude } from './fake-claude/build.mjs';
 
 const REPO = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const BASE = join(tmpdir(), 'gripterm-acceptance');
@@ -36,6 +52,84 @@ const STORE = join(BASE, 'store');
 const USER_DATA = join(BASE, 'user-data');
 const EXTENSIONS = join(BASE, 'extensions');
 const EXTENSION = join(REPO, 'packages', 'extension');
+
+/**
+ * Where the agent keeps what it keeps: session files and transcripts.
+ *
+ * Only used in the `fake` mode. `CLAUDE_CONFIG_DIR` MOVES the CLI's whole user
+ * level rather than adding to it [binary 2.1.228, quoted in
+ * `settings-locations.ts`], so pointing it here is what keeps a run of the double
+ * out of a person's own profile -- and this build reads the same variable, which
+ * is why `rename-to-cli.test.ts` finds the double's session file where it looks
+ * for the CLI's. In the `real` mode it is deliberately NOT set: a real `claude`
+ * has to run in the profile the person is logged into.
+ */
+const CLAUDE_CONFIG = join(BASE, 'claude-config');
+
+/**
+ * Who answers as `claude`, and which engine the windows run on.
+ *
+ * `fake` is the default because it is the one that costs nothing; `real` is the
+ * run the double owes and cannot replace (see the head of this file). The engine
+ * is chosen rather than defaulted for the reason
+ * `tests/every-run-names-its-engine.test.ts` states at length -- a run that sets
+ * nothing measures whatever the manifest last defaulted to and says so nowhere.
+ * `own` is the default here because it is the product's, since 2026-08-30.
+ */
+const AGENT = process.env.GRIPTERM_ACCEPTANCE_AGENT ?? 'fake';
+const ENGINE = process.env.GRIPTERM_ACCEPTANCE_ENGINE ?? 'own';
+
+/**
+ * The profile each engine gets, written out twice rather than interpolated.
+ *
+ * Both spellings are literal on purpose: `every-run-names-its-engine.test.ts`
+ * reads this file as TEXT, and a run that composed its engine out of a variable
+ * would satisfy that check while naming nothing a reader could see.
+ */
+const ENGINE_SETTINGS = {
+  editor: { 'gripterm.terminal.engine': 'editor' },
+  own: { 'gripterm.terminal.engine': 'own' },
+};
+
+/**
+ * The suites that cannot run under our own engine, by name and with the reason.
+ *
+ * FOUND BY RUNNING IT, 2026-08-31, the first time this acceptance was walked
+ * under `own` at all: `rename from the CLI` asks the EDITOR for a terminal
+ * object -- `vscode.window.terminals`, `vscode.window.activeTerminal`, and the
+ * `name` drawn on a tab -- and under our own engine there is no editor terminal
+ * to ask about. It failed on its third line with "the editor has no terminal
+ * called project", which is the suite being right rather than the engine being
+ * wrong.
+ *
+ * The criterion is the one `.vscode-test.mjs` uses for `NOT_UNDER_OWN`, and no
+ * wider: a suite is out when its SUBJECT is the terminal's place among the
+ * editor's own objects. What is LOST by excluding it is stated rather than
+ * buried -- the half of M2.17 that is engine-neutral, `/rename` typed inside the
+ * terminal reaching the ROW and the record, is not walked under `own` by
+ * anything. Splitting the suite in two would cover it and is a change to an
+ * acceptance criterion's shape, which is not this step's to make.
+ *
+ * The other three run under both engines. `rename to the CLI`, П3 and П2 ask the
+ * registry, the gateway and the store, none of which is the editor's.
+ */
+const NOT_UNDER_OWN = new Map([
+  [
+    'rename from the CLI',
+    'its subject is the name on an EDITOR terminal -- it reads `window.terminals`, `window.activeTerminal` and a tab`s `name`, and our own engine makes none of those',
+  ],
+]);
+
+/** Runs a suite, or says why this engine cannot have it. */
+function hostUnlessTheEngineForbidsIt(grep) {
+  const why = ENGINE === 'own' ? NOT_UNDER_OWN.get(grep) : undefined;
+  if (why !== undefined) {
+    console.log(`--- NOT RUN under the own engine: ${grep}`);
+    console.log(`    ${why}`);
+    return;
+  }
+  host(grep);
+}
 
 const CODE = join(
   process.env.LOCALAPPDATA ?? '',
@@ -50,13 +144,21 @@ const QUIETENS_WITHIN_MS = 120_000;
 const POLL_MS = 500;
 
 if (process.env.GRIPTERM_ACCEPTANCE !== 'yes') {
+  console.error('This run opens real editor windows on this desktop, several times over.');
   console.error(
-    [
-      'This run starts a real editor and a real `claude`, and spends a real turn',
-      'on whoever is logged in. Set GRIPTERM_ACCEPTANCE=yes to mean it.',
-    ].join('\n')
+    AGENT === 'real'
+      ? 'It also starts a real `claude` and spends a real turn on whoever is logged in.'
+      : 'It spends nothing: the agent is the double in tests/acceptance/fake-claude.'
   );
+  console.error('Set GRIPTERM_ACCEPTANCE=yes to mean it.');
   process.exit(1);
+}
+
+if (AGENT !== 'fake' && AGENT !== 'real') {
+  throw new Error(`GRIPTERM_ACCEPTANCE_AGENT is '${AGENT}', and there are two: fake, real`);
+}
+if (ENGINE_SETTINGS[ENGINE] === undefined) {
+  throw new Error(`GRIPTERM_ACCEPTANCE_ENGINE is '${ENGINE}', and there are two: editor, own`);
 }
 
 // --- the plumbing ------------------------------------------------------------
@@ -231,12 +333,48 @@ function closeEditors() {
 
 // --- the sittings ------------------------------------------------------------
 
+/**
+ * Puts the double where `claude` would be, and says so.
+ *
+ * The whole substitution is one directory in front of PATH, and that is not a
+ * trick: `findExecutable` is what this build uses to find `claude`, it walks
+ * PATH in order, and every process of this run -- the test hosts, the
+ * development windows, the installed editor, and this file's own
+ * `claude agents --json` -- inherits the environment set here.
+ *
+ * `CLAUDE_CONFIG_DIR` goes with it, and it is doing two jobs at once: it tells
+ * the double where to keep its session files and transcripts, and it tells THIS
+ * BUILD where to look for them (`claudeSessionsDirectory`,
+ * `claudeTranscriptsDirectory`, and `rename-to-cli.test.ts`). Both sides reading
+ * one variable is what makes the double findable at all -- and it is also what
+ * keeps a run of it out of the profile of whoever is logged in.
+ *
+ * @returns {string|null} where the double was put, or null when the agent is real
+ */
+function putTheDoubleOnThePath() {
+  if (AGENT === 'real') {
+    return null;
+  }
+  const where = buildFakeClaude();
+  process.env.PATH = `${where};${process.env.PATH ?? ''}`;
+  process.env.CLAUDE_CONFIG_DIR = CLAUDE_CONFIG;
+  // The interpreter by absolute path: the launcher starts `node` on the double,
+  // and a bare `node` on the PATH a terminal inherits is not guaranteed (C5-2).
+  process.env.GRIPTERM_FAKE_CLAUDE_NODE = process.execPath;
+  return where;
+}
+
 function prepare() {
   rmSync(BASE, { recursive: true, force: true });
   mkdirSync(PROJECT, { recursive: true });
   mkdirSync(STORE, { recursive: true });
   mkdirSync(join(USER_DATA, 'User'), { recursive: true });
   mkdirSync(EXTENSIONS, { recursive: true });
+  if (AGENT === 'fake') {
+    // Only where it is used: in the `real` mode the agent's profile is the
+    // person's own, and an empty directory of ours beside it would read as one.
+    mkdirSync(CLAUDE_CONFIG, { recursive: true });
+  }
   writeFileSync(join(PROJECT, 'README.md'), '# the project of the acceptance run\n', 'utf8');
   writeFileSync(
     join(USER_DATA, 'User', 'settings.json'),
@@ -245,22 +383,23 @@ function prepare() {
         // `application` scope: a workspace file would be ignored, which is why
         // the whole run carries a user data directory of its own.
         'gripterm.storage.path': STORE,
-        // `editor`, AND THIS IS A DEBT, written here rather than in a document
-        // nobody opens while reading this file.
+        // WHICH ENGINE, and it is no longer a debt.
         //
-        // П2 and О3 have never been walked under `gripterm.terminal.engine:
-        // own`, not once. Until 2026-08-30 this run set no engine at all and
-        // took the manifest's default, which was `editor`; on that day the owner
-        // moved the default to `own`, and a run that went on setting nothing
-        // would have spent a real turn of his account measuring an engine it has
-        // no evidence about, under the name of an acceptance that passed.
+        // Until 2026-08-30 this run set no engine at all and took the manifest's
+        // default, which was `editor`; on that day the owner moved the default
+        // to `own`, and a run that went on setting nothing would have spent a
+        // real turn of his account measuring an engine it had no evidence about,
+        // under the name of an acceptance that passed. It was then pinned to
+        // `editor` -- the one this acceptance had actually been walked on -- with
+        // a comment saying that covering the other one cost real turns, needed
+        // its own decision, and was Ш32.
         //
-        // So the engine is pinned to the one this acceptance was actually walked
-        // on. What is NOT here is coverage of the other one: teaching this run
-        // `own` costs real turns and needs its own decision, and it is Ш32. The
-        // day that happens, this comment is what says the old pin was a debt and
-        // not a preference.
-        'gripterm.terminal.engine': 'editor',
+        // Ш32 is done: `GRIPTERM_ACCEPTANCE_AGENT=fake` costs nothing, so both
+        // engines can be walked as often as anybody likes, and `ENGINE` chooses
+        // which. What is NOT settled by that is whether the REAL CLI holds up
+        // under either of them -- that run is still owed, and
+        // `against-the-real-cli.json` is what will not let it be forgotten.
+        ...ENGINE_SETTINGS[ENGINE],
         'security.workspace.trust.enabled': false,
         'window.restoreWindows': 'none',
         'telemetry.telemetryLevel': 'off',
@@ -495,8 +634,13 @@ if (!existsSync(CODE)) {
 const only = process.argv.slice(2);
 const wanted = (name) => only.length === 0 || only.includes(name);
 
+const startedAt = Date.now();
 prepare();
+const doubleAt = putTheDoubleOnThePath();
 console.log(`acceptance store: ${STORE}`);
+console.log(`agent           : ${AGENT === 'real' ? 'the real `claude` on this PATH' : `the double at ${doubleAt}`}`);
+console.log(`engine          : ${ENGINE}`);
+console.log(`criteria        : ${only.length === 0 ? 'all of them' : JSON.stringify(only)}`);
 
 // The cheap ones first, each with a store of its own: both leave a record, and
 // П2 counts records to answer О3.
@@ -505,9 +649,9 @@ if (wanted('rename')) {
   // an empty store first -- which is how they know they are looking at their
   // own record and not at one left behind.
   emptyStore();
-  host('rename from the CLI');
+  hostUnlessTheEngineForbidsIt('rename from the CLI');
   emptyStore();
-  host('rename to the CLI');
+  hostUnlessTheEngineForbidsIt('rename to the CLI');
   emptyStore();
 }
 if (wanted('П3')) {
@@ -518,8 +662,35 @@ if (wanted('П3')) {
 if (!wanted('П2')) {
   console.log('--- verdict');
   console.log(`  ran ${JSON.stringify(only)} and nothing else`);
+  console.log(`  took ${Math.round((Date.now() - startedAt) / 1000)} s on the ${ENGINE} engine, agent ${AGENT}`);
   process.exit(0);
 }
+
+/*
+ * The machine, quiet, before П2 begins.
+ *
+ * FOUND BY RUNNING IT, 2026-08-31, under the editor's engine: the second sitting
+ * reported `claude processes: 2` and left one behind, and the extra one was the
+ * `rename from the CLI` conversation -- started thirty-five seconds earlier, in a
+ * test host that had already exited, and still alive. The store had been emptied
+ * between the phases, so nothing in П2 or О3 is about that conversation; but the
+ * counts below are `runningHere().length`, which is every conversation in this
+ * project's directory, and a leftover makes them mean something else.
+ *
+ * It is a WAIT and not a kill, and that is the point: the run's own comment
+ * records the same lingering against a real CLI (2026-08-13, a sitting three
+ * seconds after the previous one closed was refused with `session-running`), so
+ * hurrying it along would be the stand editing the machine it is measuring. How
+ * long it took is printed, because that number is the thing being tolerated.
+ */
+const quietFrom = Date.now();
+await until(
+  `the cheap suites' conversations to end (${JSON.stringify(runningHere().map((one) => `${one.sessionId} pid=${one.pid}`))} still running)`,
+  () => (runningHere().length === 0 ? true : null),
+  QUIETENS_WITHIN_MS
+);
+console.log(`--- before П2`);
+console.log(`  waited for quiet   : ${Date.now() - quietFrom} ms`);
 
 host('П2');
 
@@ -573,8 +744,13 @@ if (o1.leftBehind !== 0) {
 }
 
 console.log('--- verdict');
+console.log(`  took ${Math.round((Date.now() - startedAt) / 1000)} s on the ${ENGINE} engine, agent ${AGENT}`);
 if (failures.length === 0) {
-  console.log('  П2, О3 and О1 hold on this machine, in this build');
+  console.log(
+    AGENT === 'real'
+      ? '  П2, О3 and О1 hold on this machine, in this build, against a real `claude`'
+      : '  П2, О3 and О1 hold on this machine, in this build, against the double -- which is our own beliefs about `claude` and not `claude`'
+  );
 } else {
   for (const failure of failures) {
     console.log(`  FAILED: ${failure}`);
