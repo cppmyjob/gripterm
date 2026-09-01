@@ -20,10 +20,17 @@ import { fileURLToPath } from 'node:url';
  *
  * **Two levels, and the reason they are two.** `--fast` is types, lint and the
  * unit suites: measured 51 s on 2026-08-25, no editor, no window, nothing on
- * anyone's desktop. The full gate adds the live suites in a real editor, the
- * fork's workbench in Cursor, and the two-sitting stand, which opens four
- * windows; measured 7 min 30 s end to end before the Cursor stage and 17 s more
- * with it.
+ * anyone's desktop. The full gate adds the live suites in a real editor and the
+ * fork's workbench in Cursor; measured 7 min 30 s end to end before the Cursor
+ * stage and 17 s more with it.
+ *
+ * THOSE NUMBERS INCLUDED THE STAND, which no level has run since 2026-09-01: it
+ * is still a stage and it carries `onItsOwn: true`, so it answers to `--only
+ * stand` and to nothing else (the owner's decision; the `stand` record in
+ * `MISSING` says what a gate that never runs it stops measuring). Its 2 min 10 s
+ * and its four windows come off the totals above, and no full gate has been
+ * timed since, so both figures are now an upper bound rather than a
+ * measurement.
  *
  * **Why there is no THIRD level, which is what Ш9 was expected to need.** The
  * step was written expecting the live suites to run a second time in Cursor --
@@ -151,6 +158,13 @@ const STAGES = [
     name: 'stand',
     fast: false,
     runsTests: true,
+    // Kept out of the full and fast levels, and reachable only by name -- the
+    // same flag the eyes carry, and here since 2026-09-01 by the owner's
+    // decision that effort concentrates on the `own` engine. What that decision
+    // buys is the 2 min 10 s and the four windows this used to cost EVERY full
+    // gate; what it does not do is throw the instrument away. The `stand` record
+    // in `MISSING` says what a gate that never runs this stops measuring.
+    onItsOwn: true,
     what: 'pnpm run test:stand  (four windows on this desktop; measured 2 min 10 s), then gate/allowed-red.json',
     command: ['pnpm', 'run', 'test:stand'],
     // The stand's own exit code is not the answer. Two or three of its nine
@@ -315,6 +329,67 @@ function eyesAgainstWhatTheySawOrThrow(ran) {
  */
 const MISSING = [
   {
+    name: 'stand',
+    why:
+      '`pnpm run test:stand` -- THE TWO-SITTING STAND. IT IS STILL A STAGE OF THIS FILE, and since '
+      + '2026-09-01 NO LEVEL RUNS IT: it carries `onItsOwn: true`, the flag the eyes carry, so neither the '
+      + 'full gate nor `--fast` pays for it and `pnpm run gate --only stand` finds it by name. THE DECISION '
+      + 'IS THE OWNER`S, taken that day in two parts -- all effort concentrates on the `own` engine and the '
+      + 'rest of the old code may be switched off, and, asked specifically, the stand`s point 6 goes out of '
+      + 'the gate together with the stand itself. THE FORM IS THE ORCHESTRATOR`S, decided the same day and '
+      + 'after a first attempt had taken the wrong side of the exchange: the stage was deleted outright, '
+      + 'which also deleted the only reader of the nine allowances in `gate/allowed-red.json` and the only '
+      + 'printing of who had admitted each red and whether the owner had ratified it. Nobody had decided '
+      + 'THAT. `onItsOwn` buys the whole of what the owner asked for -- the 2 min 10 s and the four windows '
+      + 'come off every full gate -- and pays none of it. '
+      + 'WHAT IT MEASURES, and why that is now a question about a machine nobody is obliged to run: nine '
+      + 'points about the LAYOUT OF THE EDITOR -- how many groups a window comes back with, where the strip '
+      + 'sits, whether it stands alone in the editor area, whether the tabs are on it. Every one of those is '
+      + 'about terminals the EDITOR owns, so the run is pinned to the `editor` engine (its profile writes '
+      + '`gripterm.terminal.engine`, and `tests/every-run-names-its-engine.test.ts` holds it there). Since '
+      + '2026-08-30 that engine is NOT the default: it is the fallback the extension takes when `own` cannot '
+      + 'come up, and it tells the person so (`ADDON_REFUSAL`). So this run is the instrument of an EMERGENCY '
+      + 'engine, and a gate that spent 2 min 10 s and four windows on it every time was spending them on the '
+      + 'road not taken. '
+      + 'WHY POINT 6`S RED NEVER MEANT WHAT IT READ AS, and this is the finding the decision rests on. The '
+      + 'point asks "every record came back, and at least one of them through `--resume`". Its own comment in '
+      + '`tests/stand/judge.ts`, written 2026-08-26, says: "A red here therefore says `this stand cannot pose '
+      + 'the question`, not `the conversations did not come back`". The mechanism is closed: `planRestore` '
+      + 'answers `resume` only for a record whose conversation has a TRANSCRIPT; a transcript exists only '
+      + 'once something has been SAID in that conversation; the stand types into none of the terminals it '
+      + 'opens. So every start it can produce is structurally a `launch`, and a launch mints a new '
+      + 'conversation id which the next sitting finds just as silent. MEASURED: 64 starts over the eight runs '
+      + 'whose traces were read on 2026-08-25 and 2026-08-26, 64 launches, NOT ONE RESUME. A gate cannot '
+      + 'lose a measurement it never had. '
+      + 'WHAT DOES MEASURE THE RETURN OF A CONVERSATION, and it is not this: the ACCEPTANCE run, which '
+      + 'TYPES -- so a transcript exists and `resume` is reachable. Under `own` on 2026-08-31 it read, after '
+      + 'the runner was killed, `SessionStart source resume`, with the record and the transcript whole and no '
+      + 'duplicates (О1, `killTheRunner` in `tests/acceptance/run.mjs`). That is the real instrument for the '
+      + 'question point 6 was reaching for, and it is in the `acceptance` record below rather than in this '
+      + 'gate -- so the return of a conversation is measured BY HAND, on purpose, and not here. '
+      + 'WHAT NO GATE MEASURES ANY MORE, said without softening, because both of these are real and were '
+      + 'being paid for by every full run. They are the price of the owner`s decision and not of its form: '
+      + 'no level runs this stage, so no level reaches either number. '
+      + '(1) THE START BUDGET. `tests/stand/start-budget.ts` holds `listedMs` and `activatedMs`, ceilings '
+      + 'taken from SIXTEEN SITTINGS on this machine on 2026-08-26, and they are the only numbers this '
+      + 'repository has for how long a window takes to list its terminals and to bring one up. The stand '
+      + 'still judges them, and the budget below still refuses a run that misses them; NOTHING IN ANY LEVEL '
+      + 'OF THIS GATE MAKES ANYBODY RUN IT. A start that doubles is now a thing no gate notices. '
+      + '(2) THE TIME A CONVERSATION TAKES TO COME BACK -- point 8. Measured by the stand and by nothing '
+      + 'else, and now by no level of any gate. The acceptance run establishes THAT a conversation returns '
+      + 'under `own`; it does not hold a ceiling on how long that takes. '
+      + 'WHAT IS NOT LOST, and it was for one revision on 2026-09-01: the JUDGE. `standAgainstTheBudget` is '
+      + 'still here and still the stage`s `judgedBy`, so a run by name is held against `gate/allowed-red.json` '
+      + 'exactly as before -- the nine points, the start budget that nothing may admit, and the NOT RATIFIED '
+      + '/ RATIFIED / RENEWED lines that name who allowed each red and whether the owner has agreed to it. '
+      + 'Nothing of the stand itself was ever deleted either: the measurer, the judge, the budget, the '
+      + 'fixtures and its Jest suites are all here, and `npx jest tests/stand` still holds the judge to its '
+      + 'staircase in under a second with no editor at all. '
+      + 'HOW TO RUN IT: `pnpm run gate --only stand`, which is the stage and its budget, or `pnpm run '
+      + 'test:stand` bare, which is the nine points and the start verdict with nothing to hold them against. '
+      + 'Both open four windows on this desktop.',
+  },
+  {
     name: 'cursor-live',
     why:
       'The LIVE SUITES in Cursor, and this entry names WHY they are not here rather than only that they ' +
@@ -350,11 +425,14 @@ const MISSING = [
       'launches gave 1, 0, 0, 1. VS Code 1.134.0 exited 1 in 5 out of 5. A flicker is worse than a stable ' +
       'falsehood: a host that always exits 0 can be worked around by a rule, and one that answers ' +
       'differently to the same command can be neither trusted nor caught. ' +
-      'WHAT IS HERE INSTEAD, and it is not nothing: the `cursor` stage runs the fork`s WORKBENCH in ' +
+      'WHAT IS HERE INSTEAD, and it is less than it was: the `cursor` stage runs the fork`s WORKBENCH in ' +
       'Cursor -- the part that needs no extension of ours, and the part all four of the customer`s ' +
-      'defects live in -- and the `stand` stage runs the PRODUCT in Cursor through a DEV host, where ' +
-      'the extension does load. Between them, what is uncovered is narrower than "Cursor": it is the ' +
-      'product`s behaviour under a Cursor test host, which nothing here has yet shown anybody. ' +
+      'defects live in. THE OTHER HALF OF THIS ANSWER WAS WITHDRAWN ON 2026-09-01 and is not replaced: ' +
+      'until that day the `stand` stage ran the PRODUCT in Cursor through a DEV host, where the extension ' +
+      'does load, and this record said that between the two what was uncovered was narrower than "Cursor". ' +
+      'No LEVEL runs the stand any more (see the `stand` record above, and `--only stand` still reaches ' +
+      'it), so what a FULL GATE now shows about the product inside the fork is NOTHING -- neither under a ' +
+      'test host, which was never covered, nor under a dev host, which was until that day. ' +
       'What would close it: paying those minutes with the stage`s window chosen by name -- `--classic`, ' +
       'now that the owner has said which window the stage is about -- and not, as this entry used to say, ' +
       'a change in the fork.',
@@ -362,7 +440,12 @@ const MISSING = [
   {
     name: 'eyes',
     why:
-      'THE EYES -- `pnpm run gate:eyes`, which is `--only eyes`. They open a real editor, attach to its ' +
+      'THE EYES -- `pnpm run test:eyes` bare, or `pnpm run gate:eyes`, which is `--only eyes` and adds the ' +
+      'budget that decides the colour. THE SCRIPT IS NAMED HERE AND WAS NOT UNTIL 2026-09-01: the `eyes` ' +
+      'stage carries `onItsOwn: true`, so it belongs to no level and this gate never runs it, and until that ' +
+      'day this record named only the gate spelling -- which read, to anything counting what the gate ' +
+      'covers, as a stage that runs. `tests/every-test-script-is-run-or-said-to-be-missing.test.ts` is what ' +
+      'found that and what keeps the name here. They open a real editor, attach to its ' +
       'workbench over the DevTools protocol and ask the DOM what it is DRAWING: whether the maximise button ' +
       'is there and has a box, whether a terminal`s tab is coloured the way its own row is, and -- since ' +
       '2026-08-26 -- whether the notification a waiting agent raises is on the screen and where its button ' +
@@ -874,10 +957,11 @@ function notCovered() {
     ? [{
       name: 'cursor',
       why:
-        'There is no Cursor on this machine, so the `cursor` stage does not exist in this run at all -- and ' +
-        'neither does the stand`s preference for it (tests/stand/run.mjs falls back to VS Code). Every one of ' +
-        'the customer`s four defects was reported in Cursor. A green gate here is a green gate about the OTHER ' +
-        'editor.',
+        'There is no Cursor on this machine, so the `cursor` stage does not exist in this run at all. Every ' +
+        'one of the customer`s four defects was reported in Cursor. A green gate here is a green gate about ' +
+        'the OTHER editor. The stand used to bring a second look at the fork into a full gate -- it prefers ' +
+        'Cursor and falls back to VS Code (tests/stand/run.mjs) -- and since 2026-09-01 no level runs the ' +
+        'stand, so on a machine without Cursor a full gate now looks at the fork nowhere.',
     }]
     : [];
   return [...cursorless, ...MISSING];
@@ -896,6 +980,11 @@ function notCovered() {
  * alternative, which the person will otherwise do, is to run the underlying
  * `pnpm run test:...` by hand -- and that skips the BUDGET, which is the half of
  * those two stages that decides the colour.
+ *
+ * SINCE 2026-09-01 THIS IS THE ONLY WAY THE STAND RUNS UNDER A BUDGET. It is an
+ * `onItsOwn` stage now, like the eyes, so no level reaches it and `--only stand`
+ * is the whole of its coverage. That is not a smaller reason for this switch
+ * than the re-run it was written for; it is a larger one.
  *
  * @param {string[]} argv the command line
  * @returns {string | null} the stage named, or null
@@ -929,7 +1018,7 @@ async function main() {
 
   say(`the gate, ${level} level, over ${at.head === null ? 'a revision git would not name' : at.head.slice(0, 12)}${at.dirty === true ? ' + uncommitted changes' : ''}`);
   if (fast) {
-    say('  --fast: types, lint and the unit suites. NOT the live suites and NOT the stand.');
+    say('  --fast: types, lint and the unit suites. NOT the live suites and NOT the Cursor strip.');
     say('  This level is what `pre-push` runs. It is not what "checked" means -- run `pnpm run gate` for that.');
   }
   if (only !== null) {

@@ -7,6 +7,19 @@
  * 2026-08-23, seven sittings over one folder went 2, 2, 4, 5, 6, 7, 8 editor
  * groups, and the second of them was clean.
  *
+ * **IN NO LEVEL OF THE GATE SINCE 2026-09-01, by the owner's decision.** This is
+ * still a stage of `tools/gate.mjs` and it carries `onItsOwn: true`, the flag the
+ * eyes carry: neither the full gate nor `--fast` runs it, and it answers to
+ * `pnpm run gate --only stand` -- which is the stage AND its budget against
+ * `gate/allowed-red.json` -- or to `pnpm run test:stand` bare, which is these
+ * nine points with nothing to hold them against. Its subject is the EMERGENCY
+ * engine: the nine points are about the editor's own layout, so it is pinned to
+ * the editor engine, which since 2026-08-30 is the fallback the extension takes
+ * when `own` cannot come up rather than the default. The `stand` record in the
+ * gate's `MISSING` list carries the whole of the reasoning, including the two
+ * things no level of any gate measures now: the start budget below, and the time
+ * a conversation takes to come back.
+ *
  * **Two halves, and only this one needs a machine.** This file and
  * `observer/extension.js` MEASURE: they start the editor, write down what the
  * editor area looked like, and close the window again. `judge.ts` JUDGES, and it
