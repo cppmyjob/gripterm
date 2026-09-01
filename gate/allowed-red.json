@@ -1,8 +1,18 @@
 {
   "what": [
-    "The redness of the two-sitting stand that `pnpm run gate` admits, by name, with a ceiling and a date.",
+    "The redness of the two-sitting stand that `node tools/gate.mjs --only stand` admits, by name, with a ceiling and a date. Until 2026-09-01 that read `pnpm run gate` and was true as written: the stand was a stage of the full gate. It carries `onItsOwn: true` now, so no level reaches it, and this document is applied only when somebody asks for the stand by name.",
+    "WHAT CHANGED ON 2026-09-01, AND WHY EVERY LINE BELOW WAS RENEWED RATHER THAN DELETED. The owner asked for the work to be concentrated on `gripterm.terminal.engine: own`, and the stand -- pinned to `editor`, its nine points about the editor's grid -- left every level of the gate the same day. These five lines therefore admit the redness of an instrument that nothing forces anybody to run.",
     "",
-    "WHO ADMITTED IT, AND WHO HAS NOT. The orchestrator of step Ш6 did, on 2026-08-25, on its own authority and nobody else's. The owner has not seen this file, was not asked about it, and has agreed to none of it. That is what `ratifiedBy: null` on every line below means, and it means nothing weaker: not `unknown`, not `not applicable`, but the record that the three points still below are standing on one agent's decision, unreviewed. `tools/gate.mjs` prints it whenever the FULL gate reaches this budget at all, green or red, so that a green gate cannot be read as more than it is -- `gate:fast` never gets here, and neither does a run whose stand died before it judged. `tests/stand/allowance.ts` refuses a line that names the owner in `allowedBy` while `ratifiedBy` is null, because that is the exact sentence this file was first written with: all five lines it then carried said \"owner, through the Ш6 orchestrator, 2026-08-25\", and no owner had been asked. When the owner ratifies -- or refuses -- their name and the date go in `ratifiedBy`, and the line stops being one agent's word.",
+    "DELETING THEM WAS THE FIRST PLAN AND IT WAS WRONG, mechanically and on the merits. Mechanically: `tests/stand/allowance.test.ts` judges the fixture `tests/stand/fixtures/agent-editor-2026-08-25.ndjson` against THIS file on every `npx jest`, and points 3 and 4 with no line here fail it in a second. That is exactly what the fixture was kept for on 2026-08-25, and it caught the first attempt to take them out again -- by reading, before the edit was made. On the merits: points 1, 3 and 4 are about a window Cursor hands the stand, and the evidence for that is in this file and nowhere else. Deleting the lines would delete the measurements with them.",
+    "",
+    "SO EACH LINE IS EXTENDED ONCE, to 2026-10-06, and `renewals` says so. One is the whole of what this document gives an unratified line: `allowance.ts` refuses a second extension unless a name and a date go into `ratifiedBy`. The date is set past the owner's week on the `own` default and past the run against the real CLI owed on 2026-09-14, because the question these lines actually need answered is not their own. It is whether the editor stand lives at all now that no level runs it, and that is the owner's to answer. It was put to him on 2026-09-01.",
+    "",
+    "POINT 6'S LINE IS RENEWED WITH THE REST, AND IT IS THE ONE TO READ DIFFERENTLY. Its red never meant what the line's `says` reads as. `judge.ts` has held since 2026-08-26 that a red there says \"this stand cannot pose the question\", not that the conversations failed to come back: `planRestore` answers `resume` only where something was SAID in the conversation, and the stand types into no terminal, so every start it can produce is a `launch` -- 64 of 64 over eight runs, structurally. The conversation coming back under `own` is measured by the acceptance run, which does type: `after the kill: SessionStart source resume`, 2026-08-31. The line stays because the point still returns 3 and this document refuses a point no line admits. It is not evidence of a defect and never was, and it was read as one in a report to the owner on 2026-08-31 before the paragraph above it was read.",
+    "",
+    "THE RATE LINE IS NOT RENEWED, ON PURPOSE. `cursor-newGroupBelow` still expires 2026-09-08, because its own `why` says what the date is for: it closes by going stale rather than by being fixed, and the date is what forces a re-measurement against whatever the fork has shipped since 3.17.19. Moving it without running the probe is the one thing it exists to prevent. `pnpm run test:cursor` is seventeen seconds and one window, and it is owed before that day.",
+    "",
+    "",
+    "WHO ADMITTED IT, AND WHO HAS NOT. The orchestrator of step Ш6 did, on 2026-08-25, on its own authority and nobody else's. The owner has not seen this file, was not asked about it, and has agreed to none of it. That is what `ratifiedBy: null` on every line below means, and it means nothing weaker: not `unknown`, not `not applicable`, but the record that the three points still below are standing on one agent's decision, unreviewed. `tools/gate.mjs` prints it whenever the FULL gate reaches this budget at all, green or red, so that a green gate cannot be read as more than it is -- `gate:fast` never gets here, and neither does a run whose stand died before it judged. SINCE 2026-09-01 NO LEVEL GETS HERE AT ALL: the stand belongs to none of them, so the print happens on `--only stand` and nowhere else. What that costs is the whole of this document's pressure -- nothing anybody runs by habit reaches it now. `tests/stand/allowance.ts` refuses a line that names the owner in `allowedBy` while `ratifiedBy` is null, because that is the exact sentence this file was first written with: all five lines it then carried said \"owner, through the Ш6 orchestrator, 2026-08-25\", and no owner had been asked. When the owner ratifies -- or refuses -- their name and the date go in `ratifiedBy`, and the line stops being one agent's word.",
     "",
     "WHAT `null` DOES NOT MEAN. It does not mean the owner said no. There is no value of `ratifiedBy` for that, and there deliberately is not one: a line the owner has REFUSED is not an unreviewed permission, it is an overridden one, and it has no business standing in a budget. If the owner says no, the line is DELETED and the gate goes red -- that is the whole procedure. A union type distinguishing 'refused' from 'not asked' was considered and refused in turn: it would branch every place that reads the field and double the cases about it, for a state that has occurred nought times. So `null` is unambiguous, and it says one thing: nobody has been asked.",
     "",
@@ -75,8 +85,8 @@
       "why": "Ш8 did the half that was the product's: the sweep now runs in the turn that adopts the strip instead of behind a three-and-a-half-second sleep that always found the strip already made. What is left is not the queue: it is that a group of another editor part cannot be told from a column of the editor area through this API, so the sweep refuses rather than guesses. NOT CLOSED, and the next step for it is naming which part a group belongs to.",
       "allowedBy": "the Ш6 orchestrator, on its own authority and nobody else's, 2026-08-25",
       "ratifiedBy": null,
-      "renewals": 0,
-      "expires": "2026-09-08"
+      "renewals": 1,
+      "expires": "2026-10-06"
     },
     {
       "point": 3,
@@ -89,8 +99,8 @@
       "why": "NOT THE PRODUCT, and `measured` above is the measurement rather than this sentence. `vscode.getEditorLayout` answers for the editor part that holds the ACTIVE group, and Cursor's own \"New Agent\" editor is a part of its own. While that tab holds the focus, the grid the observer writes down is the agent pane's while the `ViewColumn` the judge indexes it by is the editor area's -- one container read with another's numbers. Every point that indexes the grid by a column is exposed: 1, 3 and 4. THE PREDICTOR IS FOCUS, NOT PRESENCE. Measured over the runs in `seen`: an agent editor merely PRESENT at the settled sighting leaves both points green -- run 2, sitting 3, three tab groups, a two-leaf grid, 0.334 -- and the same editor ACTIVE at that sighting is what makes them red. WAITING DOES NOT FIX IT, and that is measured too: the pair was stable for three seconds of a window that sent no tab or group event at all, `torn: false` throughout, so a measurer told to \"wait until the grid matures\" would spend its ceiling and write down the same number. WHAT WAS WEIGHED AND REFUSED: focusing a group of the editor area before reading the grid. It is measured to work -- it is what moved the grid at +4956 ms -- and it is refused, because a focus change IS a tab-group event, `QuietSpell` in the product wakes on those, and `_payWhatIsOwed` then re-asks for the third. The stand would be causing the behaviour it measures, which is worse than not measuring it. Closed the day the extension API says which editor part a group belongs to -- the same day point 1's line closes, and for the same reason.",
       "allowedBy": "the agent that measured the fifth run of 2026-08-25, on its own authority and nobody else's, 2026-08-25",
       "ratifiedBy": null,
-      "renewals": 0,
-      "expires": "2026-09-08"
+      "renewals": 1,
+      "expires": "2026-10-06"
     },
     {
       "point": 4,
@@ -103,8 +113,8 @@
       "why": "NOT THE PRODUCT, and `measured` above is the measurement rather than this sentence. `vscode.getEditorLayout` answers for the editor part that holds the ACTIVE group, and Cursor's own \"New Agent\" editor is a part of its own. While that tab holds the focus, the grid the observer writes down is the agent pane's while the `ViewColumn` the judge indexes it by is the editor area's -- one container read with another's numbers. Every point that indexes the grid by a column is exposed: 1, 3 and 4. THE PREDICTOR IS FOCUS, NOT PRESENCE. Measured over the runs in `seen`: an agent editor merely PRESENT at the settled sighting leaves both points green -- run 2, sitting 3, three tab groups, a two-leaf grid, 0.334 -- and the same editor ACTIVE at that sighting is what makes them red. WAITING DOES NOT FIX IT, and that is measured too: the pair was stable for three seconds of a window that sent no tab or group event at all, `torn: false` throughout, so a measurer told to \"wait until the grid matures\" would spend its ceiling and write down the same number. WHAT WAS WEIGHED AND REFUSED: focusing a group of the editor area before reading the grid. It is measured to work -- it is what moved the grid at +4956 ms -- and it is refused, because a focus change IS a tab-group event, `QuietSpell` in the product wakes on those, and `_payWhatIsOwed` then re-asks for the third. The stand would be causing the behaviour it measures, which is worse than not measuring it. Closed the day the extension API says which editor part a group belongs to -- the same day point 1's line closes, and for the same reason.",
       "allowedBy": "the agent that measured the fifth run of 2026-08-25, on its own authority and nobody else's, 2026-08-25",
       "ratifiedBy": null,
-      "renewals": 0,
-      "expires": "2026-09-08"
+      "renewals": 1,
+      "expires": "2026-10-06"
     },
     {
       "point": 6,
@@ -117,8 +127,8 @@
       "why": "Ш7 -- the restore traps. This line used to say 'the customer's complaint number 1'; it is not that. Item 1 of `customer-feedback.txt` (2026-08-22) is the panels multiplying on restart, which is point 1 here, and the plan's 'боль №1 владельца' is the strip at 0.906, which is point 3. The plan also titles Ш7 itself 'боль №1'. The two numberings disagree, the customer's list does not mention resume under any number, and which of them 'number one' means is NOT established.",
       "allowedBy": "the Ш6 orchestrator, on its own authority and nobody else's, 2026-08-25",
       "ratifiedBy": null,
-      "renewals": 0,
-      "expires": "2026-09-08"
+      "renewals": 1,
+      "expires": "2026-10-06"
     },
     {
       "point": 7,
@@ -131,8 +141,8 @@
       "why": "Ш7 -- the same restore. Whether it is one defect with point 6 or two is not established.",
       "allowedBy": "the Ш6 orchestrator, on its own authority and nobody else's, 2026-08-25",
       "ratifiedBy": null,
-      "renewals": 0,
-      "expires": "2026-09-08"
+      "renewals": 1,
+      "expires": "2026-10-06"
     }
   ],
   "rates": [
