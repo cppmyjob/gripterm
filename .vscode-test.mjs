@@ -29,10 +29,11 @@
  */
 
 import { defineConfig } from '@vscode/test-cli';
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { suitesFor } from './tests/engine-split.mjs';
 import { hostUserData, runStore } from './tools/host-user-data.mjs';
 import { refuseStaleBuilds } from './tools/refuse-stale-builds.mjs';
 import {
@@ -43,7 +44,6 @@ import {
 
 const require_ = createRequire(import.meta.url);
 const here = dirname(fileURLToPath(import.meta.url));
-const COMPILED = join(here, 'out', 'tests', 'integration');
 
 /**
  * The Cursor of this machine, or `null`.
@@ -187,46 +187,23 @@ function inCursor() {
 // `claude` has to be started before it even begins.
 const TIMEOUT_MS = 120000;
 
-/**
- * The suites that do NOT run under our own engine, by name and with the reason.
+/*
+ * WHICH SUITE RUNS UNDER WHICH ENGINE is declared in `tests/engine-split.mjs`
+ * and nowhere else, one line and one reason per suite.
  *
- * The criterion is the one M3.10 was given and no wider: a suite is out when its
- * SUBJECT is the shell or the terminal's place among the editors. Everything
- * else runs under both engines, because a suite that passes under one engine and
- * was never run under the other is a promise about half the product.
+ * Until 2026-09-01 it was declared here, and only half of it was: the exclusions
+ * from the `own` run were named and reasoned, and the `integration` run was a
+ * glob over the whole directory. A glob makes no statement, so twenty-eight
+ * suites of thirty-four ran twice with nothing anywhere saying what the second
+ * run was for -- and after 2026-08-30 the second run was under the engine that
+ * is no longer the default. The split module says all three sets instead, and
+ * `tests/live-runs-split-by-engine.test.ts` holds it to being total: every
+ * compiled suite in exactly one set, so that none of them runs nowhere.
  *
- * A name here that matches no suite throws below, so a rename cannot quietly
- * turn an exclusion into an exclusion of nothing.
+ * It is a module of its own because it has to be LOADABLE. This file is not:
+ * importing it refuses stale builds, seeds two stores and reads an editor's
+ * `product.json`, which is why every guard of ours reads it as text.
  */
-const NOT_UNDER_OWN = new Map([
-  ['quiet-shell.test.js', 'its subject is `gripterm.launch.mode: shell`, which our own engine refuses outright (M2.25, `chooseEngine`)'],
-  ['editor-strip.test.js', 'its subject is the terminal`s place in the editor area -- it reads `window.tabGroups`'],
-  ['terminal-rename.test.js', 'its subject is the name on an editor terminal -- it reads `window.terminals`'],
-  ['closing-a-terminal.test.js', 'its subject is what the EDITOR does to a record when its tab or its group is closed'],
-  ['tab-decoration.test.js', 'its subject is what is drawn on an EDITOR tab, and a terminal of our own has none'],
-  ['terminal-gateway.test.js', 'its subject is the editor`s gateway itself; the half that is common to both engines is `terminal-gateway-contract.test.js`'],
-]);
-
-/** Every compiled suite except the named exclusions, as absolute paths. */
-function suitesUnderOwn() {
-  // Read from disk rather than globbed, because the exclusions below are applied
-  // to what is really there. A missing directory is a build that has not been
-  // run, and it is said in those words: the alternative is an ENOENT stack over
-  // a path nobody recognises.
-  let compiled;
-  try {
-    compiled = readdirSync(COMPILED);
-  } catch {
-    throw new Error(`no compiled suites in ${COMPILED} -- run \`pnpm run build:integration\` first`);
-  }
-  const present = new Set(compiled.filter((name) => name.endsWith('.test.js')));
-  for (const [name, why] of NOT_UNDER_OWN) {
-    if (!present.has(name)) {
-      throw new Error(`the run under our own engine excludes '${name}' (${why}), and there is no such suite -- rename the exclusion or drop it`);
-    }
-  }
-  return [...present].filter((name) => !NOT_UNDER_OWN.has(name)).map((name) => join(COMPILED, name));
-}
 
 /*
  * Both runs get a user data directory of their own, and with it a store of their
@@ -273,6 +250,16 @@ refuseStaleBuilds();
  * test would be a record the restore has already walked past, and the whole of
  * S01 -- "the terminals came back by themselves" -- would stay unmeasurable.
  * `activation-restore.test.js` reads what activation did with this.
+ *
+ * STILL SEEDED INTO BOTH STORES, and since 2026-09-01 only one run reads it.
+ * `activation-restore.test.js` moved to the `own` label with the rest of the
+ * suites the engine does not move, so the `integration` window now restores a
+ * record, starts a real `claude` for it, and nothing asserts anything about
+ * either. That is a cost with no measurement behind it and it is left standing
+ * on purpose: what the editor run's other suites do with a terminal that is
+ * already there was never measured either way, and taking the seed away would
+ * change that run without a window to check it in. It is the next question about
+ * this file, not a settled one.
  */
 for (const label of ['integration', 'own']) {
   seedRestorableRecord(runStore(label));
@@ -288,7 +275,7 @@ for (const label of ['integration', 'own']) {
 export default defineConfig([
   {
     label: 'integration',
-    files: 'out/tests/integration/**/*.test.js',
+    files: suitesFor('integration'),
     extensionDevelopmentPath: 'packages/extension',
     version: 'stable',
     launchArgs: [
@@ -300,7 +287,7 @@ export default defineConfig([
   },
   {
     label: 'own',
-    files: suitesUnderOwn(),
+    files: suitesFor('own'),
     extensionDevelopmentPath: 'packages/extension',
     version: 'stable',
     launchArgs: [
