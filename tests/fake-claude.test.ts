@@ -482,6 +482,10 @@ describe('the double that stands in for `claude`', () => {
     expect(file?.name).toBe('the row calls it this');
     expect(file?.sessionId).toBe(SESSION);
     expect(file?.cwd).toBe(where.cwd);
+    // Behaviour 3, measured 2026-08-13 against 2.1.228 and NOT re-measured
+    // since. On 2.1.260 every session file looked at carried the key, and how
+    // those sessions were started was not recorded -- so this is the oldest
+    // belief in the double and the next thing worth putting to a real CLI.
     expect('nameSource' in (file ?? {})).toBe(false);
     // Named after the pid the world outside the pty sees, which for a double
     // started by this test is this process.
@@ -499,7 +503,7 @@ describe('the double that stands in for `claude`', () => {
     expect(typeof file?.name).toBe('string');
   });
 
-  it('takes the name a person types with `/rename`, and drops the mark that says it derived one', async () => {
+  it('takes the name a person types with `/rename`, and marks it as chosen by one', async () => {
     const where = open();
     const session = launch(where, ['--session-id', SESSION, '--settings', where.settings]);
     await within('the session to start', () => named(listening.posted, 'SessionStart').length === 1);
@@ -508,7 +512,11 @@ describe('the double that stands in for `claude`', () => {
     session.child.stdin.write('/rename told-by-a-person\r');
 
     await within('the new name', () => sessionFiles(where)[0]?.name === 'told-by-a-person');
-    expect('nameSource' in (sessionFiles(where)[0] ?? {})).toBe(false);
+    // Behaviour 4, measured 2026-09-08 against 2.1.260: the mark stays and says
+    // `user`. Against 2.1.228 the same command REMOVED it -- `readSessionName`
+    // reads a person's name out of either, and this double writes the one the
+    // CLI of today writes.
+    expect(sessionFiles(where)[0]?.nameSource).toBe('user');
     // A local command spends no turn, so it must not look like one.
     expect(named(listening.posted, 'UserPromptSubmit')).toHaveLength(0);
   });

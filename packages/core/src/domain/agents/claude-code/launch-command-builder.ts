@@ -53,12 +53,21 @@ export class LaunchCommandBuilder {
         : ['--resume', params.entry.sessionId.value]),
 
       // --- what the person calls it, on BOTH paths -----------------------------
-      // Measured 2026-08-13 (M2.19): `claude --name X` writes `name: X` into its
-      // own session file with NO `nameSource`, which is precisely what
-      // `readSessionName` reads as "a person chose this". So the CLI's view and
-      // ours agree from the first second rather than drifting until somebody
-      // types `/rename`. On a resume it matters more, not less: a resumed
-      // conversation otherwise comes back with a fresh derived name.
+      // Measured 2026-08-13 against 2.1.228 (M2.19): `claude --name X` writes
+      // `name: X` into its own session file with NO `nameSource`, which
+      // `readSessionName` still reads as "a person chose this". So the CLI's
+      // view and ours agree from the first second rather than drifting until
+      // somebody types `/rename`. On a resume it matters more, not less: a
+      // resumed conversation otherwise comes back with a fresh derived name.
+      //
+      // WHAT THAT MEASUREMENT DOES NOT COVER: 2.1.260 writes `nameSource` into
+      // every session file (measured 2026-09-08, quoted in `session-name.ts`),
+      // and nobody has looked at what it writes for a session started this way.
+      // If the answer is `derived`, the flag still names the conversation for
+      // the person reading the CLI, but the agreement above is gone until
+      // somebody types `/rename` -- so this comment states a measurement and not
+      // a property of the build people are running. The flag is sent either way:
+      // it is how the CLI is told the name at all.
       ...displayName(params.entry),
 
       ...scalars(launch, params.intent),

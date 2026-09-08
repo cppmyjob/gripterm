@@ -94,13 +94,24 @@
  *      `SessionStart(source: clear)` with a NEW conversation id, on the same
  *      endpoint. MEASURED: M0/A10, quoted in `p3-clear.test.ts`.
  *   3. `--name X` writes `name: X` into the CLI's own session file with NO
- *      `nameSource` key. MEASURED: M2.19, 2026-08-13, quoted in
- *      `launch-command-builder.ts`.
+ *      `nameSource` key. MEASURED: M2.19, 2026-08-13, against 2.1.228, quoted in
+ *      `launch-command-builder.ts`. NOT re-measured since, and it is the largest
+ *      thing this double is unsure of: on 2.1.260 the key was present in all
+ *      four sessions looked at (behaviour 4), and how those four were started
+ *      was not recorded -- so whether `--name` still leaves the key out is
+ *      unknown. Copied as measured rather than guessed forward: a guess here
+ *      would become a green test certifying the guess.
  *   4. A session started without `--name` carries `"nameSource":"derived"`, and
- *      `/rename` writes the new name and REMOVES the key. MEASURED: 2026-08-13
- *      against 2.1.228, quoted in `session-name.ts`. The absence of that key is
- *      the whole of the evidence that a person chose the name, so a double that
- *      never wrote it would make `readSessionName` untestable.
+ *      `/rename` writes the new name and marks it `"nameSource":"user"`.
+ *      MEASURED TWICE, AND THIS DOUBLE COPIES THE SECOND. On 2026-08-13 against
+ *      2.1.228, `/rename` REMOVED the key, and its absence was the whole of the
+ *      evidence that a person had chosen the name. On 2026-09-08, on the owner's
+ *      machine against 2.1.260, the key was present in all four live sessions --
+ *      `derived` in two, `user` in the other two -- so the CLI now writes a
+ *      positive mark instead of taking one away. Both are quoted in
+ *      `session-name.ts`, which accepts either. The double writes what today's
+ *      CLI writes, because one that still removed the key would keep the defect
+ *      the owner found by hand invisible to every suite here.
  *   5. The session file is named after the pid of the process holding the
  *      conversation and lives in `<config>/sessions/`. It SURVIVES a killed
  *      process. MEASURED: A22, quoted in `settings-locations.ts` and
@@ -954,8 +965,10 @@ function conversation(plan, config, cwd) {
   const state = {
     sessionId: plan.sessionId,
     name: plan.name,
-    // Behaviour 4: a name nobody chose is marked `derived`, and that mark being
-    // absent is the whole of the evidence that a person chose one.
+    // Behaviours 3 and 4: a name nobody chose is marked `derived`, and a name
+    // given with `--name` carries no mark at all -- measured against 2.1.228,
+    // and not re-measured since. `null` here means the key is left out of the
+    // file entirely, which is what `publish` does with it.
     nameSource: plan.name === null ? 'derived' : null,
     startedAt: Date.now(),
     busy: Promise.resolve(),
@@ -1035,11 +1048,12 @@ function conversation(plan, config, cwd) {
     });
 
   const rename = (name) => {
-    // Behaviour 4: the new name, and the `derived` mark removed. No hook and no
-    // event: the CLI offers neither, which is why `SessionNameMirror` polls this
-    // file rather than listening for anything.
+    // Behaviour 4: the new name, marked as the person's -- 2.1.260 writes
+    // `user` where 2.1.228 removed the key. No hook and no event: the CLI offers
+    // neither, which is why `SessionNameMirror` polls this file rather than
+    // listening for anything.
     state.name = name;
-    state.nameSource = null;
+    state.nameSource = 'user';
     publish();
     process.stdout.write(`renamed to ${name}\n`);
   };

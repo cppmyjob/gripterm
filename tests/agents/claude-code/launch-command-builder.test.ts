@@ -304,10 +304,15 @@ describe('LaunchCommandBuilder: the result cannot be edited afterwards', () => {
 
 /**
  * M2.19. The name a person gave the row, carried into the CLI's own view of the
- * conversation -- measured 2026-08-13: `claude --name X` puts `name: X` into
- * `~/.claude/sessions/<pid>.json` with NO `nameSource`, which is exactly what
- * `readSessionName` reads as "a person named this". So the two sides agree from
- * the first second instead of drifting until somebody types `/rename`.
+ * conversation -- measured 2026-08-13 against 2.1.228: `claude --name X` puts
+ * `name: X` into `~/.claude/sessions/<pid>.json` with NO `nameSource`, which
+ * `readSessionName` still reads as "a person named this". So the two sides agree
+ * from the first second instead of drifting until somebody types `/rename`.
+ *
+ * What 2.1.260 writes for a session started this way has NOT been measured -- see
+ * the comment beside the flag in `launch-command-builder.ts`. Nothing below turns
+ * on it: these are assertions about the argument vector this build produces, and
+ * the flag is sent whatever the CLI does with it.
  */
 describe('LaunchCommandBuilder: the name the person gave the row', () => {
   it('is given to the CLI on launch', () => {

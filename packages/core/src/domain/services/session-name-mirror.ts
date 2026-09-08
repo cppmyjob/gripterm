@@ -69,6 +69,13 @@ export interface SessionNameMirrorOptions {
  * measured (2026-08-13) -- `claude --resume` does NOT keep the name, the resumed
  * conversation comes back with a fresh derived one, and a derived name is
  * refused by `readSessionName`. The row therefore remembers what the CLI forgets.
+ *
+ * THAT STILL HOLDS after the rule in `readSessionName` was widened on 2026-09-08
+ * to admit `nameSource: "user"`, and it holds for the reason the sentence rests
+ * on rather than by luck: what a resume brings back is marked `derived`, and
+ * `derived` is refused by both the old rule and the new one. What changed is
+ * only which files count as a person's -- and a name the CLI invented was never
+ * one of them.
  */
 export class SessionNameMirror implements Disposable {
   private readonly _options: SessionNameMirrorOptions;

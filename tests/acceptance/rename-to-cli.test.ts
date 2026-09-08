@@ -23,9 +23,12 @@ import { WatchedTerminal } from './watching-a-terminal';
  *
  * From Ш32 the conversation is normally held by `tests/acceptance/fake-claude/`,
  * and the session file this reads is one the double wrote. That the file is
- * NAMED after the pid, carries `name`, and carries no `nameSource` once a person
- * has chosen the name, are all measurements of the real CLI (M2.19 and
- * 2026-08-13 against 2.1.228) that the double copies rather than invents -- and
+ * NAMED after the pid, carries `name`, and marks a name a person chose with
+ * `nameSource: "user"`, are all measurements of the real CLI (M2.19 2026-08-13,
+ * and 2026-09-08 against 2.1.260) that the double copies rather than invents.
+ * The mark moved between those two dates -- 2.1.228 REMOVED the key on `/rename`,
+ * 2.1.260 writes `user` into it -- and `readSessionName` accepts either; this
+ * suite reads only `name` and so says nothing about which. And
  * `CLAUDE_CONFIG_DIR`, which is what puts the double's file where this looks for
  * the CLI's, is moved into the run's own directory by the runner so that neither
  * side goes near a person's profile.

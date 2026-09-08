@@ -1,14 +1,42 @@
 import type { SessionId } from '../../entities/session-id';
 
 /**
- * The key the CLI writes when IT invented the name.
+ * The key the CLI writes to say where the name came from.
  *
- * Measured on 2026-08-13 against 2.1.228: a fresh session's file carries
- * `"nameSource":"derived"`, and `/rename` writes the new name and REMOVES the
- * key. So the absence of this field is the whole of the evidence that a person
- * typed the name -- there is no positive marker to look for.
+ * TWO MEASUREMENTS, AND THE RULE BELOW IS THE DIFFERENCE BETWEEN THEM. Both are
+ * kept: this build runs against whatever CLI the machine has.
+ *
+ * 2026-08-13, against 2.1.228: a fresh session's file carried
+ * `"nameSource":"derived"`, and `/rename` wrote the new name and REMOVED the
+ * key. The absence of the field was the whole of the evidence that a person had
+ * typed the name, and there was no positive marker to look for.
+ *
+ * 2026-09-08, on the owner's machine, against 2.1.260: the key is present in
+ * every one of four live sessions -- `"derived"` in two, `"user"` in the other
+ * two. There IS a positive marker now, and `/rename` no longer takes the key
+ * away. That is what turned the old rule, written to ADMIT a person's name, into
+ * one that refused every name the CLI writes: the owner typed `/rename fdfd`,
+ * the CLI renamed the conversation, and the row did not move.
+ *
+ * Neither measurement contradicts the other, so one rule serves both builds:
+ * `"user"` is a person, an absent key was a person on 2.1.228, and anything else
+ * -- including a source this build has never met -- is not.
  */
-const DERIVED_MARKER = 'nameSource';
+const NAME_SOURCE = 'nameSource';
+
+/**
+ * The one value of that key which says a person chose the name.
+ *
+ * WHAT WAS MEASURED on 2026-09-08 against 2.1.260: two of four live session
+ * files carried this value, the other two carried `derived`, and none was
+ * without the key. WHAT WAS NOT: which conversation each file belonged to, and
+ * what the CLI writes for a session started with `--name` -- which this product
+ * passes on every launch and every resume. `derived` there would mean the name
+ * is refused at launch and the two sides part company until somebody types
+ * `/rename`; `user` there would mean this build follows back the very name it
+ * gave, which costs nothing. Both are guesses until somebody looks.
+ */
+const CHOSEN_BY_A_PERSON = 'user';
 
 /**
  * The name Claude Code has for a conversation, when a person is the one who gave
@@ -31,6 +59,9 @@ const DERIVED_MARKER = 'nameSource';
  * names a fresh conversation after its folder (`trudocker-50`), and putting that
  * on the row would replace a name this build chose for the person -- and chose
  * to be unique within the window -- with one that is neither.
+ *
+ * HOW a person's name is recognised depends on the build of the CLI, and both
+ * ways are accepted -- see `NAME_SOURCE`. What is refused has not changed.
  */
 export function readSessionName(text: string, conversation: SessionId): string | null {
   let payload: unknown;
@@ -47,10 +78,11 @@ export function readSessionName(text: string, conversation: SessionId): string |
   if (fields.sessionId !== conversation.value) {
     return null;
   }
-  // Present at all, with any value: a source this build has never met is not
-  // evidence of a person, and `null` is a value the CLI could start writing
-  // tomorrow.
-  if (fields[DERIVED_MARKER] !== undefined) {
+  // Absent (2.1.228 and older) or `user` (2.1.260): a person. Anything else --
+  // `derived`, a source this build has never met, and `null`, which is a value
+  // the CLI could start writing tomorrow -- is not evidence of one.
+  const source = fields[NAME_SOURCE];
+  if (source !== undefined && source !== CHOSEN_BY_A_PERSON) {
     return null;
   }
 
