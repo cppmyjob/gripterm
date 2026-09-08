@@ -647,9 +647,14 @@ const MISSING = [
       'criterion. WHAT IT COST, MEASURED: the first terminal of a run took 20.3 s against 4.3 s before Ш39, ' +
       'because the answer was decided at the 15-second mark Ш38 chose. THE OWNER WEIGHED THAT ON 2026-09-08 ' +
       'AND DECIDED TO DO IT (Ш42): the wait is `a session OR the question on the screen`, whichever comes ' +
-      'first, and the 20.3 s above is therefore the last number taken of the old shape -- NO NEW NUMBER IS ' +
-      'PRINTED HERE, because nothing in this repository has re-measured it and inventing one is the failure ' +
-      'this whole record exists against. THE RISK THAT MOVE CARRIES, AND IT IS THE WHOLE OF THE WORK: the ' +
+      'first, and the 20.3 s above is therefore the last number taken of the old shape. THE NEW NUMBER, AND ' +
+      'IT IS NO LONGER OWED: MEASURED 2026-09-08 AGAINST THE REAL `claude` 2.1.260, the first terminal of an ' +
+      'acceptance run under `own` WITH THE TRUST QUESTION ASKED AND ANSWERED takes 8.4 s -- against the 22.4 s ' +
+      'the same machine measured that morning in the old shape, and against the 4.3 s of before Ш39, which ' +
+      'reached its number by sending the key blind and being told to leave. So Ш42 gave back more than Ш39 ' +
+      'spent AND kept the answer a sighted one. WHOLE-CRITERION NUMBERS FROM THE SAME SITTING: `rename` and П3 ' +
+      'together under `own`, 47 s; `rename` under `editor`, 47 s; `rename` under `own` a second time, 34 s. ' +
+      'THE RISK THAT MOVE CARRIES, AND IT IS THE WHOLE OF THE WORK: the ' +
       'frame used to be read once, at 15 s, and was therefore certain to be finished; it is read early now and ' +
       'can be caught MID-DRAWING, where the answering step refuses with `the cursor is on nothing this can ' +
       'read`. A naive version of this change turns a slow green into a fast red. So the decision is a pure ' +
@@ -705,8 +710,17 @@ const MISSING = [
       'IS PAID OUT OF A PERSON`S PROFILE: every `real` run writes a NEW record of trust into the profile of ' +
       'whoever ran it, where there used to be one such record for ever, and nothing here reads, counts or ' +
       'tidies them. Nothing accumulates on the disk side -- `prepare()` opens with `rmSync(BASE)`, which takes ' +
-      'every folder any earlier run left. The half nobody has checked: that the question really comes back. ' +
-      'It is text in a runner until a run against the real CLI says otherwise, and ' +
+      'every folder any earlier run left. THAT HALF IS NOW CHECKED, 2026-09-08, THREE RUNS IN A ROW EACH ON A ' +
+      'FOLDER OF ITS OWN against the real `claude` 2.1.260: under `own` the question CAME BACK and was ' +
+      'answered, TWICE OUT OF TWO; under `editor` it was NOT ASKED AT ALL. THE CAUSE OF THAT DIFFERENCE IS NOT ' +
+      'ESTABLISHED AND NO EXPLANATION IS OFFERED HERE: a plausible one written down would be the exact defect ' +
+      'this record exists against, so it stands as an open path with a day on it and not as a closed one. One ' +
+      'caveat belongs with the observation rather than under it: under `editor` a handle carries no screen ' +
+      '(§4.1), so `not asked` and `asked where nothing here could see it` have NOT been told apart, and the ' +
+      'sentence above is what the runs printed and not more. ONE EARLIER `because` IS WITHDRAWN BY THE SAME ' +
+      'MEASUREMENT: the five hosts` ~8 s was put down above to the CLI already holding trust for that folder, ' +
+      'and a run that holds NO trust for its folder, asks the question and answers it comes up in 8.4 s -- so ' +
+      'the pre-recorded trust does not account for the 8 s, and nothing here yet does. ' +
       '`tests/acceptance-answers-only-what-it-saw.test.ts` can only hold the path to not being a constant. ' +
       '`against-the-real-cli.json` IS NOT TOUCHED FROM HERE AND WAS NEVER THIS RECORD`S TO TOUCH: the ' +
       'orchestrator writes that file in the same move that corrected these sentences, and what a walk of ' +
