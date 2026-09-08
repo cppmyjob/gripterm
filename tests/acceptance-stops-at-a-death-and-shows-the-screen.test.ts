@@ -35,10 +35,17 @@ import { join, resolve } from 'node:path';
  *      may not have one.
  *   2. **A refusal shows the screen.** The watcher throws in exactly one place,
  *      and that place prints the tail first -- or, under the `editor` engine
- *      where no handle has a screen, says in one line that there is none. And
- *      each suite takes the tail itself at the one moment no refusal covers:
- *      immediately before the blind Enter it sends on the 15th second, which is
- *      the frame this whole move exists to see.
+ *      where no handle has a screen, says in one line that there is none. And the
+ *      tail is taken at the one moment no refusal covers: the 15th second, when a
+ *      session has not started and something is about to be decided about it.
+ *      **That look used to be in each of the four suites, immediately before the
+ *      blind Enter they sent there. Ш39 read the frame it printed, found the
+ *      cursor sitting on `No, exit`, and moved both the look and the answer into
+ *      `WatchedTerminal.theSessionStarts` -- one place, which reads the screen and
+ *      answers what is on it.** So this rule now asks the watcher for that look
+ *      rather than the suites, and what the suites are held to is that they carry
+ *      no key of their own at all:
+ *      `tests/acceptance-answers-only-what-it-saw.test.ts`.
  *
  * **THE PROCESS, NEVER THE RECORD, AND THAT WAS SETTLED BY A REFUTATION.** The
  * obvious predicate -- `isWitnessedEnd(entry.observed.state)` -- is forbidden
@@ -97,13 +104,30 @@ const THE_WATCHER = `from './watching-a-terminal'`;
  */
 const A_DEADLINE_OF_ITS_OWN = /Date\.now\(\)\s*[+<>]|[<>]=?\s*Date\.now\(\)/u;
 
-/** The blind Enter of the 15th second, as all four write it. */
-const A_BLIND_ENTER = `sendText('', true)`;
+/**
+ * How every suite brings its session up, and the one place the 15-second look
+ * lives since Ш39.
+ *
+ * It used to be four copies of a look followed by a blind Enter. The Enter chose
+ * `No, exit`, and both halves moved into the watcher; the suites now call this
+ * and carry no key at all.
+ */
+const THROUGH_THE_WATCHER = 'theSessionStarts(';
+
+/** The look at the frame that no refusal covers, as the watcher labels it. */
+const THE_LOOK_AT_FIFTEEN_SECONDS = `showTheScreen('at 15 s`;
 
 /** What a suite calls to put the terminal's own output on the run's output. */
 const SHOWS_THE_SCREEN = 'showTheScreen(';
 
-/** How far back from the blind Enter the screen may be taken and still be its frame. */
+/**
+ * How far above a refusal the screen may be taken and still be the frame that
+ * refusal is about.
+ *
+ * It used to measure the same distance above the blind Enter in each of the four
+ * suites; since Ш39 there is no such Enter, and the one remaining reader is
+ * the rule about the watcher's single `throw`.
+ */
 const WITHIN_LINES = 6;
 
 function textOf(file: string): string {
@@ -153,30 +177,16 @@ describe('the acceptance suites, which used to wait 73 seconds for a process tha
     expect(byTheClock).toStrictEqual([]);
   });
 
-  it('takes the screen immediately before the blind Enter, which is the frame nothing else covers', () => {
-    const unseen: string[] = [];
-    for (const file of theSuites()) {
-      const lines = linesOf(file);
-      for (const [index, line] of lines.entries()) {
-        if (!line.includes(A_BLIND_ENTER)) {
-          continue;
-        }
-        const before = lines.slice(Math.max(0, index - WITHIN_LINES), index);
-        if (!before.some((one) => one.includes(SHOWS_THE_SCREEN))) {
-          unseen.push(`${file}:${(index + 1).toString()} sends a blind Enter with no screen taken in the ${WITHIN_LINES.toString()} lines before it`);
-        }
-      }
-    }
-
-    expect(unseen).toStrictEqual([]);
+  it('takes the screen at the fifteenth second, in the one place that now does it for all four', () => {
+    expect(theWatcher()).toContain(THE_LOOK_AT_FIFTEEN_SECONDS);
   });
 
   it('is looked for at all, so that no assertion above is about an empty list', () => {
     const suites = theSuites();
-    const enters = suites.filter((file) => textOf(file).includes(A_BLIND_ENTER));
+    const throughTheWatcher = suites.filter((file) => textOf(file).includes(THROUGH_THE_WATCHER));
 
     expect(suites.length).toBeGreaterThanOrEqual(4);
-    expect(enters.length).toBeGreaterThanOrEqual(4);
+    expect(throughTheWatcher.length).toBeGreaterThanOrEqual(4);
   });
 });
 

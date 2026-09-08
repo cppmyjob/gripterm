@@ -203,6 +203,14 @@ function putTheDoubleOnThePath() {
   // The interpreter by absolute path: the launcher starts `node` on the double,
   // and a bare `node` on the PATH a terminal inherits is not guaranteed (C5-2).
   process.env.GRIPTERM_FAKE_CLAUDE_NODE = process.execPath;
+  // Since Ш39 the double asks about a folder it has not seen, the way the real
+  // CLI was measured to on 2026-09-08. THIS run has no way to answer it: it
+  // waits for a terminal to come up and reads no screen at all. So it says what a
+  // profile says when somebody trusted the folder on an earlier day, rather than
+  // sending a key at a prompt nothing here can see -- which is the defect Ш39
+  // removed. The suites that DO have eyes answer it for real, under the `own`
+  // engine, in `tests/acceptance/watching-a-terminal.ts`.
+  process.env.GRIPTERM_FAKE_CLAUDE_FOLDER_IS_ALREADY_TRUSTED = '1';
   return where;
 }
 

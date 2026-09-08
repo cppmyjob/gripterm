@@ -98,15 +98,10 @@ suite('П3', () => {
     // Before anything can end: see `watching-a-terminal.ts`.
     const watched = new WatchedTerminal(gripterm, entry.terminalId);
 
-    const trustPrompt = 15_000;
-    if ((await watched.waitedFor('the session to start', () => stateOf(gripterm, id) === 'idle', trustPrompt)) !== 'reached') {
-      // Blind, and said so since 2026-09-08; the frame it is sent into is taken
-      // since Ш38 -- see `rename-from-cli.test.ts` and `watching-a-terminal.ts`.
-      watched.showTheScreen('at 15 s, before the blind Enter');
-      console.log('P3: no session after 15 s; sending a blind Enter, in case the CLI is waiting to be trusted -- nothing here has seen a prompt');
-      gripterm.gateway.handleFor(entry.terminalId)?.sendText('', true);
-    }
-    await watched.until('the session to start', () => stateOf(gripterm, id) === 'idle');
+    // The CLI's own question about an unseen folder, answered by what is on the
+    // screen rather than by a blind Enter -- see `watching-a-terminal.ts`, which
+    // is where that Enter was found to be pressing `No, exit` (2026-09-08, Ш39).
+    await watched.theSessionStarts(() => stateOf(gripterm, id) === 'idle');
 
     gripterm.metadata.setTask(entry.terminalId, TASK);
     gripterm.metadata.addNote(entry.terminalId, NOTE);

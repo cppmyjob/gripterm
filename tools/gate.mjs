@@ -586,7 +586,8 @@ const MISSING = [
       'DOUBLE IS NAMED IN THAT SENTENCE ON PURPOSE: it is what answered, and a green from it is a green about ' +
       '`tests/acceptance/fake-claude/`. The 201 s, 212 s, 185 s and 210 s above are whole-run numbers and all ' +
       'predate the split, which adds one host to each engine; they have not been retaken. ' +
-      'THE FIRST RUN EVER MADE AGAINST THE REAL CLI, 2026-09-08, AND IT IS RED ON BOTH ENGINES. Until that ' +
+      'THE FIRST RUN EVER MADE AGAINST THE REAL CLI, 2026-09-08, AND IT WAS RED ON BOTH ENGINES; THE CAUSE ' +
+      'UNDER `own` IS NOW ESTABLISHED AND IT WAS OURS (Ш39, the same day). Until that ' +
       'day `lastRun` in `tests/acceptance/against-the-real-cli.json` was `null`: the debt that file records ' +
       'had never once been paid, so nothing in this repository had ever seen this acceptance meet Claude ' +
       'Code. It has now, for one criterion of the four -- `pnpm run test:acceptance rename` with ' +
@@ -594,17 +595,38 @@ const MISSING = [
       'for the session to start after 90000 ms`. Under `editor`, once: the session came up inside 15 s and ' +
       'then `gave up waiting for the row to be called gripterm-acceptance-renamed (the list said "project" ' +
       'and the record "project" when the wait began) after 90000 ms`. THE CAUSE IS NOT ESTABLISHED AND IS NOT ' +
-      'GUESSED AT HERE. Two sides can carry it and neither is chosen: this STAND in its `real` mode, which no ' +
+      'GUESSED AT HERE FOR THE `editor` HALF. Two sides can carry it and neither is chosen: this STAND in its `real` mode, which no ' +
       'run had exercised before that day and which is therefore unproven in exactly the way a first run ' +
       'exposes, and the PRODUCT. What weighs against the second without settling anything is the owner`s own ' +
       'daily use -- he works under `own` with a real `claude` and his terminals come up -- so "the real CLI ' +
       'does not start under `own`" is a sentence this finding does NOT support as a general claim. WHAT THE ' +
-      'GREEN ABOVE IS WORTH IN THAT LIGHT: the double asks nothing before it starts, by its own head ' +
-      '(`fake-claude.mjs`), so the trust prompt the real CLI raises for an unseen folder is a branch a `fake` ' +
-      'run never reaches, and the four suites` Enter for it is dead code there. ONE INSTRUMENT DEFECT WAS ' +
+      'GREEN ABOVE WAS WORTH IN THAT LIGHT, AND IT IS THE HALF THAT MATTERED: the double asked nothing before ' +
+      'it started, by its own head (`fake-claude.mjs`), so the trust prompt the real CLI raises for an unseen ' +
+      'folder was a branch a `fake` run never reached, and the four suites` Enter for it was dead code there. ' +
+      'Four criteria green against a program that skipped the first thing Claude Code says. ' +
+      'BOTH HALVES OF THAT ARE CORRECTED IN Ш39, and the first of them is the answer to the `own` redness ' +
+      'above. THE FRAME Ш38 TAUGHT THE SUITES TO PRINT WAS PRINTED, and the cursor was on `No, exit`: the ' +
+      'blind Enter was choosing "no, leave", which is why `claude` left with code 1 on the 17th second, three ' +
+      'runs of three. So (1) the Enter is gone from all four suites -- `WatchedTerminal.theSessionStarts` reads ' +
+      'the screen at 15 s, moves the cursor onto `Yes, I trust this folder` with an `ESC [ B`, looks AGAIN, and ' +
+      'confirms only what the second look says is under the cursor; anything else on that screen is printed and ' +
+      'the wait refuses with it. (2) The double now ASKS the measured question, so that answer is walked by ' +
+      'every acceptance run under `own` instead of by one that costs turns, and by `tests/fake-claude.test.ts` ' +
+      'on every gate. Two rules hold the pair together, both in this gate: ' +
+      '`tests/acceptance-answers-only-what-it-saw.test.ts` (no suite carries a key of its own; every key the ' +
+      'watcher sends has a look above it; both sides print the same measured words) and ' +
+      '`tests/acceptance-stops-at-a-death-and-shows-the-screen.test.ts`. WHAT IS STILL BLIND, SAID PLAINLY: ' +
+      'under `editor` a handle carries no screen (§4.1), so no suite there can see a prompt at all. The ' +
+      'watcher REFUSES there rather than guessing, and the run sets ' +
+      '`GRIPTERM_FAKE_CLAUDE_FOLDER_IS_ALREADY_TRUSTED` for the double -- the state a profile is in when ' +
+      'somebody answered on an earlier day -- so the question is asked and answered on every `own` run and on ' +
+      'no `editor` one. WHAT ANSWERING COSTS AGAINST THE REAL CLI, and it is the owner`s to weigh: `Yes, I ' +
+      'trust this folder` writes trust for the run`s own temporary folder into the profile of whoever runs it, ' +
+      'and nothing here reads or tidies that profile. ONE INSTRUMENT DEFECT WAS ' +
       'ESTABLISHED BY THIS RUN AND IS CORRECTED: the suites printed "answering the CLI trust prompt with ' +
       'Enter", which they cannot know -- they read the record`s state and see no prompt, and under `own` that ' +
-      'line printed in both runs while no session ever came. All four now say they are sending a blind Enter. ' +
+      'line printed in both runs while no session ever came. All four said they were sending a blind Enter, and ' +
+      'in Ш39 that Enter was read, understood and removed. ' +
       'A SECOND INSTRUMENT DEFECT WAS ESTABLISHED BY THE SAME RUN AND CORRECTED IN Ш38, and it is the reason ' +
       'the 90 000 ms above is a number this repository will not print again for a dead process: the window`s ' +
       'own log of that run says the terminal CLOSED at 14:41:16 with `{"exitCode":1,"reason":"process",' +
@@ -612,11 +634,12 @@ const MISSING = [
       'for a process that was gone and then named the deadline as the cause. It was not the cause. Every wait ' +
       'in the four suites now goes through `tests/acceptance/watching-a-terminal.ts`, which ends on ' +
       '`TerminalHandle.onDidClose` -- the gateway`s own witness of the PROCESS -- and says the exit code and ' +
-      'the reason instead. NOT on the record`s `ended`, and that was settled by a refutation rather than by ' +
+      'the reason instead -- and it was that instrument, on its first outing, that caught the blind Enter above. ' +
+      'NOT on the record`s `ended`, and that was settled by a refutation rather than by ' +
       'taste: `/clear` walks a healthy terminal through `ended` and out of it again (the state machine`s ' +
       'resurrection edge), so a refusal keyed on the record would have failed `p3-clear.test.ts` on a ' +
       'terminal that was never in any trouble. THE SUITES ALSO PRINT THE SCREEN NOW -- the tail the panel`s ' +
-      'bridge keeps, twice: immediately before the blind Enter at 15 s, and at every refusal -- so the next ' +
+      'bridge keeps, twice: at 15 s with no session started, and at every refusal -- so a ' +
       'run against the real CLI can be READ rather than guessed at. It is a byte tail and not a rendered ' +
       'frame, which the head of that file says at length. `against-the-real-cli.json` IS DELIBERATELY NOT ' +
       'TOUCHED: one criterion of four was walked, and what that does to the debt`s date is the owner`s ' +

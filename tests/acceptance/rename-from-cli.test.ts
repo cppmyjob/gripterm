@@ -139,33 +139,27 @@ async function aTerminalWithASession(
     registry.list().find((one) => one.terminalId.value === id)?.observed.state ?? 'nothing at all';
 
   /*
-   * A BLIND ENTER, AND THE LINE IT PRINTS USED TO CLAIM MORE THAN THAT.
+   * THE BLIND ENTER IS GONE, AND WHAT IT TURNED OUT TO BE PRESSING.
    *
    * The real CLI puts a trust prompt in front of a folder it has not seen
-   * (measured 2026-08-13, quoted in `p2-first-window.test.ts`), and this is the
-   * Enter for it. Until 2026-09-08 this code printed "answering the CLI trust
-   * prompt with Enter" while reading the record's state and nothing else -- it
-   * had never seen a prompt in its life. THAT WAS A GUESS OF THE INSTRUMENT, and
-   * the run that showed it up is in `tools/gate.mjs`: against the real CLI under
-   * `own` the line printed in both runs and the session still never came, so
-   * what it announced as an answer was the timeout and not a prompt.
+   * (measured 2026-08-13, quoted in `p2-first-window.test.ts`), and this is where
+   * the four suites answered it. Until 2026-09-08 this code printed "answering
+   * the CLI trust prompt with Enter" while reading the record's state and nothing
+   * else -- it had never seen a prompt in its life. THAT WAS A GUESS OF THE
+   * INSTRUMENT, and the run that showed it up is in `tools/gate.mjs`: against the
+   * real CLI under `own` the line printed in both runs and the session still
+   * never came.
    *
-   * SINCE Ш38 THE FRAME ITSELF IS TAKEN, immediately before the Enter goes: the
-   * tail of what the process has printed, which is where the words about
-   * trusting a folder would be if they were anywhere. The Enter is deliberately
-   * unchanged -- it is the suspect of this experiment, and the experiment is run
-   * OVER it rather than instead of it.
-   *
-   * The double asks nothing before it starts, by its own head, so under `fake`
-   * this branch is never reached at all.
+   * Ш38 took the frame the Enter was going into and left the Enter alone, because
+   * it was the suspect. It was guilty: the cursor sits on `No, exit`, so the
+   * acceptance was answering "no, leave" and `claude` was leaving with code 1 on
+   * the 17th second, three runs out of three. Ш39 replaced it with a look at the
+   * screen and an answer chosen on what is on it, in one place for all four
+   * suites -- `watching-a-terminal.ts` -- and taught the double to ask the same
+   * question, so the answer is walked by every run under `own` instead of only by
+   * a run that costs turns.
    */
-  const trustPrompt = 15_000;
-  if ((await watched.waitedFor('the session to start', () => stateOf() === 'idle', trustPrompt)) !== 'reached') {
-    watched.showTheScreen('at 15 s, before the blind Enter');
-    console.log('rename: no session after 15 s; sending a blind Enter, in case the CLI is waiting to be trusted -- nothing here has seen a prompt');
-    gripterm.gateway.handleFor(entry.terminalId)?.sendText('', true);
-  }
-  await watched.until('the session to start', () => stateOf() === 'idle');
+  await watched.theSessionStarts(() => stateOf() === 'idle');
   return { entry, watched };
 }
 

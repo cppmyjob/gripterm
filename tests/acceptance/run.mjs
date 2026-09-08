@@ -389,6 +389,26 @@ function putTheDoubleOnThePath() {
   const where = buildFakeClaude();
   process.env.PATH = `${where};${process.env.PATH ?? ''}`;
   process.env.CLAUDE_CONFIG_DIR = CLAUDE_CONFIG;
+  // WHO CAN ANSWER THE DOUBLE'S QUESTION ABOUT THE FOLDER, AND WHO CANNOT.
+  //
+  // Since Ш39 the double asks what the real CLI was measured to ask on
+  // 2026-09-08: a folder it has not seen gets a prompt with the cursor on
+  // `No, exit`, and until it is answered nothing starts. Under `own` the suites
+  // ANSWER it -- the panel keeps the tail of everything a terminal printed, so
+  // `watching-a-terminal.ts` reads the screen, moves the cursor onto
+  // `Yes, I trust this folder` and confirms what it then sees. That is the whole
+  // point of the step, and it is why this is not set here.
+  //
+  // Under `editor` there is no screen at all beside a handle (§4.1), so nothing
+  // in this run can see a prompt, and a key sent unseen is precisely the defect
+  // Ш39 removed -- the old blind Enter was pressing `No, exit`. So this run says
+  // instead what a real profile says when somebody answered on an earlier day.
+  // The question is then not asked under `editor`, which is the honest cost:
+  // that branch of the double is walked by every `own` run and by no `editor`
+  // one.
+  if (ENGINE === 'editor') {
+    process.env.GRIPTERM_FAKE_CLAUDE_FOLDER_IS_ALREADY_TRUSTED = '1';
+  }
   // The interpreter by absolute path: the launcher starts `node` on the double,
   // and a bare `node` on the PATH a terminal inherits is not guaranteed (C5-2).
   process.env.GRIPTERM_FAKE_CLAUDE_NODE = process.execPath;

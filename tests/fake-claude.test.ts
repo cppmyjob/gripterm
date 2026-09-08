@@ -159,13 +159,26 @@ interface Session {
   readonly exited: Promise<number | null>;
 }
 
-function start(where: Room, args: readonly string[]): Session {
+/**
+ * A session of the double, started the way another program starts it.
+ *
+ * `asksAboutTheFolder` is off for every test but the four that are ABOUT the
+ * question, and that is a decision rather than a convenience. Behaviour 16 puts a
+ * question in front of a folder this double has not seen, every room here is a
+ * fresh temporary folder, and a suite whose every session had to answer it first
+ * would be testing the answer thirteen times and everything else through it. So
+ * the rest of them say what a profile says when somebody answered on an earlier
+ * day -- which is exactly what the variable means -- and the question gets tests
+ * of its own, below.
+ */
+function start(where: Room, args: readonly string[], asksAboutTheFolder = false): Session {
   const child = spawn(process.execPath, [DOUBLE, ...args], {
     cwd: where.cwd,
     env: {
       ...process.env,
       CLAUDE_CONFIG_DIR: where.config,
       GRIPTERM_TOKEN: TOKEN,
+      ...(asksAboutTheFolder ? {} : { GRIPTERM_FAKE_CLAUDE_FOLDER_IS_ALREADY_TRUSTED: '1' }),
     },
   });
   let stdout = '';
@@ -255,11 +268,96 @@ describe('the double that stands in for `claude`', () => {
     return where;
   }
 
-  function launch(where: Room, args: readonly string[]): Session {
-    const session = start(where, args);
+  function launch(where: Room, args: readonly string[], asksAboutTheFolder = false): Session {
+    const session = start(where, args, asksAboutTheFolder);
     running.push(session);
     return session;
   }
+
+  /**
+   * The question of behaviour 16, and the two keys that answer it.
+   *
+   * The same two the acceptance sends -- `ESC [ B` and a carriage return -- and
+   * the same order, because the point of these four tests is that the answering
+   * path the suites walk is walked here too, on every gate, with no editor and no
+   * pty. What a pty adds is measured separately and once: 2026-09-08, node-pty
+   * 1.1.0 over a ConPTY, the arrow arrived and the cursor moved. THIS suite
+   * cannot establish that, and does not claim to -- a pipe delivers what is
+   * written to it, and a console has modes.
+   */
+  const A_DOWN_ARROW = '\u001B[B';
+
+  describe('the question it asks about a folder it has not seen', () => {
+    it('asks it in the measured words, with the cursor on the refusing choice', async () => {
+      const where = open();
+      const session = launch(where, ['--session-id', SESSION, '--settings', where.settings], true);
+
+      await within('the question', () => session.stdout().includes('Yes, I trust this folder'));
+
+      expect(session.stdout()).toContain(`Accessing workspace: ${where.cwd}`);
+      expect(session.stdout()).toContain('Quick safety check: Is this a project you created or one you trust?');
+      expect(session.stdout()).toContain('❯ No, exit');
+      expect(session.stdout()).toContain('Enter to confirm');
+      // The question and nothing else: no session may start behind it.
+      expect(named(listening.posted, 'SessionStart')).toHaveLength(0);
+      expect(sessionFiles(where)).toStrictEqual([]);
+    });
+
+    it('moves its cursor onto the trusting choice, and starts the conversation when that is confirmed', async () => {
+      const where = open();
+      const session = launch(where, ['--session-id', SESSION, '--settings', where.settings], true);
+      await within('the question', () => session.stdout().includes('Yes, I trust this folder'));
+
+      const asked = session.stdout().length;
+      session.child.stdin.write(A_DOWN_ARROW);
+      await within(
+        'the cursor to move onto the trusting choice',
+        () => session.stdout().slice(asked).includes('❯ Yes, I trust this folder')
+      );
+      session.child.stdin.write('\r');
+
+      await within('the session to start', () => named(listening.posted, 'SessionStart').length === 1);
+      expect(session.stdout()).toContain(`conversation ${SESSION} in ${where.cwd}`);
+    });
+
+    it('does not ask about the same folder twice', async () => {
+      const where = open();
+      const first = launch(where, ['--session-id', SESSION, '--settings', where.settings], true);
+      await within('the question', () => first.stdout().includes('Yes, I trust this folder'));
+      first.child.stdin.write(`${A_DOWN_ARROW}\r`);
+      await within('the session to start', () => named(listening.posted, 'SessionStart').length === 1);
+      first.child.stdin.write('/exit\r');
+      expect(await first.exited).toBe(0);
+
+      const second = launch(where, ['--session-id', OTHER_SESSION, '--settings', where.settings], true);
+      await within('the second session to start', () => named(listening.posted, 'SessionStart').length === 2);
+
+      expect(second.stdout()).not.toContain('Yes, I trust this folder');
+    });
+
+    it('leaves with code 1 when the answer under the cursor is the refusing one', async () => {
+      const where = open();
+      const session = launch(where, ['--session-id', SESSION, '--settings', where.settings], true);
+      await within('the question', () => session.stdout().includes('Yes, I trust this folder'));
+
+      // Enter with nothing moved, which is the blind Enter the four suites used
+      // to send: the cursor is on `No, exit` and this is what it was choosing.
+      session.child.stdin.write('\r');
+
+      expect(await session.exited).toBe(1);
+      expect(named(listening.posted, 'SessionStart')).toHaveLength(0);
+    });
+
+    it('asks nothing, and says so, when the run declares the folder trusted before it started', async () => {
+      const where = open();
+      const session = launch(where, ['--session-id', SESSION, '--settings', where.settings]);
+
+      await within('the session to start', () => named(listening.posted, 'SessionStart').length === 1);
+
+      expect(session.stdout()).not.toContain('Yes, I trust this folder');
+      expect(session.stdout()).toContain('GRIPTERM_FAKE_CLAUDE_FOLDER_IS_ALREADY_TRUSTED is set');
+    });
+  });
 
   it('answers `--version` with a build that is not the one this repository pinned', async () => {
     const where = open();

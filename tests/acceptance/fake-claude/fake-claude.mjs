@@ -31,12 +31,21 @@
  *     and nothing whatever about an agent producing one.
  *   * draws no interface. There is no prompt box, no spinner, no status line, no
  *     ANSI screen of any kind. Anything about how a terminal LOOKS is untested by
- *     a run against this.
- *   * asks nothing before it starts. The real CLI puts a trust prompt in front of
- *     a folder it has not seen (measured 2026-08-13, quoted in
- *     `p2-first-window.test.ts`); this program starts in an unseen folder without
- *     a word. The suites carry an Enter for that prompt and it is never needed
- *     here, so THAT branch of the suites is dead code under this double.
+ *     a run against this. The one exception is behaviour 16, the question about
+ *     the folder, and it is plain lines: the CLI repaints that prompt in place
+ *     and this program prints the block again, because what was measured of it is
+ *     the TEXT and a repaint nobody saw would be invention.
+ *   * asks ONE thing before it starts, and until 2026-09-08 (Ш39) it asked
+ *     nothing. That was the largest hole this double had: the real CLI puts a
+ *     trust prompt in front of a folder it has not seen, the four suites carried
+ *     a blind Enter for it, and against this double that Enter was never needed
+ *     -- so all four criteria went green against a program that skipped the first
+ *     thing Claude Code says, and the answering code ran only in a run that costs
+ *     the owner turns. It ran in one, on 2026-09-08, and the blind Enter turned
+ *     out to be pressing `No, exit`. The question is behaviour 16 below, the
+ *     answer is now walked by every acceptance run under the `own` engine, and
+ *     `tests/acceptance-answers-only-what-it-saw.test.ts` holds both sides to the
+ *     measured words.
  *   * uses no tools, asks no permissions, starts no subagents and reports no
  *     cost. Of the thirteen hooks `hook-vocabulary.ts` translates it ever emits
  *     four: SessionStart, SessionEnd, UserPromptSubmit and Stop. PreToolUse,
@@ -141,6 +150,19 @@
  *      deliberately NOT the pinned one, so that a window running against it says
  *      out loud that it is not on the build every fact was measured against.
  *  15. `/exit` leaves with code 0. MEASURED: A13, 2026-08-10.
+ *  16. A folder it has not seen is asked about before anything starts, in nine
+ *      lines with the cursor on `No, exit`, and Enter on that line leaves with
+ *      code 1. MEASURED: 2026-09-08, CLI 2.1.260, printed by
+ *      `tests/acceptance/watching-a-terminal.ts` out of the acceptance's own pty
+ *      and quoted whole at `THE_TRUST_QUESTION`. Three runs of three ended
+ *      `exitCode: 1, reason: process` on the 17th second, which is what the
+ *      suites' blind Enter bought. What is copied is the TEXT and the cursor's
+ *      starting line; what is OUR SIDE is everything about the mechanism -- that
+ *      the answer is remembered per folder (`fake-claude-trusted/`, a directory
+ *      the CLI has no such thing as), that a second launch into a trusted folder
+ *      is not asked, that the arrows are `ESC [ A/B` and `ESC O A/B`, and that
+ *      the cursor clamps rather than wraps. Esc is printed in the measured line
+ *      and is deliberately not implemented; `takeAKey` says why.
  *
  * OUR SIDE, and marked as such rather than dressed up as the CLI's:
  *
@@ -177,6 +199,13 @@
  * a convenience: everything it writes goes under that directory, and without one
  * it would be writing session files and transcripts into the profile of whoever
  * is logged in.
+ *
+ * The one other variable it reads is
+ * `GRIPTERM_FAKE_CLAUDE_FOLDER_IS_ALREADY_TRUSTED`, and it is a declaration
+ * rather than a switch: a run that has no way to SEE the question of behaviour 16
+ * says so, and this program then behaves as it would in a profile where somebody
+ * had already answered. It says which one it did on the terminal. See
+ * `ALREADY_TRUSTED`.
  */
 
 import { spawn } from 'node:child_process';
@@ -227,6 +256,72 @@ const HEARTBEAT_IS_STALE_MS = HEARTBEAT_MS * 5;
 
 /** Ours: the terminal is a pty, and a line arrives with either terminator or both. */
 const LINE_BREAK = /\r\n|\r|\n/u;
+
+/**
+ * The question the real CLI puts in front of a folder it has not seen, word for
+ * word.
+ *
+ * MEASURED 2026-09-08, CLI 2.1.260, in the acceptance's own pty: this is the
+ * tail `tests/acceptance/watching-a-terminal.ts` printed on the 15th second of a
+ * run that had been answering it blind, with the escape sequences taken out. The
+ * only thing changed here is the workspace path, which was that run's own:
+ *
+ * ```
+ * Accessing workspace: c:\...\gripterm-acceptance\project
+ * Quick safety check: Is this a project you created or one you trust?
+ * (Like your own code, a well-known open source project, or work from your team).
+ * If not, take a moment to review what's in this folder first.
+ * Claude Code'll be able to read, edit, and execute files here.
+ * Security guide
+ *  ❯ No, exit
+ *    Yes, I trust this folder
+ *  Enter to confirm · Esc to cancel
+ * ```
+ *
+ * Copied and not improved on, down to which line the cursor starts on: the
+ * REFUSING one. That is the whole reason this question is in this file at all --
+ * the four suites used to press Enter without looking, which on this prompt is
+ * the answer "no, leave", and `claude` left with code 1 on the 17th second,
+ * three runs out of three.
+ */
+const THE_TRUST_QUESTION = [
+  `Quick safety check: Is this a project you created or one you trust?`,
+  `(Like your own code, a well-known open source project, or work from your team).`,
+  `If not, take a moment to review what's in this folder first.`,
+  `Claude Code'll be able to read, edit, and execute files here.`,
+  `Security guide`,
+];
+
+/** The two answers, in the measured order. The cursor starts on the first. */
+const TRUST_CHOICES = ['No, exit', 'Yes, I trust this folder'];
+
+/** U+276F, the cursor of that prompt, and the one glyph the instrument steers by. */
+const THE_CURSOR = '\u276f';
+
+/** The first byte of every key that is not a character. Named, because a literal one is invisible. */
+const ESC = '\u001b';
+
+/** The line that says which key confirms. U+00B7 is the separator it was measured with. */
+const CONFIRM_LINE = `Enter to confirm \u00b7 Esc to cancel`;
+
+/**
+ * A run that says the folder was trusted before it started, so that nothing is
+ * asked.
+ *
+ * OURS, and it exists because ANSWERING this question needs eyes. The acceptance
+ * has them under the `own` engine -- the panel keeps the tail of everything a
+ * terminal printed -- and has none at all under `editor`, where a handle carries
+ * no screen (§4.1). A run that cannot see a prompt must not send a key at it;
+ * that is the defect Ш39 removed. So the runs with no eyes say so here instead,
+ * and it stands for the state a real profile would be in: a folder somebody
+ * trusted on an earlier day is a folder the CLI does not ask about again.
+ *
+ * Set by `tests/acceptance/run.mjs` under the `editor` engine only, and by
+ * `tests/vsix/run.mjs` whenever it is asked for the double. NOT set under `own`:
+ * there the question is asked, seen and answered on every run, which is the only
+ * reason the answering code is worth anything.
+ */
+const ALREADY_TRUSTED = 'GRIPTERM_FAKE_CLAUDE_FOLDER_IS_ALREADY_TRUSTED';
 
 function main() {
   const argv = process.argv.slice(2);
@@ -623,6 +718,198 @@ function listAgents() {
   process.stdout.write(`${JSON.stringify(running)}\n`);
 }
 
+// --- the question about the folder -------------------------------------------
+
+/**
+ * Where this program remembers a folder somebody trusted.
+ *
+ * OUR SIDE, and deliberately outside the layout this file copies, for the reason
+ * `runningDirectory` gives about its own directory: `sessions/` and `projects/`
+ * are shapes taken from the CLI, and nothing may be added to them that the CLI
+ * does not put there. WHERE the real CLI keeps this was never measured by any
+ * step of ours -- what was measured is the OBSERVABLE rule, and only one half of
+ * it: a folder it has not seen is asked about (2026-09-08). That the same folder
+ * is not asked about twice is OUR SIDE as well; it is the behaviour of every
+ * such prompt anybody here has used, and a double that asked again on every
+ * launch would make the answer untestable in the one run that has eyes.
+ */
+function trustedDirectory(config) {
+  return join(config, 'fake-claude-trusted');
+}
+
+/** One file per folder, named the way transcripts name theirs: punctuation to dashes. */
+function trustFileFor(config, cwd) {
+  return join(trustedDirectory(config), `${cwd.replace(/[^a-zA-Z0-9]/gu, '-')}.json`);
+}
+
+/**
+ * Whether this folder is one the question has an answer for.
+ *
+ * Two ways to be true, and the second is not an answer at all: the run may
+ * declare that the folder was trusted before it started (see `ALREADY_TRUSTED`).
+ * It says so out loud on the terminal, so that a person reading a run's output
+ * can tell a question that was ANSWERED from one that was never asked.
+ */
+function theFolderHasBeenTrusted(config, cwd) {
+  if (existsSync(trustFileFor(config, cwd))) {
+    return true;
+  }
+  if ((process.env[ALREADY_TRUSTED] ?? '').trim().length === 0) {
+    return false;
+  }
+  process.stdout.write(
+    `${ALREADY_TRUSTED} is set, so this double asked nothing about ${cwd}: the run it is in has no way to see a prompt\n`
+  );
+  return true;
+}
+
+function rememberTheFolder(config, cwd) {
+  const dir = trustedDirectory(config);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    trustFileFor(config, cwd),
+    JSON.stringify({ cwd, trustedAt: new Date().toISOString(), writtenBy: 'the Gripterm acceptance double' }, null, 2),
+    'utf8'
+  );
+}
+
+/**
+ * The question on the terminal, with the cursor where the measurement put it.
+ *
+ * Printed again on every move rather than repainted in place. The real CLI
+ * repaints -- it is an interface drawn with escape sequences -- but WHICH
+ * sequences was never measured: the tail of 2026-09-08 was read with the escapes
+ * taken out, so all that survives of that frame is its text. Inventing a repaint
+ * would be inventing the one part of this nobody has seen, and a reader of a
+ * run's output is better served by a second copy of the block than by a guess
+ * that moves a cursor somewhere.
+ */
+function drawTheQuestion(cwd, cursorAt) {
+  const lines = [
+    `Accessing workspace: ${cwd}`,
+    ...THE_TRUST_QUESTION,
+    ...TRUST_CHOICES.map((choice, at) => (at === cursorAt ? ` ${THE_CURSOR} ${choice}` : `   ${choice}`)),
+    ` ${CONFIRM_LINE}`,
+  ];
+  process.stdout.write(`${lines.join('\n')}\n`);
+}
+
+/**
+ * Keys rather than lines, for as long as the question is up.
+ *
+ * An arrow key is not a line, and a terminal in its ordinary mode never delivers
+ * one: the console eats it as line editing. Raw mode is what makes the pty hand
+ * the bytes over, and it is turned off again the moment the question is answered
+ * -- everything after this reads LINES, exactly as it did before Ш39, and a
+ * session left in raw mode would be a change to every one of those reads for the
+ * sake of two keys.
+ *
+ * Absent where there is no terminal at all: `tests/fake-claude.test.ts` starts
+ * this program on pipes, where there is no mode to set and the bytes arrive as
+ * they were written.
+ */
+function keysRatherThanLines() {
+  if (process.stdin.isTTY !== true || typeof process.stdin.setRawMode !== 'function') {
+    return () => {
+      // Nothing to put back: there was no mode to set.
+    };
+  }
+  process.stdin.setRawMode(true);
+  return () => {
+    process.stdin.setRawMode(false);
+  };
+}
+
+/**
+ * One key off the front of what has arrived, or `null` while it is still half a
+ * key.
+ *
+ * Both spellings of an arrow: `ESC [ B` is what a terminal sends in its ordinary
+ * cursor mode and `ESC O B` is what it sends in application mode, and which one
+ * arrives is the far end's decision rather than ours. A lone ESC -- "Esc to
+ * cancel", in the measured line above -- is deliberately NOT a key here: telling
+ * it from the first byte of an arrow needs a timer, that timer is a mechanism
+ * nobody measured, and nothing in this repository presses Esc. The line is
+ * printed because the measurement has it; the key behind it is not implemented,
+ * and this sentence is the whole of the reason.
+ */
+function takeAKey(pending) {
+  if (pending.length === 0) {
+    return null;
+  }
+  const escape = pending.startsWith(ESC);
+  if (escape && pending.length < 3) {
+    return null;
+  }
+  if (escape && (pending.startsWith(`${ESC}[`) || pending.startsWith(`${ESC}O`))) {
+    const letter = pending.charAt(2);
+    const key = letter === 'A' ? 'up' : letter === 'B' ? 'down' : 'nothing';
+    return { key, rest: pending.slice(3) };
+  }
+  const first = pending.charAt(0);
+  return { key: first === '\r' || first === '\n' ? 'confirm' : 'nothing', rest: pending.slice(1) };
+}
+
+/**
+ * The question, and the answer it waits for.
+ *
+ * `No, exit` leaves with code 1, which is what the real CLI did three runs out of
+ * three when the acceptance pressed Enter on it (2026-09-08). `Yes, I trust this
+ * folder` calls back, and the caller writes the folder down so that the second
+ * launch into it is not asked.
+ *
+ * The cursor CLAMPS at either end rather than wrapping, and that is OUR SIDE: a
+ * list of two has no measured behaviour for a third press in the same direction,
+ * and clamping is the choice that cannot turn an answer into its opposite.
+ */
+function askAboutTheFolder(cwd, trusted) {
+  let cursorAt = 0;
+  const linesAgain = keysRatherThanLines();
+  process.stdin.setEncoding('utf8');
+  let pending = '';
+  // A terminal whose other end went away while the question was up. Nothing is
+  // trusted and nothing starts. Taken off again with the rest of them: the
+  // session installs an `end` of its own that leaves with code 0, and a listener
+  // of this one left behind would turn every ordinary end of a pty into a 1.
+  const onEnd = () => {
+    process.exit(1);
+  };
+  const onData = (chunk) => {
+    pending += chunk;
+    for (;;) {
+      const taken = takeAKey(pending);
+      if (taken === null) {
+        return;
+      }
+      pending = taken.rest;
+      if (taken.key === 'up' || taken.key === 'down') {
+        const moved = Math.min(TRUST_CHOICES.length - 1, Math.max(0, cursorAt + (taken.key === 'up' ? -1 : 1)));
+        if (moved !== cursorAt) {
+          cursorAt = moved;
+          drawTheQuestion(cwd, cursorAt);
+        }
+        continue;
+      }
+      if (taken.key !== 'confirm') {
+        continue;
+      }
+      process.stdin.off('data', onData);
+      process.stdin.off('end', onEnd);
+      process.stdin.pause();
+      linesAgain();
+      if (cursorAt === 0) {
+        process.exit(1);
+      }
+      trusted();
+      return;
+    }
+  };
+  process.stdin.on('data', onData);
+  process.stdin.on('end', onEnd);
+  process.stdin.resume();
+  drawTheQuestion(cwd, cursorAt);
+}
+
 // --- a session ---------------------------------------------------------------
 
 /**
@@ -638,9 +925,31 @@ function answerTo(prompt) {
   return prompt;
 }
 
+/**
+ * The folder first, and the conversation only after it has been answered for.
+ *
+ * Behaviour 16: the real CLI asks about a folder it has not seen before it
+ * starts anything at all, so nothing below this point may run until the question
+ * has an answer. Under `--resume` too, and that half is OUR SIDE: the question
+ * is about the FOLDER rather than about a conversation, and whether the real one
+ * asks it before a resume was never measured. It costs an acceptance run
+ * nothing either way -- a resume happens in the folder the launch already
+ * trusted, in the same profile, so the question does not come up twice.
+ */
 function session(plan) {
   const config = configDirectory();
   const cwd = process.cwd();
+  if (theFolderHasBeenTrusted(config, cwd)) {
+    conversation(plan, config, cwd);
+    return;
+  }
+  askAboutTheFolder(cwd, () => {
+    rememberTheFolder(config, cwd);
+    conversation(plan, config, cwd);
+  });
+}
+
+function conversation(plan, config, cwd) {
   const hooks = hooksFrom(plan.settingsPath);
   const state = {
     sessionId: plan.sessionId,

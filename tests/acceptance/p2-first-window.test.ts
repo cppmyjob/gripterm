@@ -118,21 +118,12 @@ suite('П2, the first sitting', () => {
     // `ConversationStarted`, arriving over a real hook from a real CLI -- unless the
     // CLI is asking its own question first. A folder Claude Code has not seen
     // before gets a trust prompt, and until it is answered no session starts and
-    // no hook fires (measured 2026-08-13; the same wall A13 met in a temporary
-    // profile). The stand answers it with Enter, the way a person would and the
-    // way the A19 stand did. IT IS SENT BLIND, and until 2026-09-08 this comment
-    // and the line below both said otherwise: what this code can see is that no
-    // session started inside 15 s, never a prompt. The correction and the run
-    // that forced it are in `rename-from-cli.test.ts` and in `tools/gate.mjs`.
-    // SINCE Ш38 the frame the Enter is sent into is taken and printed first --
-    // the Enter itself is untouched, because it is the suspect.
-    const trustPrompt = 15_000;
-    if ((await watched.waitedFor('the session to start', () => stateOf(gripterm, id) === 'idle', trustPrompt)) !== 'reached') {
-      watched.showTheScreen('at 15 s, before the blind Enter');
-      console.log('P2 phase 1: no session after 15 s; sending a blind Enter, in case the CLI is waiting to be trusted -- nothing here has seen a prompt');
-      gripterm.gateway.handleFor(entry.terminalId)?.sendText('', true);
-    }
-    await watched.until('the session to start', () => stateOf(gripterm, id) === 'idle');
+    // no hook fires (measured 2026-08-13, and printed word for word 2026-09-08).
+    // Until that second date this suite pressed Enter at it BLIND, which on that
+    // prompt is `No, exit`; since Ш39 the screen is read and the answer is chosen
+    // on what is on it, in the one place that does it for all four suites. See
+    // `watching-a-terminal.ts`.
+    await watched.theSessionStarts(() => stateOf(gripterm, id) === 'idle');
 
     // The turn. Sent into the terminal the way a person types it, which is also
     // the first time this project has done that outside a stand (A13).
