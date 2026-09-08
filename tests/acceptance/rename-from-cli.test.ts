@@ -45,22 +45,52 @@ import { WatchedTerminal } from './watching-a-terminal';
  * row, in the record and on our own tab -- AGAINST THE DOUBLE IN
  * `tests/acceptance/fake-claude/` and not against Claude Code. Under `editor`,
  * green in 38 s, with this window's strip holding 0 tabs, which is the reading
- * two paragraphs below confirmed by a run rather than by argument. The head of
+ * in `WHAT THE ENGINE-NEUTRAL HALF CAN REACH` below confirmed by a run rather
+ * than by argument. The head of
  * `fake-claude.mjs` is what bounds both of those greens: it lists, one by one,
  * what the double does not do.
  *
- * **AND AGAINST THE REAL `claude` THE SAME CRITERION IS RED, ON BOTH ENGINES,
- * AND THE CAUSE IS NOT ESTABLISHED.** Measured 2026-09-08 with
- * `GRIPTERM_ACCEPTANCE_AGENT=real` against CLI 2.1.260, the first time this
- * acceptance had ever been walked against the real thing: under `own`, twice out
- * of two, no session inside 90 s; under `editor`, once, the session started but
- * the row never took the new name. WHICH SIDE IS BROKEN IS NOT KNOWN and is not
- * guessed at here -- the candidates are this stand in its `real` mode, which
- * nothing had run until that day, and the product; the owner works under `own`
- * with a real `claude` daily and his terminals come up, which weighs against the
- * second without settling the first. `tools/gate.mjs` carries the finding whole.
+ * **AGAINST THE REAL `claude` THE SAME CRITERION WAS RED ON BOTH ENGINES ON THE
+ * MORNING OF 2026-09-08 AND GREEN ON BOTH BY THAT EVENING.** The red is kept
+ * here rather than replaced, because it is the reason two defects were found.
+ * Measured with `GRIPTERM_ACCEPTANCE_AGENT=real` against CLI 2.1.260, the first
+ * time this acceptance had ever been walked against the real thing: under `own`,
+ * twice out of two, no session inside 90 s; under `editor`, once, the session
+ * started but the row never took the new name. BOTH CAUSES WERE ESTABLISHED AND
+ * CORRECTED THAT DAY, and both were ours:
  *
- * **A GREEN FROM THIS FILE THEREFORE MEANS: the double, not Claude Code.**
+ *   * under `own`, THE INSTRUMENT. The suites pressed a blind Enter into a trust
+ *     prompt whose cursor sat on `No, exit`, so the run itself chose "no, leave"
+ *     and `claude` left with code 1 on the 17th second, three runs of three.
+ *     Ш38 taught the watcher to print that frame; Ш39 read it and replaced the
+ *     Enter with a look, an arrow and a second look.
+ *   * under `editor`, THE PRODUCT. 2.1.260 keeps `nameSource` through a
+ *     `/rename` and writes `"user"` into it, while this build took the ABSENCE
+ *     of that key -- what 2.1.228 wrote -- as the evidence a person had typed the
+ *     name, and so refused every name the real CLI wrote. Ш40.
+ *
+ * MEASURED AFTER BOTH, the same evening and against the same real CLI: `rename`
+ * green under `editor` in 44 s and П3 in 13 s; `rename` and П3 green under
+ * `own` in 54 s. The owner then did it by hand -- a real editor, a real
+ * `claude` 2.1.260, engine `own`, `/rename test` typed inside the terminal --
+ * and the name arrived on the panel's tab, on the list's row and in the details.
+ *
+ * **WHAT THAT GREEN DOES NOT COVER, AND IT IS TWO THINGS.** TWO CRITERIA OF THE
+ * FOUR: П2 and О1 were not walked against the real CLI, and they are exactly the
+ * two that cost -- a turn and an install. AND NOT THE TRUST QUESTION: not one of
+ * those runs printed a `the cursor is on ...` line, and a suite came up in about
+ * 8 s against the 22.4 s measured the same day when the question WAS asked,
+ * because the real CLI already had trust for that folder recorded in the profile
+ * it ran under. The path Ш39 built was therefore NOT the path those greens
+ * walked. `tools/gate.mjs` carries the whole of it.
+ *
+ * **SO TWO DIFFERENT GREENS COME OUT OF THIS FILE AND THEY ARE NOT WORTH THE
+ * SAME.** An ordinary run leaves `GRIPTERM_ACCEPTANCE_AGENT` unset, which is
+ * `fake`: A GREEN FROM THAT RUN MEANS THE DOUBLE, NOT CLAUDE CODE -- this
+ * repository's beliefs about Claude Code, bounded by the head of
+ * `fake-claude.mjs`. Only a run with `GRIPTERM_ACCEPTANCE_AGENT=real` is a
+ * green about Claude Code, it spends the owner's account, and the one that
+ * exists is the evening above with the two holes just named.
  *
  * **WHAT THE ENGINE-NEUTRAL HALF CAN REACH, established by reading on
  * 2026-09-08 rather than assumed.** `GriptermApi` hands out the registry, the

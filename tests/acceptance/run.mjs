@@ -134,9 +134,17 @@ const THE_TAB_IS_THE_EDITOR_S =
  * `tests/acceptance/fake-claude/`, which is this repository's beliefs about
  * Claude Code and not Claude Code. Under `editor` the same day: green, 38 s,
  * with this window's strip holding 0 tabs. AGAINST THE REAL `claude` 2.1.260 the
- * same criterion is RED on BOTH engines and the cause is NOT ESTABLISHED --
- * `tools/gate.mjs` carries that finding whole, and nothing here guesses at which
- * side is broken.
+ * same criterion was RED on BOTH engines on the morning of 2026-09-08 and GREEN
+ * on both by that evening: both causes were established the same day and both
+ * were ours -- the blind Enter this stand sent into a trust prompt whose cursor
+ * sat on `No, exit` (Ш38 printed the frame, Ш39 read it and answered it), and
+ * the product refusing every name the CLI writes because it read `nameSource`
+ * the way 2.1.228 wrote it (Ш40). WHAT THE GREEN DOES NOT COVER: two criteria of
+ * the four were walked, `rename` and П3, while П2 and О1 were not; and none of
+ * those runs reached the trust question at all, because the real CLI already had
+ * trust for that folder recorded in the profile it ran under.
+ * `tools/gate.mjs` carries the whole of it, red and green, with the dates and
+ * the numbers.
  *
  * The other four run under both engines. `rename from the CLI reaches the row`,
  * `rename to the CLI`, П3 and П2 ask the registry, the gateway and the store,

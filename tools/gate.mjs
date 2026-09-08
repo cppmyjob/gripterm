@@ -586,20 +586,26 @@ const MISSING = [
       'DOUBLE IS NAMED IN THAT SENTENCE ON PURPOSE: it is what answered, and a green from it is a green about ' +
       '`tests/acceptance/fake-claude/`. The 201 s, 212 s, 185 s and 210 s above are whole-run numbers and all ' +
       'predate the split, which adds one host to each engine; they have not been retaken. ' +
-      'THE FIRST RUN EVER MADE AGAINST THE REAL CLI, 2026-09-08, AND IT WAS RED ON BOTH ENGINES; THE CAUSE ' +
-      'UNDER `own` IS NOW ESTABLISHED AND IT WAS OURS (Ш39, the same day). Until that ' +
+      'THE FIRST RUN EVER MADE AGAINST THE REAL CLI, 2026-09-08, AND IT WAS RED ON BOTH ENGINES; BOTH ' +
+      'CAUSES ARE NOW ESTABLISHED, BOTH WERE OURS AND BOTH ARE FIXED -- the `own` half in Ш39 and the ' +
+      '`editor` half in Ш40, the same day. Until that ' +
       'day `lastRun` in `tests/acceptance/against-the-real-cli.json` was `null`: the debt that file records ' +
       'had never once been paid, so nothing in this repository had ever seen this acceptance meet Claude ' +
-      'Code. It has now, for one criterion of the four -- `pnpm run test:acceptance rename` with ' +
-      '`GRIPTERM_ACCEPTANCE_AGENT=real` against CLI 2.1.260. Under `own`, TWICE OUT OF TWO: `gave up waiting ' +
+      'Code. It has now, and twice over on that one day: RED IN THE MORNING for one criterion -- ' +
+      '`pnpm run test:acceptance rename` with `GRIPTERM_ACCEPTANCE_AGENT=real` against CLI 2.1.260 -- and ' +
+      'GREEN IN THE EVENING, after both fixes, for TWO criteria of the four and on BOTH engines (further ' +
+      'down, with its numbers and with what it does not cover). THE MORNING FIRST, because it is why ' +
+      'anything at all was found. Under `own`, TWICE OUT OF TWO: `gave up waiting ' +
       'for the session to start after 90000 ms`. Under `editor`, once: the session came up inside 15 s and ' +
       'then `gave up waiting for the row to be called gripterm-acceptance-renamed (the list said "project" ' +
-      'and the record "project" when the wait began) after 90000 ms`. THE CAUSE IS NOT ESTABLISHED AND IS NOT ' +
-      'GUESSED AT HERE FOR THE `editor` HALF. Two sides can carry it and neither is chosen: this STAND in its `real` mode, which no ' +
-      'run had exercised before that day and which is therefore unproven in exactly the way a first run ' +
-      'exposes, and the PRODUCT. What weighs against the second without settling anything is the owner`s own ' +
-      'daily use -- he works under `own` with a real `claude` and his terminals come up -- so "the real CLI ' +
-      'does not start under `own`" is a sentence this finding does NOT support as a general claim. WHAT THE ' +
+      'and the record "project" when the wait began) after 90000 ms`. THE CAUSE OF THE `editor` HALF IS ' +
+      'ESTABLISHED TOO AND IT WAS THE PRODUCT`S: `nameSource` (Ш40, the same day). CLI 2.1.260 keeps that ' +
+      'key through a `/rename` and writes "user" into it, while this build read a person`s name off the ' +
+      'ABSENCE of the key, which is what 2.1.228 wrote -- so it refused every name the real CLI gave, and ' +
+      'the row stayed "project" exactly as the run above says. Both sides a first run exposes were named in ' +
+      'the end, and neither by guessing: the STAND under `own`, the PRODUCT under `editor`. "The real CLI ' +
+      'does not start under `own`" is a sentence this finding never supported, and the owner`s own daily ' +
+      'use said so at the time -- he works under `own` with a real `claude` and his terminals come up. WHAT THE ' +
       'GREEN ABOVE WAS WORTH IN THAT LIGHT, AND IT IS THE HALF THAT MATTERED: the double asked nothing before ' +
       'it started, by its own head (`fake-claude.mjs`), so the trust prompt the real CLI raises for an unseen ' +
       'folder was a branch a `fake` run never reached, and the four suites` Enter for it was dead code there. ' +
@@ -659,9 +665,23 @@ const MISSING = [
       'terminal that was never in any trouble. THE SUITES ALSO PRINT THE SCREEN NOW -- the tail the panel`s ' +
       'bridge keeps, twice: at 15 s with no session started, and at every refusal -- so a ' +
       'run against the real CLI can be READ rather than guessed at. It is a byte tail and not a rendered ' +
-      'frame, which the head of that file says at length. `against-the-real-cli.json` IS DELIBERATELY NOT ' +
-      'TOUCHED: one criterion of four was walked, and what that does to the debt`s date is the owner`s ' +
-      'question and not this record`s.',
+      'frame, which the head of that file says at length. ' +
+      'WALKED AGAINST THE REAL CLI AFTER BOTH FIXES, the evening of 2026-09-08, CLI 2.1.260 with ' +
+      '`GRIPTERM_ACCEPTANCE_AGENT=real`: GREEN ON BOTH ENGINES. Under `editor`, the `rename` criterion in ' +
+      '44 s over its three suites and П3 in 13 s; under `own`, `rename` and П3 together in 54 s, with the ' +
+      'editor-tab suite NOT RUN there by name as always. THE OWNER THEN SAID IT BY HAND that evening, which ' +
+      'is the one witness a stand cannot be: a real editor, a real `claude` 2.1.260, engine `own`, ' +
+      '`/rename test` typed inside the terminal, and `test` on the panel`s tab, on the list`s row and in ' +
+      'the details header. WHAT THOSE GREENS DO NOT COVER, AND IT IS TWO THINGS. (1) TWO CRITERIA OF THE ' +
+      'FOUR: П2 and О1 were not walked against the real CLI, and they are exactly the two that cost -- a ' +
+      'turn and an install. (2) THEY NEVER REACHED THE TRUST QUESTION: not one of the four printed a ' +
+      '`the cursor is on ...` line, and a suite came up in about 8 s against the 22.4 s measured the same ' +
+      'day when the question WAS asked, because the real CLI already had trust for that folder recorded in ' +
+      'the profile it ran under. So the answer Ш39 built is walked by every `own` run against the DOUBLE ' +
+      'and was NOT walked by these greens. ' +
+      '`against-the-real-cli.json` IS NOT TOUCHED FROM HERE AND WAS NEVER THIS RECORD`S TO TOUCH: the ' +
+      'orchestrator writes that file in the same move that corrected these sentences, and what a walk of ' +
+      'two criteria out of four does to the debt`s date is the owner`s question.',
   },
 ];
 
