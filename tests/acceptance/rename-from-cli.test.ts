@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { TerminalEntry } from '../../packages/core/src/index';
 import type { GriptermApi } from '../../packages/extension/src/extension';
+import { WatchedTerminal } from './watching-a-terminal';
 
 /**
  * `/rename`, typed by a person inside a Claude Code terminal, arriving on the
@@ -78,10 +79,18 @@ import type { GriptermApi } from '../../packages/extension/src/extension';
  *     `PtyTerminalGateway` makes those. Under the editor's engine this window's
  *     strip holds nothing, so there is no tab of ours to be right or wrong
  *     about. It is asserted where it exists and said out loud where it does not.
+ *   * THE SCREEN, since Ш38 -- `GriptermApi.stage.bridgeFor(id).tail`, the bytes
+ *     this terminal has printed. Reachable under `own` only, for the same reason
+ *     the tab is, and printed rather than asserted on: see
+ *     `watching-a-terminal.ts`, which every wait in this file is now made
+ *     through.
+ *
+ * **WHAT THE 90 s ABOVE MEANS NOW.** Nothing in this file waits out a deadline
+ * for a process that has already ended: `WatchedTerminal` refuses the moment the
+ * gateway reports the exit, with the code and the reason in the message. The two
+ * runs quoted above spent 73 of those 90 seconds waiting for a `claude` that had
+ * exited 1 on the 17th second, and no run of this file will spend them again.
  */
-
-const SETTLES_WITHIN_MS = 90_000;
-const POLL_MS = 200;
 
 const NEW_NAME = 'gripterm-acceptance-renamed';
 
@@ -95,29 +104,22 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function until(what: string, ready: () => boolean, ms = SETTLES_WITHIN_MS): Promise<void> {
-  const deadline = Date.now() + ms;
-  while (!ready()) {
-    if (Date.now() > deadline) {
-      throw new Error(`gave up waiting for ${what} after ${ms} ms`);
-    }
-    await sleep(POLL_MS);
-  }
-}
-
 interface StoredRecord {
   readonly metadata: { readonly displayName: string };
 }
 
 /**
- * One terminal of this window's own, with a conversation running in it.
+ * One terminal of this window's own, with a conversation running in it -- and
+ * the watch over it that every wait after this one is made through.
  *
  * Shared by both halves rather than written twice: they run in separate hosts,
  * on separate stores, so the code is the only thing they can share -- and two
  * copies of the trust-prompt answer would be two places to correct the day the
  * CLI asks something else.
  */
-async function aTerminalWithASession(gripterm: GriptermApi): Promise<TerminalEntry> {
+async function aTerminalWithASession(
+  gripterm: GriptermApi
+): Promise<{ readonly entry: TerminalEntry, readonly watched: WatchedTerminal }> {
   const { readiness, registry } = gripterm;
   assert.ok(
     readiness.storageDir.includes('gripterm-acceptance'),
@@ -129,6 +131,9 @@ async function aTerminalWithASession(gripterm: GriptermApi): Promise<TerminalEnt
   const [entry] = registry.list();
   assert.ok(entry, 'no record appeared in the registry');
   const id = entry.terminalId.value;
+  // Before anything can end: the watch is what hears the process die, and a
+  // listener taken later would miss the death it was taken for.
+  const watched = new WatchedTerminal(gripterm, entry.terminalId);
 
   const stateOf = (): string =>
     registry.list().find((one) => one.terminalId.value === id)?.observed.state ?? 'nothing at all';
@@ -138,25 +143,30 @@ async function aTerminalWithASession(gripterm: GriptermApi): Promise<TerminalEnt
    *
    * The real CLI puts a trust prompt in front of a folder it has not seen
    * (measured 2026-08-13, quoted in `p2-first-window.test.ts`), and this is the
-   * Enter for it. What this code can see is only that no session started inside
-   * 15 s: it reads the record's state and nothing else, so it never sees a
-   * prompt, and until 2026-09-08 it printed "answering the CLI trust prompt with
-   * Enter" as though it had. THAT WAS A GUESS OF THE INSTRUMENT, and the run
-   * that showed it up is in `tools/gate.mjs`: against the real CLI under `own`
-   * the line printed in both runs and the session still never came, so what it
-   * announced as an answer was the timeout and not a prompt. The double asks
-   * nothing before it starts, by its own head, so under `fake` this branch is
-   * never reached at all.
+   * Enter for it. Until 2026-09-08 this code printed "answering the CLI trust
+   * prompt with Enter" while reading the record's state and nothing else -- it
+   * had never seen a prompt in its life. THAT WAS A GUESS OF THE INSTRUMENT, and
+   * the run that showed it up is in `tools/gate.mjs`: against the real CLI under
+   * `own` the line printed in both runs and the session still never came, so
+   * what it announced as an answer was the timeout and not a prompt.
+   *
+   * SINCE Ш38 THE FRAME ITSELF IS TAKEN, immediately before the Enter goes: the
+   * tail of what the process has printed, which is where the words about
+   * trusting a folder would be if they were anywhere. The Enter is deliberately
+   * unchanged -- it is the suspect of this experiment, and the experiment is run
+   * OVER it rather than instead of it.
+   *
+   * The double asks nothing before it starts, by its own head, so under `fake`
+   * this branch is never reached at all.
    */
   const trustPrompt = 15_000;
-  try {
-    await until('the session to start', () => stateOf() === 'idle', trustPrompt);
-  } catch {
+  if ((await watched.waitedFor('the session to start', () => stateOf() === 'idle', trustPrompt)) !== 'reached') {
+    watched.showTheScreen('at 15 s, before the blind Enter');
     console.log('rename: no session after 15 s; sending a blind Enter, in case the CLI is waiting to be trusted -- nothing here has seen a prompt');
     gripterm.gateway.handleFor(entry.terminalId)?.sendText('', true);
   }
-  await until('the session to start', () => stateOf() === 'idle');
-  return entry;
+  await watched.until('the session to start', () => stateOf() === 'idle');
+  return { entry, watched };
 }
 
 /**
@@ -207,7 +217,7 @@ suite('rename from the CLI reaches the row', () => {
   test('typed inside the terminal, the new name is on the row, in the record and on our own tab', async () => {
     const gripterm = await api();
     const { readiness, registry } = gripterm;
-    const entry = await aTerminalWithASession(gripterm);
+    const { entry, watched } = await aTerminalWithASession(gripterm);
     const id = entry.terminalId.value;
     const before = entry.metadata.displayName;
 
@@ -220,29 +230,24 @@ suite('rename from the CLI reaches the row', () => {
     // The ROW, through the provider the list itself draws from. The registry is
     // read for the message and not for the assertion: a record read twice would
     // show only that this file can read a field.
-    await until(
+    await watched.until(
       `the row to be called ${NEW_NAME} (the list said "${rowLabel(gripterm, id) ?? 'nothing'}" and the record "${nameOf()}" when the wait began)`,
       () => rowLabel(gripterm, id) === NEW_NAME
     );
 
     // And on disk, because a window that reloads reads the file and not the
-    // registry.
-    let stored: string | null = null;
-    const deadline = Date.now() + SETTLES_WITHIN_MS;
-    while (Date.now() < deadline) {
-      stored = await storedName(readiness.storageDir, id);
-      if (stored === NEW_NAME) {
-        break;
-      }
-      await sleep(POLL_MS);
-    }
-    assert.equal(stored, NEW_NAME, 'the new name never reached the store');
+    // registry. The wait either comes back with the name or says why it never
+    // will, so there is nothing left here for an assertion to add.
+    await watched.untilThere(
+      `the new name to reach the store, where a window that reloads reads it`,
+      async () => ((await storedName(readiness.storageDir, id)) === NEW_NAME ? NEW_NAME : null)
+    );
 
     // Our own tab, where there is one. See the head of this file: the panel
     // holds a terminal only when its handle has a screen, which is our own
     // engine's and not the editor's.
     if (readiness.engine === 'own') {
-      await until(
+      await watched.until(
         `our own tab to be called ${NEW_NAME} (it said "${tabLabel(gripterm, id) ?? 'nothing'}" when the wait began)`,
         () => tabLabel(gripterm, id) === NEW_NAME
       );
@@ -259,7 +264,7 @@ suite('rename from the CLI reaches the row', () => {
 suite('rename from the CLI reaches an editor tab', () => {
   test('typed inside the terminal, the new name is on the tab the editor drew', async () => {
     const gripterm = await api();
-    const entry = await aTerminalWithASession(gripterm);
+    const { entry, watched } = await aTerminalWithASession(gripterm);
     const before = entry.metadata.displayName;
 
     const tab = vscode.window.terminals.find((one) => one.name === before);
@@ -268,12 +273,12 @@ suite('rename from the CLI reaches an editor tab', () => {
     // A person typing `/rename` is looking at that terminal, so this is the
     // state the feature lives in -- and the state the tab rename needs.
     gripterm.gateway.handleFor(entry.terminalId)?.show(true);
-    await until('the terminal to be the active one', () => vscode.window.activeTerminal === tab, 15_000);
+    await watched.until('the terminal to be the active one', () => vscode.window.activeTerminal === tab, 15_000);
 
     await sleep(2000);
     gripterm.gateway.handleFor(entry.terminalId)?.sendText(`/rename ${NEW_NAME}`, true);
 
-    await until(
+    await watched.until(
       `the tab to be called ${NEW_NAME} (it said "${tab.name}" when the wait began)`,
       () => tab.name === NEW_NAME
     );

@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { claudeSessionsDirectory } from '../../packages/core/src/index';
 import type { GriptermApi } from '../../packages/extension/src/extension';
+import { WatchedTerminal } from './watching-a-terminal';
 
 /**
  * The other direction (M2.19): a name given HERE reaching Claude Code itself.
@@ -30,9 +31,6 @@ import type { GriptermApi } from '../../packages/extension/src/extension';
  * side goes near a person's profile.
  */
 
-const SETTLES_WITHIN_MS = 90_000;
-const POLL_MS = 250;
-
 const NEW_NAME = 'gripterm-told-the-cli';
 
 async function api(): Promise<GriptermApi> {
@@ -43,16 +41,6 @@ async function api(): Promise<GriptermApi> {
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function until(what: string, ready: () => boolean, ms = SETTLES_WITHIN_MS): Promise<void> {
-  const deadline = Date.now() + ms;
-  while (!ready()) {
-    if (Date.now() > deadline) {
-      throw new Error(`gave up waiting for ${what} after ${ms} ms`);
-    }
-    await sleep(POLL_MS);
-  }
 }
 
 /** What the CLI calls the conversation held by `pid`, out of its own file. */
@@ -89,6 +77,8 @@ suite('rename to the CLI', () => {
     assert.ok(entry, 'no record appeared in the registry');
     const id = entry.terminalId.value;
     const started = entry.metadata.displayName;
+    // Before anything can end: see `watching-a-terminal.ts`.
+    const watched = new WatchedTerminal(gripterm, entry.terminalId);
 
     const stateOf = (): string =>
       registry.list().find((one) => one.terminalId.value === id)?.observed.state ?? 'nothing at all';
@@ -96,44 +86,34 @@ suite('rename to the CLI', () => {
       registry.list().find((one) => one.terminalId.value === id)?.observed.pid ?? null;
 
     const trustPrompt = 15_000;
-    try {
-      await until('the session to start', () => stateOf() === 'idle', trustPrompt);
-    } catch {
-      // Blind, and said so since 2026-09-08 -- see `rename-from-cli.test.ts`.
+    if ((await watched.waitedFor('the session to start', () => stateOf() === 'idle', trustPrompt)) !== 'reached') {
+      // Blind, and said so since 2026-09-08; the frame it is sent into is taken
+      // since Ш38 -- see `rename-from-cli.test.ts` and `watching-a-terminal.ts`.
+      watched.showTheScreen('at 15 s, before the blind Enter');
       console.log('rename: no session after 15 s; sending a blind Enter, in case the CLI is waiting to be trusted -- nothing here has seen a prompt');
       gripterm.gateway.handleFor(entry.terminalId)?.sendText('', true);
     }
-    await until('the session to start', () => stateOf() === 'idle');
+    await watched.until('the session to start', () => stateOf() === 'idle');
 
     const pid = pidOf();
     assert.ok(pid !== null, 'the record has no pid, so the CLI cannot be asked anything');
 
     // The first half, and it needed nobody to do anything: `--name` at launch.
-    let atStart: string | null = null;
-    const deadline = Date.now() + SETTLES_WITHIN_MS;
-    while (Date.now() < deadline && atStart !== started) {
-      atStart = await nameInTheCli(pid);
-      if (atStart === started) {
-        break;
-      }
-      await sleep(POLL_MS);
-    }
-    assert.equal(atStart, started, 'the CLI was never told the name the terminal started with');
+    // The wait comes back with the name or says why it never will, so there is
+    // nothing left here for an assertion to add.
+    await watched.untilThere(
+      `the CLI to be told the name the terminal started with ("${started}")`,
+      async () => ((await nameInTheCli(pid)) === started ? started : null)
+    );
 
     // The second half: renamed here, and the conversation is told by typing.
     await sleep(2000);
     metadata.rename(entry.terminalId, NEW_NAME);
 
-    let after: string | null = null;
-    const untilRenamed = Date.now() + SETTLES_WITHIN_MS;
-    while (Date.now() < untilRenamed) {
-      after = await nameInTheCli(pid);
-      if (after === NEW_NAME) {
-        break;
-      }
-      await sleep(POLL_MS);
-    }
-    assert.equal(after, NEW_NAME, 'the conversation never took the name given here');
+    await watched.untilThere(
+      `the conversation itself to take the name given here ("${NEW_NAME}")`,
+      async () => ((await nameInTheCli(pid)) === NEW_NAME ? NEW_NAME : null)
+    );
 
     console.log(`rename: "${started}" -> "${NEW_NAME}" reached Claude Code's own session file`);
   });

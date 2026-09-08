@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { GriptermApi } from '../../packages/extension/src/extension';
+import { WatchedTerminal } from './watching-a-terminal';
 
 /**
  * П3: a person types `/clear` in their terminal. Claude Code starts a new
@@ -24,10 +25,20 @@ import type { GriptermApi } from '../../packages/extension/src/extension';
  * record -- and the pair of reports it drives that half with is COPIED from A10
  * rather than invented; the head of `fake-claude.mjs` says so beside the code
  * that sends them.
+ *
+ * **WHY THIS SUITE DECIDED WHAT Ш38 REFUSES ON.** Every wait here is made
+ * through `watching-a-terminal.ts`, which ends a wait early when the PROCESS
+ * ends -- and never on the record's own `ended`. This file is the reason that
+ * distinction had to be made rather than assumed: `/clear` takes a perfectly
+ * healthy terminal through `ended` and out again (`ConversationEnded` then
+ * `ConversationStarted`, the state machine's resurrection edge), and the double
+ * delivers the second of that pair by spawning a `node`, so the record rests in
+ * a witnessed end for longer than one poll. An instrument that read `ended` as
+ * "the process is gone" would fail this suite on a terminal that is fine, most
+ * runs, and would call the failure a death. What it refuses on instead --
+ * `TerminalHandle.onDidClose` -- cannot happen here at all while the terminal is
+ * alive, so this suite is green by construction rather than by luck.
  */
-
-const SETTLES_WITHIN_MS = 90_000;
-const POLL_MS = 200;
 
 const TASK = 'the task that survives a new conversation';
 const NOTE = 'the note that survives a new conversation';
@@ -42,32 +53,16 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function stateWithin(gripterm: GriptermApi, id: string, wanted: string, ms: number): Promise<string> {
-  const deadline = Date.now() + ms;
-  let seen = 'nothing at all';
-  while (Date.now() < deadline) {
-    seen = gripterm.registry.list().find((one) => one.terminalId.value === id)?.observed.state
-      ?? 'nothing at all';
-    if (seen === wanted) {
-      return seen;
-    }
-    await sleep(POLL_MS);
-  }
-  return seen;
+/** The state of the one terminal this run owns, as the registry has it right now. */
+function stateOf(gripterm: GriptermApi, id: string): string {
+  return gripterm.registry.list().find((one) => one.terminalId.value === id)?.observed.state
+    ?? 'nothing at all';
 }
 
-/** The conversation the record names now, once it is no longer the one it named before. */
-async function conversationAfter(gripterm: GriptermApi, id: string, was: string): Promise<string> {
-  const deadline = Date.now() + SETTLES_WITHIN_MS;
-  let seen = was;
-  while (Date.now() < deadline) {
-    seen = gripterm.registry.list().find((one) => one.terminalId.value === id)?.sessionId.value ?? was;
-    if (seen !== was) {
-      return seen;
-    }
-    await sleep(POLL_MS);
-  }
-  return seen;
+/** The conversation the record names now, or `null` while it is still the one it named before. */
+function conversationAfter(gripterm: GriptermApi, id: string, was: string): string | null {
+  const seen = gripterm.registry.list().find((one) => one.terminalId.value === id)?.sessionId.value ?? was;
+  return seen === was ? null : seen;
 }
 
 interface StoredRecord {
@@ -76,19 +71,13 @@ interface StoredRecord {
   readonly metadata: { readonly task: string | null, readonly notes: { readonly text: string }[] };
 }
 
-/** The record file once it says what the caller is waiting for, or the last thing it said. */
-async function recordWithin(
+/** The record file when it says what the caller is waiting for, and `null` until then. */
+async function recordWhen(
   file: string,
   ready: (record: StoredRecord) => boolean
-): Promise<StoredRecord> {
-  const deadline = Date.now() + SETTLES_WITHIN_MS;
-  for (;;) {
-    const record = JSON.parse(await readFile(file, 'utf8')) as StoredRecord;
-    if (ready(record) || Date.now() > deadline) {
-      return record;
-    }
-    await sleep(POLL_MS);
-  }
+): Promise<StoredRecord | null> {
+  const record = JSON.parse(await readFile(file, 'utf8')) as StoredRecord;
+  return ready(record) ? record : null;
 }
 
 suite('П3', () => {
@@ -106,14 +95,18 @@ suite('П3', () => {
     assert.ok(entry, 'no record appeared in the registry');
     const id = entry.terminalId.value;
     const first = entry.sessionId.value;
+    // Before anything can end: see `watching-a-terminal.ts`.
+    const watched = new WatchedTerminal(gripterm, entry.terminalId);
 
     const trustPrompt = 15_000;
-    if ((await stateWithin(gripterm, id, 'idle', trustPrompt)) !== 'idle') {
-      // Blind, and said so since 2026-09-08 -- see `rename-from-cli.test.ts`.
+    if ((await watched.waitedFor('the session to start', () => stateOf(gripterm, id) === 'idle', trustPrompt)) !== 'reached') {
+      // Blind, and said so since 2026-09-08; the frame it is sent into is taken
+      // since Ш38 -- see `rename-from-cli.test.ts` and `watching-a-terminal.ts`.
+      watched.showTheScreen('at 15 s, before the blind Enter');
       console.log('P3: no session after 15 s; sending a blind Enter, in case the CLI is waiting to be trusted -- nothing here has seen a prompt');
       gripterm.gateway.handleFor(entry.terminalId)?.sendText('', true);
     }
-    assert.equal(await stateWithin(gripterm, id, 'idle', SETTLES_WITHIN_MS), 'idle', 'the session never started');
+    await watched.until('the session to start', () => stateOf(gripterm, id) === 'idle');
 
     gripterm.metadata.setTask(entry.terminalId, TASK);
     gripterm.metadata.addNote(entry.terminalId, NOTE);
@@ -121,9 +114,12 @@ suite('П3', () => {
     await sleep(2000);
     gripterm.gateway.handleFor(entry.terminalId)?.sendText('/clear', true);
 
-    const second = await conversationAfter(gripterm, id, first);
+    // The wait that made Ш38 choose its predicate: see the head of this file.
+    const second = await watched.untilThere(
+      `the conversation under the record to become a different one (it was ${first}, and nothing would have been cleared if it stayed)`,
+      () => conversationAfter(gripterm, id, first)
+    );
     console.log(`P3: ${first} -> ${second}`);
-    assert.notEqual(second, first, 'the conversation never changed, so nothing was cleared');
 
     // One row, not two: the record is the terminal's, and the conversation under
     // it is a field (M2.8).
@@ -140,9 +136,12 @@ suite('П3', () => {
     // Polled: a change that came from an EVENT is written after a debounce of
     // half a second (M2.6), and reading once here would be a race the test wins
     // or loses by scheduling.
-    const record = await recordWithin(
-      join(readiness.storageDir, 'terminals', id, 'record.json'),
-      (one) => one.sessionId === second
+    const record = await watched.untilThere(
+      `the record on disk to name the new conversation (${second})`,
+      async () => await recordWhen(
+        join(readiness.storageDir, 'terminals', id, 'record.json'),
+        (one) => one.sessionId === second
+      )
     );
     assert.equal(record.sessionId, second);
     assert.deepEqual(record.sessionIdHistory, [first]);

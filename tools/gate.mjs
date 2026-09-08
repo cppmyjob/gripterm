@@ -605,8 +605,22 @@ const MISSING = [
       'ESTABLISHED BY THIS RUN AND IS CORRECTED: the suites printed "answering the CLI trust prompt with ' +
       'Enter", which they cannot know -- they read the record`s state and see no prompt, and under `own` that ' +
       'line printed in both runs while no session ever came. All four now say they are sending a blind Enter. ' +
-      '`against-the-real-cli.json` IS DELIBERATELY NOT TOUCHED: one criterion of four was walked, and what ' +
-      'that does to the debt`s date is the owner`s question and not this record`s.',
+      'A SECOND INSTRUMENT DEFECT WAS ESTABLISHED BY THE SAME RUN AND CORRECTED IN Ш38, and it is the reason ' +
+      'the 90 000 ms above is a number this repository will not print again for a dead process: the window`s ' +
+      'own log of that run says the terminal CLOSED at 14:41:16 with `{"exitCode":1,"reason":"process",' +
+      '"event":"LaunchExitedNonZero"}`, 17 s after it started, so the suite spent 73 further seconds waiting ' +
+      'for a process that was gone and then named the deadline as the cause. It was not the cause. Every wait ' +
+      'in the four suites now goes through `tests/acceptance/watching-a-terminal.ts`, which ends on ' +
+      '`TerminalHandle.onDidClose` -- the gateway`s own witness of the PROCESS -- and says the exit code and ' +
+      'the reason instead. NOT on the record`s `ended`, and that was settled by a refutation rather than by ' +
+      'taste: `/clear` walks a healthy terminal through `ended` and out of it again (the state machine`s ' +
+      'resurrection edge), so a refusal keyed on the record would have failed `p3-clear.test.ts` on a ' +
+      'terminal that was never in any trouble. THE SUITES ALSO PRINT THE SCREEN NOW -- the tail the panel`s ' +
+      'bridge keeps, twice: immediately before the blind Enter at 15 s, and at every refusal -- so the next ' +
+      'run against the real CLI can be READ rather than guessed at. It is a byte tail and not a rendered ' +
+      'frame, which the head of that file says at length. `against-the-real-cli.json` IS DELIBERATELY NOT ' +
+      'TOUCHED: one criterion of four was walked, and what that does to the debt`s date is the owner`s ' +
+      'question and not this record`s.',
   },
 ];
 

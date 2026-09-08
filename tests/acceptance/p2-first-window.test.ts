@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { GriptermApi } from '../../packages/extension/src/extension';
+import { WatchedTerminal } from './watching-a-terminal';
 
 /**
  * П2, the first sitting: a person opens a terminal, has a conversation in it,
@@ -39,9 +40,6 @@ import type { GriptermApi } from '../../packages/extension/src/extension';
  * name is free.
  */
 
-const SETTLES_WITHIN_MS = 90_000;
-const POLL_MS = 200;
-
 /** Short, cheap, and with an answer that cannot be produced by accident. */
 const PROMPT = 'reply with only the word pineapple';
 const ANSWER = /pineapple/iu;
@@ -55,24 +53,10 @@ async function api(): Promise<GriptermApi> {
   return await extension.activate();
 }
 
-/** The state of the one terminal this run owns, polled because the editor moves on its own schedule. */
-async function stateWithin(
-  gripterm: GriptermApi,
-  id: string,
-  wanted: string,
-  ms: number = SETTLES_WITHIN_MS
-): Promise<string> {
-  const deadline = Date.now() + ms;
-  let seen = 'nothing at all';
-  while (Date.now() < deadline) {
-    seen = gripterm.registry.list().find((one) => one.terminalId.value === id)?.observed.state
-      ?? 'nothing at all';
-    if (seen === wanted) {
-      return seen;
-    }
-    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-  }
-  return seen;
+/** The state of the one terminal this run owns, as the registry has it right now. */
+function stateOf(gripterm: GriptermApi, id: string): string {
+  return gripterm.registry.list().find((one) => one.terminalId.value === id)?.observed.state
+    ?? 'nothing at all';
 }
 
 interface StoredRecord {
@@ -81,19 +65,13 @@ interface StoredRecord {
   readonly closedAt: number | null;
 }
 
-/** The record file once it says what the caller is waiting for, or the last thing it said. */
-async function recordWithin(
+/** The record file when it says what the caller is waiting for, and `null` until then. */
+async function recordWhen(
   file: string,
   ready: (record: StoredRecord) => boolean
-): Promise<StoredRecord> {
-  const deadline = Date.now() + SETTLES_WITHIN_MS;
-  for (;;) {
-    const record = JSON.parse(await readFile(file, 'utf8')) as StoredRecord;
-    if (ready(record) || Date.now() > deadline) {
-      return record;
-    }
-    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-  }
+): Promise<StoredRecord | null> {
+  const record = JSON.parse(await readFile(file, 'utf8')) as StoredRecord;
+  return ready(record) ? record : null;
 }
 
 /** Where the CLI said it keeps this conversation, taken from the journal this window wrote. */
@@ -112,18 +90,6 @@ function transcriptPath(storageDir: string, id: string): string | null {
     }
   }
   return null;
-}
-
-/** Whether a file turns up within the wait. */
-async function fileWithin(path: string): Promise<boolean> {
-  const deadline = Date.now() + SETTLES_WITHIN_MS;
-  while (Date.now() < deadline) {
-    if (existsSync(path)) {
-      return true;
-    }
-    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-  }
-  return false;
 }
 
 suite('П2, the first sitting', () => {
@@ -146,6 +112,8 @@ suite('П2, the first sitting', () => {
     const [entry] = gripterm.registry.list();
     assert.ok(entry, 'no record appeared in the registry');
     const id = entry.terminalId.value;
+    // Before anything can end: see `watching-a-terminal.ts`.
+    const watched = new WatchedTerminal(gripterm, entry.terminalId);
 
     // `ConversationStarted`, arriving over a real hook from a real CLI -- unless the
     // CLI is asking its own question first. A folder Claude Code has not seen
@@ -156,12 +124,15 @@ suite('П2, the first sitting', () => {
     // and the line below both said otherwise: what this code can see is that no
     // session started inside 15 s, never a prompt. The correction and the run
     // that forced it are in `rename-from-cli.test.ts` and in `tools/gate.mjs`.
+    // SINCE Ш38 the frame the Enter is sent into is taken and printed first --
+    // the Enter itself is untouched, because it is the suspect.
     const trustPrompt = 15_000;
-    if ((await stateWithin(gripterm, id, 'idle', trustPrompt)) !== 'idle') {
+    if ((await watched.waitedFor('the session to start', () => stateOf(gripterm, id) === 'idle', trustPrompt)) !== 'reached') {
+      watched.showTheScreen('at 15 s, before the blind Enter');
       console.log('P2 phase 1: no session after 15 s; sending a blind Enter, in case the CLI is waiting to be trusted -- nothing here has seen a prompt');
       gripterm.gateway.handleFor(entry.terminalId)?.sendText('', true);
     }
-    assert.equal(await stateWithin(gripterm, id, 'idle'), 'idle', 'the session never started');
+    await watched.until('the session to start', () => stateOf(gripterm, id) === 'idle');
 
     // The turn. Sent into the terminal the way a person types it, which is also
     // the first time this project has done that outside a stand (A13).
@@ -170,8 +141,8 @@ suite('П2, the first sitting', () => {
     await new Promise((resolve) => setTimeout(resolve, 2000));
     handle.sendText(PROMPT, true);
 
-    assert.equal(await stateWithin(gripterm, id, 'working'), 'working', 'the prompt never landed');
-    assert.equal(await stateWithin(gripterm, id, 'idle'), 'idle', 'the turn never finished');
+    await watched.until('the prompt to land, which the record says by going to working', () => stateOf(gripterm, id) === 'working');
+    await watched.until('the turn to finish, which the record says by going back to idle', () => stateOf(gripterm, id) === 'idle');
 
     const answered = gripterm.registry.list().find((one) => one.terminalId.value === id);
     assert.ok(answered);
@@ -188,7 +159,10 @@ suite('П2, the first sitting', () => {
     // read here would be a race the test wins or loses by scheduling.
     const file = join(readiness.storageDir, 'terminals', id, 'record.json');
     const wroteAt = Date.now();
-    const record = await recordWithin(file, (one) => one.metadata.task === TASK);
+    const record = await watched.untilThere(
+      'the task to reach the record on disk',
+      async () => await recordWhen(file, (one) => one.metadata.task === TASK)
+    );
     console.log(`P2 phase 1: the task reached the disk in ${Date.now() - wroteAt} ms`);
     assert.equal(record.metadata.task, TASK);
     assert.deepEqual(record.metadata.notes.map((note) => note.text), [NOTE]);
@@ -200,17 +174,14 @@ suite('П2, the first sitting', () => {
     // names the path in every hook body; whether the FILE is there yet is a
     // different question, and the first acceptance run answered it the hard way
     // -- the editor closed a second after the turn, and nothing was ever
-    // written. So this waits for it, and says how long it took.
+    // written. So this waits for it, and says how long it took. A wait that ends
+    // some other way says so itself: without a transcript nothing could have
+    // brought this conversation back.
     const transcript = transcriptPath(readiness.storageDir, id);
     assert.ok(transcript !== null, 'no hook ever said where the transcript would be');
     const waitedFrom = Date.now();
-    const appeared = await fileWithin(transcript);
-    console.log(
-      appeared
-        ? `P2 phase 1: the transcript appeared ${Date.now() - waitedFrom} ms after the turn`
-        : `P2 phase 1: NO transcript at ${transcript}`
-    );
-    assert.ok(appeared, 'the conversation has no transcript, so nothing could bring it back');
+    await watched.until(`the transcript to appear at ${transcript}`, () => existsSync(transcript));
+    console.log(`P2 phase 1: the transcript appeared ${Date.now() - waitedFrom} ms after the turn`);
 
     console.log(`P2 phase 1: terminal ${id}, conversation ${record.sessionId}`);
     console.log(`P2 phase 1: answer ${JSON.stringify(answered.observed.lastAssistantMessage)}`);
