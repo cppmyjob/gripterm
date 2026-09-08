@@ -591,10 +591,11 @@ const MISSING = [
       '`editor` half in Ш40, the same day. Until that ' +
       'day `lastRun` in `tests/acceptance/against-the-real-cli.json` was `null`: the debt that file records ' +
       'had never once been paid, so nothing in this repository had ever seen this acceptance meet Claude ' +
-      'Code. It has now, and twice over on that one day: RED IN THE MORNING for one criterion -- ' +
-      '`pnpm run test:acceptance rename` with `GRIPTERM_ACCEPTANCE_AGENT=real` against CLI 2.1.260 -- and ' +
-      'GREEN IN THE EVENING, after both fixes, for TWO criteria of the four and on BOTH engines (further ' +
-      'down, with its numbers and with what it does not cover). THE MORNING FIRST, because it is why ' +
+      'Code. It has now, and three times over on that one day: RED IN THE MORNING for one criterion -- ' +
+      '`pnpm run test:acceptance rename` with `GRIPTERM_ACCEPTANCE_AGENT=real` against CLI 2.1.260 -- ' +
+      'GREEN IN THE EVENING, after both fixes, for TWO criteria of the four and on BOTH engines, and GREEN ' +
+      'AGAIN THE SAME EVENING FOR ALL FOUR, WHICH PAID THE DEBT (both further down, with their numbers and ' +
+      'with what they do not cover). THE MORNING FIRST, because it is why ' +
       'anything at all was found. Under `own`, TWICE OUT OF TWO: `gave up waiting ' +
       'for the session to start after 90000 ms`. Under `editor`, once: the session came up inside 15 s and ' +
       'then `gave up waiting for the row to be called gripterm-acceptance-renamed (the list said "project" ' +
@@ -696,8 +697,10 @@ const MISSING = [
       'is the one witness a stand cannot be: a real editor, a real `claude` 2.1.260, engine `own`, ' +
       '`/rename test` typed inside the terminal, and `test` on the panel`s tab, on the list`s row and in ' +
       'the details header. WHAT THOSE GREENS DO NOT COVER, AND IT IS TWO THINGS. (1) TWO CRITERIA OF THE ' +
-      'FOUR: П2 and О1 were not walked against the real CLI, and they are exactly the two that cost -- a ' +
-      'turn and an install. (2) THEY NEVER REACHED THE TRUST QUESTION: not one of the four printed a ' +
+      'FOUR: П2 and О1 were not walked by THOSE runs, and they are exactly the two that cost -- a turn ' +
+      'and an install. THAT ONE IS NO LONGER OPEN AND THIS SENTENCE IS KEPT ONLY AS THE SHAPE OF WHAT THOSE ' +
+      'GREENS WERE: the paid half was walked later the same evening, and the last paragraph of this record ' +
+      'has it with its numbers. (2) THEY NEVER REACHED THE TRUST QUESTION: not one of the four printed a ' +
       '`the cursor is on ...` line, and a suite came up in about 8 s against the 22.4 s measured the same ' +
       'day when the question WAS asked, because the real CLI already had trust for that folder recorded in ' +
       'the profile it ran under. So the answer Ш39 built is walked by every `own` run against the DOUBLE ' +
@@ -723,8 +726,27 @@ const MISSING = [
       'the pre-recorded trust does not account for the 8 s, and nothing here yet does. ' +
       '`tests/acceptance-answers-only-what-it-saw.test.ts` can only hold the path to not being a constant. ' +
       '`against-the-real-cli.json` IS NOT TOUCHED FROM HERE AND WAS NEVER THIS RECORD`S TO TOUCH: the ' +
-      'orchestrator writes that file in the same move that corrected these sentences, and what a walk of ' +
-      'two criteria out of four does to the debt`s date is the owner`s question.',
+      'orchestrator writes that file in the same move that corrects these sentences. WHAT A WALK DOES TO ' +
+      'THE DEBT`S DATE WAS THE OWNER`S QUESTION AND IT IS ANSWERED: THE DEBT IS PAID, 2026-09-08, AND THIS ' +
+      'RECORD HAS NEVER SAID THAT BEFORE. ALL FOUR CRITERIA WERE PUT TO THE REAL `claude` 2.1.260 ON BOTH ' +
+      'ENGINES AND ALL FOUR HOLD: `rename` and П3 with the numbers already above, and then the half that ' +
+      'costs -- П2 with О3 and О1 behind it, 183 s under `own` and 196 s under `editor`, each ending on ' +
+      'the runner`s own sentence and not on a summary of ours, "П2, О3 and О1 hold on this machine, in this ' +
+      'build, against a real `claude`". THE TWO ENGINES PRINT OPPOSITE LINES FOR О1 AND BOTH ARE GREEN, ' +
+      'which is the refinement of 2026-08-31 doing the work it was written for: `the same process still ' +
+      'holds the same conversation` is `false` under `own` and `true` under `editor`, because the ' +
+      'criterion differs by engine and each run prints which one it held (`the criterion` in its own ' +
+      'output). So `lastRun` now carries 2026-09-08, 2.1.260 and both engines, `grace` is null, and ' +
+      '`tests/fake-claude.test.ts` goes red again on 2026-10-08. WHAT THOSE THIRTY DAYS ARE AND ARE NOT. ' +
+      'They are NOT a finding that the double is correct: what was bought is the ONE DAY on which the double ' +
+      'and Claude Code were seen to agree on every criterion, and everything the double still does not ' +
+      'imitate is listed in the head of `fake-claude.mjs` and none of it moved. They do NOT close the open ' +
+      'path above: the trust question was asked and answered under `own` and was NOT asked under `editor`, ' +
+      'with a folder as new to the CLI on the one as on the other, the cause is not established, and no ' +
+      'explanation is offered here -- the register carries it. WHAT THE PAYMENT COST, said out loud because ' +
+      'making the cost visible is why this half of the record exists: two turns on the owner`s account, one ' +
+      'per engine; a transcript per sitting in his OWN profile, because `real` deliberately does not move ' +
+      '`CLAUDE_CONFIG_DIR`; and one record of trust per run.',
   },
 ];
 
