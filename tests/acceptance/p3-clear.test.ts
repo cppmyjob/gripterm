@@ -109,7 +109,8 @@ suite('П3', () => {
 
     const trustPrompt = 15_000;
     if ((await stateWithin(gripterm, id, 'idle', trustPrompt)) !== 'idle') {
-      console.log('P3: no session after 15 s, answering the CLI trust prompt with Enter');
+      // Blind, and said so since 2026-09-08 -- see `rename-from-cli.test.ts`.
+      console.log('P3: no session after 15 s; sending a blind Enter, in case the CLI is waiting to be trusted -- nothing here has seen a prompt');
       gripterm.gateway.handleFor(entry.terminalId)?.sendText('', true);
     }
     assert.equal(await stateWithin(gripterm, id, 'idle', SETTLES_WITHIN_MS), 'idle', 'the session never started');

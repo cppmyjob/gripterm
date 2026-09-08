@@ -152,10 +152,13 @@ suite('П2, the first sitting', () => {
     // before gets a trust prompt, and until it is answered no session starts and
     // no hook fires (measured 2026-08-13; the same wall A13 met in a temporary
     // profile). The stand answers it with Enter, the way a person would and the
-    // way the A19 stand did, and says so rather than sending a key blindly.
+    // way the A19 stand did. IT IS SENT BLIND, and until 2026-09-08 this comment
+    // and the line below both said otherwise: what this code can see is that no
+    // session started inside 15 s, never a prompt. The correction and the run
+    // that forced it are in `rename-from-cli.test.ts` and in `tools/gate.mjs`.
     const trustPrompt = 15_000;
     if ((await stateWithin(gripterm, id, 'idle', trustPrompt)) !== 'idle') {
-      console.log('P2 phase 1: no session after 15 s, answering the CLI trust prompt with Enter');
+      console.log('P2 phase 1: no session after 15 s; sending a blind Enter, in case the CLI is waiting to be trusted -- nothing here has seen a prompt');
       gripterm.gateway.handleFor(entry.terminalId)?.sendText('', true);
     }
     assert.equal(await stateWithin(gripterm, id, 'idle'), 'idle', 'the session never started');

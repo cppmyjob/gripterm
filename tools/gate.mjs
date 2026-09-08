@@ -151,7 +151,17 @@ const STAGES = [
     name: 'live',
     fast: false,
     runsTests: true,
-    what: 'pnpm run test:integration  (two labels in a downloaded VS Code; measured 4 min 20 s)',
+    // THE NUMBER CARRIES ITS CONDITION, and that is the correction of 2026-09-08.
+    // What stood here was `measured 4 min 20 s`, one number with nothing said
+    // about when or on what -- and it was taken BEFORE Ш35 divided the live
+    // suites by engine, so it timed a run in which twenty-eight suites of
+    // thirty-four ran twice. Re-measured on 2026-09-08 after that division: 187 s
+    // on a desktop nobody was using, 196 tests, none skipped, the full gate
+    // green. THE SAME DAY, on the same machine while the owner was working at
+    // it: 344 s. Both are written because the difference between them is not
+    // noise and is not ours -- it is whether a person is at the keyboard -- and
+    // an average would report a machine that does not exist.
+    what: 'pnpm run test:integration  (two labels in a downloaded VS Code; measured 2026-09-08: 187 s on a free desktop, 344 s the same day with the machine in use)',
     command: ['pnpm', 'run', 'test:integration'],
   },
   {
@@ -561,9 +571,42 @@ const MISSING = [
       'in `tests/acceptance/run.mjs`): under `editor` the same process on the same conversation, as written; ' +
       'under `own` the record and the transcript whole, the conversation back through `--resume` on the SAME ' +
       'session with its task and its notes, no duplicates, and a terminal the person closed THEMSELVES still ' +
-      'gone. MEASURED AFTER THAT CHANGE, both heads green: 185 s under `own`, 210 s under `editor`. The ' +
-      'second finding stands: `rename from the CLI` cannot run under `own` at all, its subject being an ' +
-      'editor terminal.',
+      'gone. MEASURED AFTER THAT CHANGE, both heads green: 185 s under `own`, 210 s under `editor`. THE SECOND ' +
+      'FINDING WAS HALF WITHDRAWN ON 2026-09-08 (Ш37). It said that `rename from the CLI` cannot run under ' +
+      '`own` at all; what could not was the part of that one suite whose subject really is an editor terminal ' +
+      '-- `window.terminals`, `window.activeTerminal`, the `name` on a tab -- and that part is now a suite of ' +
+      'its own, `rename from the CLI reaches an editor tab`, still excluded under `own` by name. The rest of ' +
+      'it is `rename from the CLI reaches the row`: `/rename` typed inside the terminal reaching the ROW, the ' +
+      'RECORD and this window`s own tab, none of which is the editor`s, and it is in the run under BOTH ' +
+      'engines from that day. WALKED THE SAME DAY AND GREEN, AGAINST THE DOUBLE: under `own`, the first time ' +
+      'anything had walked that half there at all, 31 s for the `rename` criterion, with "project" becoming ' +
+      '"gripterm-acceptance-renamed" on the row, in the record and on this window`s own tab; under `editor`, ' +
+      '38 s, the same row and record, and this window`s strip holding 0 tabs -- which is the panel`s rule ' +
+      'confirmed by a run rather than by argument, since only a handle with a SCREEN reaches the stage. THE ' +
+      'DOUBLE IS NAMED IN THAT SENTENCE ON PURPOSE: it is what answered, and a green from it is a green about ' +
+      '`tests/acceptance/fake-claude/`. The 201 s, 212 s, 185 s and 210 s above are whole-run numbers and all ' +
+      'predate the split, which adds one host to each engine; they have not been retaken. ' +
+      'THE FIRST RUN EVER MADE AGAINST THE REAL CLI, 2026-09-08, AND IT IS RED ON BOTH ENGINES. Until that ' +
+      'day `lastRun` in `tests/acceptance/against-the-real-cli.json` was `null`: the debt that file records ' +
+      'had never once been paid, so nothing in this repository had ever seen this acceptance meet Claude ' +
+      'Code. It has now, for one criterion of the four -- `pnpm run test:acceptance rename` with ' +
+      '`GRIPTERM_ACCEPTANCE_AGENT=real` against CLI 2.1.260. Under `own`, TWICE OUT OF TWO: `gave up waiting ' +
+      'for the session to start after 90000 ms`. Under `editor`, once: the session came up inside 15 s and ' +
+      'then `gave up waiting for the row to be called gripterm-acceptance-renamed (the list said "project" ' +
+      'and the record "project" when the wait began) after 90000 ms`. THE CAUSE IS NOT ESTABLISHED AND IS NOT ' +
+      'GUESSED AT HERE. Two sides can carry it and neither is chosen: this STAND in its `real` mode, which no ' +
+      'run had exercised before that day and which is therefore unproven in exactly the way a first run ' +
+      'exposes, and the PRODUCT. What weighs against the second without settling anything is the owner`s own ' +
+      'daily use -- he works under `own` with a real `claude` and his terminals come up -- so "the real CLI ' +
+      'does not start under `own`" is a sentence this finding does NOT support as a general claim. WHAT THE ' +
+      'GREEN ABOVE IS WORTH IN THAT LIGHT: the double asks nothing before it starts, by its own head ' +
+      '(`fake-claude.mjs`), so the trust prompt the real CLI raises for an unseen folder is a branch a `fake` ' +
+      'run never reaches, and the four suites` Enter for it is dead code there. ONE INSTRUMENT DEFECT WAS ' +
+      'ESTABLISHED BY THIS RUN AND IS CORRECTED: the suites printed "answering the CLI trust prompt with ' +
+      'Enter", which they cannot know -- they read the record`s state and see no prompt, and under `own` that ' +
+      'line printed in both runs while no session ever came. All four now say they are sending a blind Enter. ' +
+      '`against-the-real-cli.json` IS DELIBERATELY NOT TOUCHED: one criterion of four was walked, and what ' +
+      'that does to the debt`s date is the owner`s question and not this record`s.',
   },
 ];
 

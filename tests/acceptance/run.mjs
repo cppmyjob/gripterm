@@ -93,32 +93,62 @@ const ENGINE_SETTINGS = {
 };
 
 /**
+ * Why the editor's half of M2.17 is out under our own engine.
+ *
+ * Hoisted out of the map below so that each entry there is one readable line:
+ * the reason is the part a person needs and the longer of the two.
+ */
+const THE_TAB_IS_THE_EDITOR_S =
+  'its subject is the name on an EDITOR terminal -- it reads `window.terminals`, `window.activeTerminal` and a tab`s `name`, and our own engine makes none of those';
+
+/**
  * The suites that cannot run under our own engine, by name and with the reason.
  *
  * FOUND BY RUNNING IT, 2026-08-31, the first time this acceptance was walked
- * under `own` at all: `rename from the CLI` asks the EDITOR for a terminal
- * object -- `vscode.window.terminals`, `vscode.window.activeTerminal`, and the
- * `name` drawn on a tab -- and under our own engine there is no editor terminal
- * to ask about. It failed on its third line with "the editor has no terminal
- * called project", which is the suite being right rather than the engine being
- * wrong.
+ * under `own` at all: the suite then called `rename from the CLI` asks the
+ * EDITOR for a terminal object -- `vscode.window.terminals`,
+ * `vscode.window.activeTerminal`, and the `name` drawn on a tab -- and under our
+ * own engine there is no editor terminal to ask about. It failed on its third
+ * line with "the editor has no terminal called project", which is the suite
+ * being right rather than the engine being wrong.
  *
- * The criterion is the one `.vscode-test.mjs` uses for `NOT_UNDER_OWN`, and no
- * wider: a suite is out when its SUBJECT is the terminal's place among the
- * editor's own objects. What is LOST by excluding it is stated rather than
- * buried -- the half of M2.17 that is engine-neutral, `/rename` typed inside the
- * terminal reaching the ROW and the record, is not walked under `own` by
- * anything. Splitting the suite in two would cover it and is a change to an
- * acceptance criterion's shape, which is not this step's to make.
+ * The criterion is the one `tests/engine-split.mjs` uses for the live suites,
+ * and no wider: a suite is out when its SUBJECT is the terminal's place among
+ * the editor's own objects.
  *
- * The other three run under both engines. `rename to the CLI`, П3 and П2 ask the
- * registry, the gateway and the store, none of which is the editor's.
+ * **WHAT WAS LOST BY THAT EXCLUSION IS NO LONGER LOST, since 2026-09-08 (Ш37).**
+ * This note used to say that the half of M2.17 which is engine-neutral --
+ * `/rename` typed inside the terminal reaching the ROW and the record -- was
+ * walked under `own` by nothing, and that splitting the suite was not that
+ * step's to do. The owner asked for the split; it is done, and
+ * `tests/acceptance/rename-from-cli.test.ts` now holds two suites with two
+ * subjects. `rename from the CLI reaches the row` asks the registry, the list's
+ * own provider, the store and this window's own strip, none of which is the
+ * editor's, so it is in the run under BOTH engines. Only
+ * `rename from the CLI reaches an editor tab` stays out below.
+ *
+ * **WHAT THAT MEASUREMENT SAID, THE SAME DAY, AND AGAINST WHOM.** The
+ * engine-neutral half was walked under `own` for the first time on 2026-09-08:
+ * GREEN, 31 s for the whole `rename` criterion, the new name on the row, in the
+ * record and on this window's own tab -- AGAINST THE DOUBLE in
+ * `tests/acceptance/fake-claude/`, which is this repository's beliefs about
+ * Claude Code and not Claude Code. Under `editor` the same day: green, 38 s,
+ * with this window's strip holding 0 tabs. AGAINST THE REAL `claude` 2.1.260 the
+ * same criterion is RED on BOTH engines and the cause is NOT ESTABLISHED --
+ * `tools/gate.mjs` carries that finding whole, and nothing here guesses at which
+ * side is broken.
+ *
+ * The other four run under both engines. `rename from the CLI reaches the row`,
+ * `rename to the CLI`, П3 and П2 ask the registry, the gateway and the store,
+ * none of which is the editor's.
+ *
+ * The names below and at the calls are the mocha `--grep` this run selects with,
+ * and `tests/every-acceptance-suite-runs-once.test.ts` holds them to picking out
+ * exactly one suite each -- a name that were a substring of another would run
+ * two suites in one host and count the windows wrong.
  */
 const NOT_UNDER_OWN = new Map([
-  [
-    'rename from the CLI',
-    'its subject is the name on an EDITOR terminal -- it reads `window.terminals`, `window.activeTerminal` and a tab`s `name`, and our own engine makes none of those',
-  ],
+  ['rename from the CLI reaches an editor tab', THE_TAB_IS_THE_EDITOR_S],
 ]);
 
 /** Runs a suite, or says why this engine cannot have it. */
@@ -828,11 +858,17 @@ console.log(`criteria        : ${only.length === 0 ? 'all of them' : JSON.string
 // The cheap ones first, each with a store of its own: both leave a record, and
 // П2 counts records to answer О3.
 if (wanted('rename')) {
-  // Two hosts and not one: each of these opens a terminal, and each asserts on
-  // an empty store first -- which is how they know they are looking at their
-  // own record and not at one left behind.
+  // Three hosts and not one -- two under `own`, where the editor's half is
+  // excluded. Each of these opens a terminal, and each asserts on an empty store
+  // first, which is how they know they are looking at their own record and not
+  // at one left behind. THE COUNT GREW BY ONE ON EACH ENGINE ON 2026-09-08 (Ш37).
+  // MEASURED AFTER THAT, this criterion alone against the double: 31 s under
+  // `own`, 38 s under `editor`. The whole-run numbers in `tools/gate.mjs` are
+  // still the ones taken before the split.
   emptyStore();
-  hostUnlessTheEngineForbidsIt('rename from the CLI');
+  hostUnlessTheEngineForbidsIt('rename from the CLI reaches the row');
+  emptyStore();
+  hostUnlessTheEngineForbidsIt('rename from the CLI reaches an editor tab');
   emptyStore();
   hostUnlessTheEngineForbidsIt('rename to the CLI');
   emptyStore();
@@ -854,7 +890,8 @@ if (!wanted('П2')) {
  *
  * FOUND BY RUNNING IT, 2026-08-31, under the editor's engine: the second sitting
  * reported `claude processes: 2` and left one behind, and the extra one was the
- * `rename from the CLI` conversation -- started thirty-five seconds earlier, in a
+ * `rename from the CLI` conversation (the suite of that name has been two suites
+ * since 2026-09-08) -- started thirty-five seconds earlier, in a
  * test host that had already exited, and still alive. The store had been emptied
  * between the phases, so nothing in П2 or О3 is about that conversation; but the
  * counts below are `runningHere().length`, which is every conversation in this
