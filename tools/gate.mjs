@@ -622,7 +622,25 @@ const MISSING = [
       'somebody answered on an earlier day -- so the question is asked and answered on every `own` run and on ' +
       'no `editor` one. WHAT ANSWERING COSTS AGAINST THE REAL CLI, and it is the owner`s to weigh: `Yes, I ' +
       'trust this folder` writes trust for the run`s own temporary folder into the profile of whoever runs it, ' +
-      'and nothing here reads or tidies that profile. ONE INSTRUMENT DEFECT WAS ' +
+      'and nothing here reads or tidies that profile. ' +
+      'WALKED AGAINST THE REAL CLI THE SAME DAY, AND IT IS THE FIRST TIME AN ANSWER OF OURS REACHED CLAUDE ' +
+      'CODE: under `own` with `GRIPTERM_ACCEPTANCE_AGENT=real` the instrument read the first frame, printed ' +
+      '`the cursor is on "No, exit"; sending a Down arrow`, sent it, AND THE CLI OBEYED. The run still went ' +
+      'red, and not for the reason it said: the RENDERING could not read the frame that came back. Measured ' +
+      'from that tail -- the repaint addresses its rows with `ESC [ 10 ; 2 H` and `ESC [ 11 ; 2 H` instead of ' +
+      'writing newlines, and holds the marker off its text with `ESC [ 1 C` instead of the space its FIRST ' +
+      'drawing used. Both were being dropped, so the two answers arrived as ONE line -- ' +
+      '` No, exit(cursor)Yes, I trust this folder` -- and no reading of that line can say which answer is ' +
+      'under the cursor. CORRECTED THE SAME DAY, in three parts: `readable` turns a column advance into that ' +
+      'many spaces and a row move into a newline (which also un-glues the prompt`s own sentences, glued by ' +
+      'the same cause); the double REPAINTS IN THE MEASURED SHAPE rather than in plain lines, so a `fake` run ' +
+      'walks the path a `real` one walks; and both frames are kept as bytes in ' +
+      '`tests/acceptance-answers-only-what-it-saw.test.ts`, which replays them through the same two pure ' +
+      'functions on every gate. MEASURED AFTER THAT, `own` against the double: GREEN, 38 s for the `rename` ' +
+      'criterion. WHAT IT COSTS, MEASURED AND DELIBERATELY NOT PAID FOR HERE: the first terminal of a run ' +
+      'takes 20.3 s against 4.3 s before Ш39, because the answer is decided at the 15-second mark Ш38 chose. ' +
+      'Whether the instrument should instead wait for `a session OR the question on the screen`, which would ' +
+      'cost neither the wait nor a blind key, is open and is the owner`s to weigh. ONE INSTRUMENT DEFECT WAS ' +
       'ESTABLISHED BY THIS RUN AND IS CORRECTED: the suites printed "answering the CLI trust prompt with ' +
       'Enter", which they cannot know -- they read the record`s state and see no prompt, and under `own` that ' +
       'line printed in both runs while no session ever came. All four said they were sending a blind Enter, and ' +

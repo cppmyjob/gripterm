@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { readable, theChoiceUnderTheCursor } from './acceptance/watching-a-terminal';
 
 /**
  * No acceptance suite sends a key it has not looked at the screen for, and the
@@ -52,18 +53,28 @@ import { join, resolve } from 'node:path';
  *      double that asked in different words would leave the instrument reading
  *      for a sentence nothing prints and the suites back to guessing.
  *
- * **Read as TEXT, and not imported**, for the reason its neighbour
- * `acceptance-stops-at-a-death-and-shows-the-screen.test.ts` gives: the suites
- * import the `vscode` module and open editor windows, and `fake-claude.mjs` is a
- * program that starts a session the moment it is loaded. The crudeness is in the
- * safe direction -- a suite that sends a key some third way is not seen here, and
- * one seen here really does go through the watcher.
+ * **The suites and the double are read as TEXT and never imported**, for the
+ * reason its neighbour `acceptance-stops-at-a-death-and-shows-the-screen.test.ts`
+ * gives: the suites import the `vscode` module and open editor windows, and
+ * `fake-claude.mjs` is a program that starts a session the moment it is loaded.
+ * The crudeness is in the safe direction -- a suite that sends a key some third
+ * way is not seen here, and one seen here really does go through the watcher.
  *
- * **What this does NOT promise.** That the cursor really moves when the arrow
- * lands: that is a fact about a pty and about the program on the other end of it,
- * and no reader of text can check it. It is measured instead -- by the acceptance
- * against the real CLI, and headlessly by
- * `tests/fake-claude.test.ts`, which drives the double's question through a pipe.
+ * **The watcher's own reading of a screen IS imported**, and that is not the same
+ * decision: `readable` and `theChoiceUnderTheCursor` are pure functions of a
+ * string, the module they live in imports nothing at run time but types, and a
+ * text rule over them would say nothing about the only question that matters --
+ * what they make of the bytes a real Claude Code sent. Those bytes are below.
+ *
+ * **What the text rules do NOT promise, and what was measured instead.** That the
+ * cursor really moves when the arrow lands is a fact about a pty and about the
+ * program on the other end of it, and no reader of text can check it. IT IS
+ * MEASURED, twice and on the same day: against the real `claude` 2.1.260 under
+ * the `own` engine, where the instrument sent the arrow and THE CLI OBEYED -- the
+ * frame it drew in answer is `WHAT_THE_REAL_CLI_REDREW` below -- and headlessly
+ * through node-pty over a ConPTY against the double, whose own frame is beside
+ * it. `tests/fake-claude.test.ts` drives the same two keys through a pipe on
+ * every gate.
  * Nor that the words above are still the words Claude Code uses: that is what
  * `tests/acceptance/against-the-real-cli.json` and the receipt at the bottom of
  * `tests/fake-claude.test.ts` are for.
@@ -223,5 +234,66 @@ describe('the double, which used to start without a word', () => {
     const stillSaysIt = present(DOUBLE).includes('asks nothing before it starts');
 
     expect(stillSaysIt).toBe(false);
+  });
+});
+
+/**
+ * ESC, so that the frames below can be written the way they were quoted.
+ *
+ * A literal control character in a source file is invisible to a reader and to a
+ * `grep`, and these two strings are evidence: they have to be legible.
+ */
+const ESC = '\u001B';
+
+/**
+ * THE FRAME THE REAL CLI DREW AFTER THE ARROW, 2026-09-08, CLI 2.1.260.
+ *
+ * Copied from the tail of an acceptance run against the real `claude` under the
+ * `own` engine -- the run in which the instrument read the first frame right,
+ * said `the cursor is on "No, exit"; sending a Down arrow`, sent it, and then
+ * refused after ten seconds although THE CURSOR HAD MOVED. It could not see that
+ * it had: the repaint addresses rows with `ESC [ <row> ; 2 H` instead of
+ * newlines, and separates the marker from its text with `ESC [ 1 C` instead of a
+ * space, and the rendering dropped both -- so the two answers arrived as one
+ * unreadable line, ` No, exit(cursor)Yes, I trust this folder`.
+ *
+ * It is a test now rather than a corrected line of code, because a rendering that
+ * cannot read the real thing is exactly what a green suite hides.
+ */
+const WHAT_THE_REAL_CLI_REDREW =
+  `${ESC}[?2026h${ESC}[?2026l${ESC}[10;2H ${ESC}[1CNo, exit`
+  + `${ESC}[38;2;177;185;249m${ESC}[11;2H❯${ESC}[1CYes, I trust this folder${ESC}[m`;
+
+/**
+ * The same frame from the double, measured through a pty on the same day.
+ *
+ * node-pty 1.1.0 over a ConPTY, `node` on `fake-claude.mjs`, `ESC [ B` written
+ * into it. The rows differ from the real CLI's on purpose and the difference is
+ * explained at `CHOICES_START_AT_ROW` in that file: 10 and 11 were where the real
+ * prompt sat on that screen, which is not a rule. Everything a reader has to get
+ * through is the same, and this is the assertion that keeps it so.
+ */
+const WHAT_THE_DOUBLE_REDRAWS =
+  `${ESC}[?25l${ESC}[7;2H ${ESC}[1CNo, exit${ESC}[8;2H❯${ESC}[1CYes, I trust this folder${ESC}[?25h`;
+
+describe('the frames those two drew, replayed into the reading that failed on one of them', () => {
+  it('reads the trusting choice out of what the real CLI redrew', () => {
+    expect(theChoiceUnderTheCursor(readable(WHAT_THE_REAL_CLI_REDREW, 200))).toBe('the trusting choice');
+  });
+
+  it('reads the same out of what the double redraws, which is the point of the double', () => {
+    expect(theChoiceUnderTheCursor(readable(WHAT_THE_DOUBLE_REDRAWS, 200))).toBe('the trusting choice');
+  });
+
+  it('puts the two answers on two lines, which is what the old rendering could not', () => {
+    const shown = readable(WHAT_THE_REAL_CLI_REDREW, 200).split('\n');
+
+    expect(shown).toStrictEqual(['  No, exit', '❯ Yes, I trust this folder']);
+  });
+
+  it('reads the refusing choice while the cursor is still on it, so that the arrow is sent at all', () => {
+    const first = `${ESC}[38;2;177;185;249m❯ No, exit${ESC}[m` + '\n' + '   Yes, I trust this folder';
+
+    expect(theChoiceUnderTheCursor(readable(first, 200))).toBe('the refusing choice');
   });
 });

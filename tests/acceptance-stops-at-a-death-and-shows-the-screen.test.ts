@@ -62,8 +62,8 @@ import { join, resolve } from 'node:path';
  * and all, every repaint one after another -- bounded at 200 000 UTF-16 code
  * units, with a count of what fell off the front. It is NOT a rendered frame:
  * nothing here runs a terminal emulator over it, and the rendering the watcher
- * prints (escapes dropped, carriage returns broken into lines) is a readable
- * approximation. It answers "is there text about trusting this folder in what
+ * prints -- most escapes dropped, and the ones that move the cursor turned into
+ * the line breaks and spaces they stand for -- is a readable approximation. It answers "is there text about trusting this folder in what
  * the CLI printed", which is the question it was built for. It does not answer
  * "what did the screen look like".
  *

@@ -287,6 +287,18 @@ describe('the double that stands in for `claude`', () => {
    */
   const A_DOWN_ARROW = '\u001B[B';
 
+  /**
+   * What the CLI redraws after that arrow, and the double with it.
+   *
+   * MEASURED 2026-09-08 from the real `claude` 2.1.260 and copied into
+   * `repaintTheChoices`: the rows are addressed absolutely and the marker is held
+   * off its text by a column advance rather than by a space. The row numbers are
+   * the double's own -- the real ones say where that prompt sat on that screen --
+   * and the SHAPE is what both sides have to agree on, because it is what
+   * `watching-a-terminal.ts` has to read through.
+   */
+  const THE_REDRAWN_TRUSTING_LINE = '\u001B[8;2H❯\u001B[1CYes, I trust this folder';
+
   describe('the question it asks about a folder it has not seen', () => {
     it('asks it in the measured words, with the cursor on the refusing choice', async () => {
       const where = open();
@@ -311,8 +323,8 @@ describe('the double that stands in for `claude`', () => {
       const asked = session.stdout().length;
       session.child.stdin.write(A_DOWN_ARROW);
       await within(
-        'the cursor to move onto the trusting choice',
-        () => session.stdout().slice(asked).includes('❯ Yes, I trust this folder')
+        'the repaint that puts the cursor on the trusting choice',
+        () => session.stdout().slice(asked).includes(THE_REDRAWN_TRUSTING_LINE)
       );
       session.child.stdin.write('\r');
 

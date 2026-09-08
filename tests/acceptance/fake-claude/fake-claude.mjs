@@ -174,6 +174,13 @@
  *      is not asked, that the arrows are `ESC [ A/B` and `ESC O A/B`, and that
  *      the cursor clamps rather than wraps. Esc is printed in the measured line
  *      and is deliberately not implemented; `takeAKey` says why.
+ *      THE REPAINT AFTER AN ARROW IS MEASURED TOO, and separately, because it is
+ *      not the shape of the first drawing: `ESC [ <row> ; 2 H` per choice and
+ *      `ESC [ 1 C` between the marker and its text, where the first drawing used
+ *      newlines and an ordinary space. Same run, 2026-09-08, and it was found the
+ *      hard way -- the instrument answered the question correctly, the CLI obeyed
+ *      the arrow, and the run still went red because nothing here could READ the
+ *      frame that came back. See `repaintTheChoices`.
  *
  * OUR SIDE, and marked as such rather than dressed up as the CLI's:
  *
@@ -274,7 +281,7 @@ const LINE_BREAK = /\r\n|\r|\n/u;
  *
  * MEASURED 2026-09-08, CLI 2.1.260, in the acceptance's own pty: this is the
  * tail `tests/acceptance/watching-a-terminal.ts` printed on the 15th second of a
- * run that had been answering it blind, with the escape sequences taken out. The
+ * run that had been answering it blind, rendered readably. The
  * only thing changed here is the workspace path, which was that run's own:
  *
  * ```
@@ -787,13 +794,12 @@ function rememberTheFolder(config, cwd) {
 /**
  * The question on the terminal, with the cursor where the measurement put it.
  *
- * Printed again on every move rather than repainted in place. The real CLI
- * repaints -- it is an interface drawn with escape sequences -- but WHICH
- * sequences was never measured: the tail of 2026-09-08 was read with the escapes
- * taken out, so all that survives of that frame is its text. Inventing a repaint
- * would be inventing the one part of this nobody has seen, and a reader of a
- * run's output is better served by a second copy of the block than by a guess
- * that moves a cursor somewhere.
+ * The FIRST drawing, and its shape is measured: line by line, and the marker
+ * separated from its text by an ORDINARY SPACE (2026-09-08, CLI 2.1.260 --
+ * `ESC [ 38 ; 2 ; 177 ; 185 ; 249 m` then the cursor then a space then
+ * `No, exit`). The colour is deliberately not copied: nothing here reads one,
+ * and a palette is the kind of detail a double invents badly. The REPAINT is a
+ * different shape and is below.
  */
 function drawTheQuestion(cwd, cursorAt) {
   const lines = [
@@ -803,6 +809,49 @@ function drawTheQuestion(cwd, cursorAt) {
     ` ${CONFIRM_LINE}`,
   ];
   process.stdout.write(`${lines.join('\n')}\n`);
+}
+
+/**
+ * Which row of the screen the first choice is drawn on when the block is
+ * repainted.
+ *
+ * OUR SIDE, and the one part of the repaint that could not be copied. The CLI
+ * repaints with ABSOLUTE positions -- `ESC [ 10 ; 2 H` and `ESC [ 11 ; 2 H` in
+ * the run of 2026-09-08 -- and those two numbers say where its prompt happened
+ * to sit on that screen, which is a fact about that screen and not a rule.
+ * This program does not track the cursor, so it counts its own block from the
+ * top: one line of workspace, then the question, then the choices. What is
+ * copied is the SHAPE of the sequence, which is what any reader of the tail has
+ * to get through; where the frame lands on a screen nobody is watching is not.
+ */
+const CHOICES_START_AT_ROW = 2 + THE_TRUST_QUESTION.length;
+
+/**
+ * The repaint after an arrow, in the shape it was measured in.
+ *
+ * MEASURED 2026-09-08, CLI 2.1.260, from the tail of an acceptance run against
+ * the real CLI under the `own` engine. The bytes, with ESC written out:
+ *
+ *   ESC[10;2H SPACE ESC[1C No, exit ... ESC[11;2H CURSOR ESC[1C Yes, I trust this folder
+ *
+ * Two things in it are NOT what the first drawing does, and both are copied
+ * because the instrument has to read through them: the rows are addressed
+ * absolutely instead of with newlines, and the marker is separated from its text
+ * by `ESC [ 1 C` -- a column advance -- instead of by a space. A double that
+ * repainted with plain lines would leave `watching-a-terminal.ts` reading a
+ * shape under `fake` that it never meets under `real`, which is the whole defect
+ * Ш39 exists to remove. It cost one red run of the real CLI to find; it costs
+ * nothing to keep.
+ *
+ * Only the two choices are repainted. The rest of the block does not change, and
+ * what the CLI does with the lines around it was not measured.
+ */
+function repaintTheChoices(cursorAt) {
+  const frame = TRUST_CHOICES.map(
+    (choice, at) =>
+      `${ESC}[${String(CHOICES_START_AT_ROW + at)};2H${at === cursorAt ? THE_CURSOR : ' '}${ESC}[1C${choice}`
+  );
+  process.stdout.write(frame.join(''));
 }
 
 /**
@@ -897,7 +946,7 @@ function askAboutTheFolder(cwd, trusted) {
         const moved = Math.min(TRUST_CHOICES.length - 1, Math.max(0, cursorAt + (taken.key === 'up' ? -1 : 1)));
         if (moved !== cursorAt) {
           cursorAt = moved;
-          drawTheQuestion(cwd, cursorAt);
+          repaintTheChoices(cursorAt);
         }
         continue;
       }

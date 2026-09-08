@@ -38,8 +38,10 @@ import type { GriptermApi } from '../../packages/extension/src/extension';
  *   * NOT a frame. It is the byte stream, escape sequences and all, so a program
  *     that repaints its screen in place appears here as every repaint one after
  *     another. Nothing in this repository renders it, and the rendering below --
- *     escape sequences dropped, carriage returns broken into lines -- is a
- *     readable approximation and not what a terminal would have drawn. It is
+ *     most escape sequences dropped, but a row move and a column advance turned
+ *     into the line break and the spaces they stand for (2026-09-08, and the
+ *     reason is at each of them) -- is a readable approximation and not what a
+ *     terminal would have drawn. It is
  *     enough for the two questions this was built for: IS THERE TEXT ABOUT
  *     TRUSTING THIS FOLDER IN WHAT THE CLI PRINTED, and WHICH OF THE TWO ANSWERS
  *     IS THE CURSOR ON. Both are asked of the LAST repaint in the tail, which is
@@ -183,15 +185,58 @@ const AN_ESCAPE = /\x1b\[[\d;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[
 const A_CONTROL = /[\x00-\x08\v\f\x0e-\x1f\x7f]/gu;
 
 /**
+ * A cursor moved forward, which in the frame the terminal drew is that many
+ * spaces.
+ *
+ * MEASURED 2026-09-08, CLI 2.1.260, in the repaint quoted at the head of this
+ * file: `ESC [ 1 C` is what the CLI puts between the cursor glyph and the text
+ * beside it, where its FIRST drawing of the same line used an ordinary space.
+ * Dropping it -- which is what this function did until those bytes were read --
+ * glues the marker to the word after it, and glues whole sentences of the prompt
+ * into one run of letters. The sequence means `advance n columns`, and in a drawn
+ * frame there are exactly n spaces there, so this is the honest rendering and not
+ * a repair aimed at one case.
+ */
+// eslint-disable-next-line no-control-regex -- ESC is the subject here, as it is for the two expressions above
+const A_COLUMN_ADVANCE = /\x1b\[(\d*)C/gu;
+
+/**
+ * A move to another row, which in a rendering made of lines is a line break.
+ *
+ * MEASURED in the same repaint: the CLI puts each choice on its own row with
+ * `ESC [ <row> ; 2 H` and writes no newline anywhere in it. Dropped, as this used
+ * to drop it, the two choices arrive here as ONE line -- ` No, exit(cursor)Yes, I
+ * trust this folder` was the last printable line of the run that refused -- and no
+ * reading of that line can say which answer the cursor is on. A row move is
+ * therefore a newline here. It is an approximation in the safe direction: two
+ * writes to the SAME row become two lines, which splits a line that was one, and
+ * splitting cannot glue two answers into something unreadable.
+ */
+// eslint-disable-next-line no-control-regex -- as above
+const A_ROW_MOVE = /\x1b\[[\d;]*[HfABEF]/gu;
+
+/** As far as one `ESC [ n C` may widen a line, so that a wild n cannot eat the output. */
+const COLUMNS_AT_MOST = 200;
+
+/**
  * The tail as text a person can read in a run's output.
  *
  * Carriage returns become newlines rather than being dropped, which is the
  * honest shape of what is held: a line rewritten in place is several lines here,
  * and the alternative -- keeping the last of them -- would be this function
- * deciding what the terminal drew.
+ * deciding what the terminal drew. Row moves become newlines and column advances
+ * become spaces, for the reasons written at each of them; both were added
+ * 2026-09-08, after a run against the real CLI printed a frame this could not
+ * read.
+ *
+ * Exported because it is pure, and because the frame that defeated it is a test
+ * now: `tests/acceptance-answers-only-what-it-saw.test.ts` replays those bytes.
  */
-function readable(text: string, lines: number): string {
+export function readable(text: string, lines: number): string {
   const shown = text
+    .replace(A_COLUMN_ADVANCE, (_whole, columns: string) =>
+      ' '.repeat(Math.min(Math.max(1, Number(columns === '' ? '1' : columns)), COLUMNS_AT_MOST)))
+    .replace(A_ROW_MOVE, '\n')
     .replace(AN_ESCAPE, '')
     .replace(/\r\n?/gu, '\n')
     .replace(A_CONTROL, (one) => `\\x${(one.codePointAt(0) ?? 0).toString(16).padStart(2, '0')}`)
@@ -199,6 +244,47 @@ function readable(text: string, lines: number): string {
     .filter((line) => line.trim().length > 0)
     .slice(-lines);
   return shown.length === 0 ? '(the tail holds no printable line)' : shown.join('\n');
+}
+
+/** Which answer of the measured question a cursor is sitting on. */
+export type Choice = 'the refusing choice' | 'the trusting choice';
+
+/**
+ * The answer under the cursor, read out of the readable tail.
+ *
+ * The LAST repaint is the only frame still on the screen: a prompt that repaints
+ * leaves every earlier frame in this byte stream, and the first cursor in it is
+ * where the cursor USED to be. So the search runs from the end and stops at the
+ * first line carrying one.
+ *
+ * `null` for all three of `no cursor in the tail`, `a cursor on something this
+ * does not recognise`, and `a line both answers are on`, and every caller prints
+ * the screen rather than acting on any of them.
+ */
+export function theChoiceUnderTheCursor(said: string): Choice | null {
+  const lines = said.split('\n');
+  for (let at = lines.length - 1; at >= 0; at -= 1) {
+    const line = lines[at] ?? '';
+    if (!line.includes(THE_CURSOR)) {
+      continue;
+    }
+    const trusting = line.includes(THE_TRUSTING_CHOICE);
+    const refusing = line.includes(THE_REFUSING_CHOICE);
+    if (trusting && refusing) {
+      // BOTH on one line, which this tail can produce: it is a byte stream, and
+      // a prompt that changed rows with escape sequences rather than with a
+      // newline used to arrive exactly so. `readable` breaks rows now, and this
+      // stays as the net under it -- answered `null` rather than by preferring
+      // one, because preferring the trusting one would press Enter on `No, exit`
+      // in the very case this class exists to stop.
+      return null;
+    }
+    if (trusting) {
+      return 'the trusting choice';
+    }
+    return refusing ? 'the refusing choice' : null;
+  }
+  return null;
 }
 
 /**
@@ -250,7 +336,7 @@ export class WatchedTerminal {
     console.log(
       `screen ${when}: ${replay.text.length} code units held, ${replay.droppedChars} dropped off the front before them`
     );
-    console.log(`screen ${when}, its last ${SCREEN_LINES} printable lines with the escape sequences taken out:`);
+    console.log(`screen ${when}, its last ${SCREEN_LINES} printable lines, rendered by \`readable\`:`);
     console.log(readable(replay.text, SCREEN_LINES));
     console.log(
       `screen ${when}, its last ${RAW_TAIL_CHARS} code units exactly as they arrived: `
@@ -275,43 +361,14 @@ export class WatchedTerminal {
    * Which of the two answers the cursor is on, out of the LAST repaint in the
    * tail.
    *
-   * The last one is the only frame still on the screen: a prompt that repaints in
-   * place leaves every earlier frame in this byte stream, and the first `❯` in it
-   * is where the cursor USED to be. So the search runs from the end, and stops at
-   * the first line that carries the cursor.
-   *
-   * `null` for all four of "no screen", "no cursor in the tail", "a cursor on
-   * something this does not recognise" and "a line this cannot read one answer
-   * out of", and the caller prints the screen rather than acting on any of them.
+   * `null` when there is no screen at all, and otherwise whatever
+   * `theChoiceUnderTheCursor` can read out of the text -- which is a pure
+   * function so that the frame of 2026-09-08 can be replayed into it by a test
+   * with no editor and no terminal.
    */
-  public theCursorIsOn(): 'the refusing choice' | 'the trusting choice' | null {
+  public theCursorIsOn(): Choice | null {
     const said = this.whatTheScreenSays();
-    if (said === null) {
-      return null;
-    }
-    const lines = said.split('\n');
-    for (let at = lines.length - 1; at >= 0; at -= 1) {
-      const line = lines[at] ?? '';
-      if (!line.includes(THE_CURSOR)) {
-        continue;
-      }
-      const trusting = line.includes(THE_TRUSTING_CHOICE);
-      const refusing = line.includes(THE_REFUSING_CHOICE);
-      if (trusting && refusing) {
-        // BOTH on one line, which is a thing this tail can produce: it is a byte
-        // stream, and a prompt that moved the cursor with escape sequences rather
-        // than with a newline would leave the two choices in one line of it.
-        // Answered `null` rather than by preferring one -- preferring the
-        // trusting one would press Enter on `No, exit` in exactly the case this
-        // class exists to stop.
-        return null;
-      }
-      if (trusting) {
-        return 'the trusting choice';
-      }
-      return refusing ? 'the refusing choice' : null;
-    }
-    return null;
+    return said === null ? null : theChoiceUnderTheCursor(said);
   }
 
   /**
