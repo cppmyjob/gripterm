@@ -1,9 +1,9 @@
 {
   "what": "one scene, planted into a private CLAUDE_CONFIG_DIR and read back out of the real CLI",
-  "capturedAt": "2026-08-27T10:30:00.000Z",
+  "capturedAt": "2026-09-08T13:22:55.202Z",
   "agent": "claude-code",
-  "build": "2.1.245",
-  "versionOutput": "2.1.245 (Claude Code)\n",
+  "build": "2.1.260",
+  "versionOutput": "2.1.260 (Claude Code)\n",
   "planted": [
     {
       "sessionId": "7c9a1b2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d",
@@ -28,17 +28,17 @@
       "status": "idle"
     }
   ],
-  "printed": "[\n  {\n    \"pid\": 22812,\n    \"cwd\": \"?\",\n    \"kind\": \"interactive\",\n    \"startedAt\": 0,\n    \"sessionId\": \"11111111-2222-4333-8444-000000000002\",\n    \"name\": \"the-unknowing-one\",\n    \"status\": \"idle\"\n  },\n  {\n    \"pid\": 16616,\n    \"cwd\": \"D:\\\\Projects\\\\Gripterm\",\n    \"kind\": \"interactive\",\n    \"startedAt\": 1786500000000,\n    \"sessionId\": \"7c9a1b2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d\",\n    \"name\": \"the-full-one\",\n    \"status\": \"busy\"\n  },\n  {\n    \"pid\": 25080,\n    \"cwd\": \"D:\\\\Projects\\\\Gripterm\",\n    \"kind\": \"interactive\",\n    \"startedAt\": 1786500000001,\n    \"sessionId\": \"11111111-2222-4333-8444-000000000001\"\n  }\n]\n",
+  "printed": "[\n  {\n    \"pid\": 2572,\n    \"cwd\": \"?\",\n    \"kind\": \"interactive\",\n    \"startedAt\": 0,\n    \"sessionId\": \"11111111-2222-4333-8444-000000000002\",\n    \"name\": \"the-unknowing-one\",\n    \"status\": \"idle\"\n  },\n  {\n    \"pid\": 24660,\n    \"cwd\": \"D:\\\\Projects\\\\Gripterm\",\n    \"kind\": \"interactive\",\n    \"startedAt\": 1786500000000,\n    \"sessionId\": \"7c9a1b2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d\",\n    \"name\": \"the-full-one\",\n    \"status\": \"busy\"\n  },\n  {\n    \"pid\": 23648,\n    \"cwd\": \"D:\\\\Projects\\\\Gripterm\",\n    \"kind\": \"interactive\",\n    \"startedAt\": 1786500000001,\n    \"sessionId\": \"11111111-2222-4333-8444-000000000001\"\n  }\n]\n",
   "recording": {
     "agent": "a recording of claude-code",
-    "build": "2.1.245",
-    "capturedAt": "2026-08-27T10:30:00.000Z",
+    "build": "2.1.260",
+    "capturedAt": "2026-09-08T13:22:55.202Z",
     "running": {
       "kind": "listed",
       "agents": [
         {
           "sessionId": "7c9a1b2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d",
-          "pid": 16616,
+          "pid": 24660,
           "cwd": "D:\\Projects\\Gripterm",
           "kind": "interactive",
           "startedAt": 1786500000000,
@@ -47,7 +47,7 @@
         },
         {
           "sessionId": "11111111-2222-4333-8444-000000000001",
-          "pid": 25080,
+          "pid": 23648,
           "cwd": "D:\\Projects\\Gripterm",
           "kind": "interactive",
           "startedAt": 1786500000001,
@@ -56,7 +56,7 @@
         },
         {
           "sessionId": "11111111-2222-4333-8444-000000000002",
-          "pid": 22812,
+          "pid": 2572,
           "cwd": null,
           "kind": "interactive",
           "startedAt": null,
@@ -77,8 +77,8 @@
     }
   },
   "pids": [
-    16616,
-    25080,
-    22812
+    24660,
+    23648,
+    2572
   ]
 }

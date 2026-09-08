@@ -24,10 +24,10 @@ import type { AgentListing, AgentRecord } from '../../packages/core/src/index';
  *
  * **The scene is the fixture's, not this file's**, and that is what the fixture
  * is for. Three session shapes are read out of
- * `tests/agents/fixtures/roster-scene-2026-08-27.json` -- one complete, one with
+ * `tests/agents/fixtures/roster-scene-2026-09-08.json` -- one complete, one with
  * no `name` and no `status`, one that knows neither its directory (`"?"`) nor
  * its start (`0`) -- planted on live pids of this run, and the CLI's answer is
- * compared with what that same file says the CLI answered on 2026-08-27. There
+ * compared with what that same file says the CLI answered on 2026-09-08. There
  * is no module the two halves can import (this one is compiled into the
  * extension host, the other runs in jest), so what they share is the file.
  *
@@ -49,8 +49,8 @@ const GENEROUS_MS = 20_000;
 
 /** `out/tests/integration` is three below the repository root. */
 const REPO = join(__dirname, '..', '..', '..');
-const SCENE_FILE = join(REPO, 'tests', 'agents', 'fixtures', 'roster-scene-2026-08-27.json');
-const SCENE_NAME = 'tests/agents/fixtures/roster-scene-2026-08-27.json';
+const SCENE_FILE = join(REPO, 'tests', 'agents', 'fixtures', 'roster-scene-2026-09-08.json');
+const SCENE_NAME = 'tests/agents/fixtures/roster-scene-2026-09-08.json';
 
 interface Scene {
   readonly build: string;

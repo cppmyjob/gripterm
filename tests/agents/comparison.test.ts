@@ -22,8 +22,8 @@ import type { AgentRecording } from '../../packages/core/src/domain/agents/recor
  * **The scene.** Three sessions planted into a `CLAUDE_CONFIG_DIR` of the run's
  * own -- one complete, one with no `name` and no `status`, one that says it
  * knows neither its directory (`"?"`) nor its start (`0`) -- and read back out
- * of the CLI. The capture in `tests/agents/fixtures/roster-scene-2026-08-27.json`
- * is that read, verbatim, against `claude 2.1.245` on 2026-08-27, and the
+ * of the CLI. The capture in `tests/agents/fixtures/roster-scene-2026-09-08.json`
+ * is that read, verbatim, against `claude 2.1.260` on 2026-09-08, and the
  * `recording` beside it is the same scene written as this build's own value.
  *
  * **What runs where, and it is the plan's rule.** This half runs ALWAYS and
@@ -50,7 +50,7 @@ interface Scene {
 }
 
 const SCENE = JSON.parse(
-  readFileSync(join(__dirname, 'fixtures', 'roster-scene-2026-08-27.json'), 'utf8')
+  readFileSync(join(__dirname, 'fixtures', 'roster-scene-2026-09-08.json'), 'utf8')
 ) as Scene;
 
 function theRecording(): AgentRecording {
