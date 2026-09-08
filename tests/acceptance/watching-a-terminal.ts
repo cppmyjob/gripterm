@@ -90,6 +90,24 @@ import type { GriptermApi } from '../../packages/extension/src/extension';
  * the screen says the cursor is on, and never otherwise. Under the `editor`
  * engine, where there is no screen to read at all, it refuses instead of
  * guessing: see that method.
+ *
+ * **THE THIRD CORRECTION, 2026-09-08 (Ш42), AND IT IS ABOUT WHEN THE SCREEN IS
+ * READ.** Ш39 read it once, at the 15-second mark Ш38 had chosen, so a terminal
+ * whose question was on the screen in the first second still paid the whole
+ * fifteen: MEASURED, the first terminal of a run took 20.3 s against 4.3 s
+ * before. The wait is a session OR a question this can act on now, whichever
+ * comes first, and the owner weighed that trade on 2026-09-08. Nothing about the
+ * ANSWER changed -- it is still two looks and still only at what the screen says.
+ * What is new is that the frame can be read MID-DRAWING, where the old wait was
+ * certain of a finished one, and `whatToDoAboutTheScreen` below is the whole of
+ * the answer to that: a frame may be acted on only when the choice block is
+ * FINISHED and the marker is readable on one of the two answers. Until then the
+ * wait goes on, and after fifteen seconds of that everything is as it was, the
+ * printed frame and the honest refusal included.
+ *
+ * WHAT IS NOT CLAIMED BY ANY OF THIS: that a run against the real CLI comes up
+ * faster now, or that the question comes back at all. Nothing in this repository
+ * has measured one since; that is a run, and `tools/gate.mjs` says whose.
  */
 
 /** The deadline every wait keeps while the process is alive and nothing arrives. */
@@ -105,19 +123,26 @@ const SCREEN_LINES = 40;
 const RAW_TAIL_CHARS = 300;
 
 /**
- * What a bounded wait did when it was not allowed to throw.
+ * What a wait for a session may decide, and it is the whole of what one decides.
  *
- * Only `theSessionStarts` uses it: 15 s without a session is not a failure
- * there, it is the condition for reading the screen and answering what is on it.
+ * THREE ANSWERS AND NOT FOUR, and the missing one is the point: refusing is not
+ * among them. Nothing about a frame alone can say that a screen will never
+ * become readable -- a half-drawn one is whole in the next chunk -- so the
+ * refusal is the CLOCK'S answer and not the screen's, and it is what `wait`
+ * becomes when `A_SESSION_STARTS_WITHIN_MS` runs out.
  */
-export type Waited = 'reached' | 'elapsed';
+export type WhatToDo = 'the session is up' | 'answer what is on the screen' | 'wait';
 
 /**
- * How long a session is given before the screen is read.
+ * How long a session is given before the wait gives up on it.
  *
  * The number is Ш38's and it was chosen there as the window in which a trust
- * prompt would have arrived. What changed in Ш39 is what happens at the end of
- * it: a key used to go out blind, and now the screen is read first.
+ * prompt would have arrived. Ш39 made it the moment the screen was read; Ш42
+ * made it stop being a DELAY. The screen is read on every poll now and a
+ * question this can act on ends the wait the moment it is whole, so what is left
+ * of this number is the patience for a terminal that shows NEITHER -- and at the
+ * end of it the frame is printed and the answering step refuses on what it
+ * finds, exactly as before.
  */
 const A_SESSION_STARTS_WITHIN_MS = 15_000;
 
@@ -288,6 +313,63 @@ export function theChoiceUnderTheCursor(said: string): Choice | null {
 }
 
 /**
+ * What a wait for a session should do about what the terminal has printed.
+ *
+ * A pure function of two things -- the readable tail, or `null` where this engine
+ * hands out no screen at all, and whether the session came up -- so that the
+ * decision can be replayed into by a test with no editor, no terminal and no
+ * agent. `tests/acceptance-answers-only-what-it-saw.test.ts` plays the measured
+ * frames of both sides through it, whole and cut.
+ *
+ * **A SESSION WINS.** Nothing is typed at a terminal that started: a question
+ * still on the screen behind a live session is not this wait's business.
+ *
+ * **WHAT MAKES A FRAME ONE THIS MAY ACT ON, and why it is enough.** Four things,
+ * all of them:
+ *
+ *   1. `No, exit` is on it;
+ *   2. `Yes, I trust this folder` is on it;
+ *   3. the line that says which key confirms is on it;
+ *   4. `theChoiceUnderTheCursor` reads exactly one of the two answers out of it.
+ *
+ * Three of those -- 2, 3 and 4 -- are EXACTLY what `_answerTheQuestionAboutTheFolder`
+ * refuses on, so a frame accepted here cannot be refused there; that is the whole
+ * of the sufficiency argument and it is checkable by reading that method. What 1
+ * adds is the rest of the block: both answers are drawn together in every shape
+ * either side was measured in, so requiring it delays nothing and it is what "the
+ * block is on the screen" means.
+ *
+ * **WHY 3 IS THE ONE THAT SAYS `FINISHED`.** MEASURED 2026-09-08, CLI 2.1.260,
+ * and copied by the double: the confirming line is written LAST of the block,
+ * after both answers. A tail that holds it holds everything before it, so it is
+ * how a frame whose remaining bytes are still in the pty is told from one the
+ * terminal has finished drawing. Without it a chunk boundary between the second
+ * answer and that line would be answered here and refused one call later.
+ *
+ * **AND WHY 4 IS NOT IMPLIED BY THE OTHERS.** A frame can carry both answers and
+ * still have no marker this can name: the shape of 2026-09-08, where a repaint
+ * put both of them on ONE line, is exactly that, and `theChoiceUnderTheCursor`
+ * answers `null` for it rather than choosing. Waiting on such a frame costs a
+ * poll; guessing on it would press Enter on `No, exit`, which is the defect this
+ * whole file exists to stop.
+ */
+export function whatToDoAboutTheScreen(said: string | null, theSessionIsUp: boolean): WhatToDo {
+  if (theSessionIsUp) {
+    return 'the session is up';
+  }
+  if (said === null) {
+    return 'wait';
+  }
+  const theBlockIsOnTheScreen =
+    said.includes(THE_REFUSING_CHOICE)
+    && said.includes(THE_TRUSTING_CHOICE)
+    && said.includes(THE_CONFIRMING_LINE);
+  return theBlockIsOnTheScreen && theChoiceUnderTheCursor(said) !== null
+    ? 'answer what is on the screen'
+    : 'wait';
+}
+
+/**
  * The terminal one acceptance suite is working on, and every wait that suite
  * makes.
  *
@@ -376,9 +458,13 @@ export class WatchedTerminal {
    * is in the way.
    *
    * **The one place in this repository a key is sent to a starting terminal**, and
-   * the shape of it is the correction Ш39 made. Fifteen seconds without a session
-   * is not a failure: it is the condition for READING the screen. What happens
-   * next is decided by what is on it, and there are four answers:
+   * the shape of it is the correction Ш39 made. A session that has not started is
+   * not a failure: it is the condition for READING the screen, and since Ш42 that
+   * reading happens on every poll rather than once at the fifteenth second --
+   * `_aSessionOrTheQuestion` ends the wait on whichever of the two arrives first,
+   * and `whatToDoAboutTheScreen` is what decides that a frame is finished enough
+   * to be one. What happens next is decided by what is on it, and there are four
+   * answers:
    *
    *   * the trust question of 2026-09-08 -- answered, by moving the cursor onto
    *     `Yes, I trust this folder` and confirming what the screen then says is
@@ -406,13 +492,23 @@ export class WatchedTerminal {
    */
   public async theSessionStarts(idle: () => boolean | Promise<boolean>): Promise<void> {
     const what = 'the session to start';
-    if (await this.waitedFor(what, idle, A_SESSION_STARTS_WITHIN_MS) === 'reached') {
+    const decided = await this._aSessionOrTheQuestion(what, idle);
+    if (decided === 'the session is up') {
       return;
     }
-    console.log(
-      `${this._id}: ${A_SESSION_STARTS_WITHIN_MS.toString()} ms and no session. Reading the screen before anything is typed.`
-    );
-    this.showTheScreen('at 15 s, with no session yet and nothing typed');
+    if (decided === 'answer what is on the screen') {
+      console.log(
+        `${this._id}: the question about the folder is on the screen and can be read, so the`
+        + ` ${A_SESSION_STARTS_WITHIN_MS.toString()} ms are not waited out.`
+      );
+      this.showTheScreen('when the question about the folder was read off the screen');
+    } else {
+      console.log(
+        `${this._id}: ${A_SESSION_STARTS_WITHIN_MS.toString()} ms, no session, and nothing on the screen this`
+        + ' could decide on. Reading it before anything is typed.'
+      );
+      this.showTheScreen('at 15 s, with no session yet and nothing typed');
+    }
     await this._answerTheQuestionAboutTheFolder();
     await this.until(`${what}, now that the question about the folder has been answered`, idle);
   }
@@ -449,23 +545,36 @@ export class WatchedTerminal {
   }
 
   /**
-   * A bounded wait that is allowed to come back empty-handed.
+   * The bounded wait `theSessionStarts` is made of: a session OR a question this
+   * can act on, whichever comes first.
    *
-   * The end of the process is still a refusal here: an Enter typed at a pty that
-   * has exited reaches nothing -- `write` after the end is ignored by the port's
-   * own measured rule, and the gateway has forgotten the handle by then anyway --
-   * so there is nothing left for the caller to try.
+   * **A wait that is allowed to come back empty-handed**, which is what `wait`
+   * means as a return value here: fifteen seconds of neither. The end of the
+   * PROCESS is still a refusal -- an Enter typed at a pty that has exited reaches
+   * nothing (`write` after the end is ignored by the port's own measured rule,
+   * and the gateway has forgotten the handle by then anyway), so there is nothing
+   * left for the caller to try.
+   *
+   * **Both questions on every poll, and the screen is read even when the session
+   * answered first.** That is deliberate: the decision belongs to
+   * `whatToDoAboutTheScreen` and to nothing else, and a caller that decided the
+   * easy half for itself would be a second copy of a rule no test can see. What
+   * it costs is one rendering of the tail per 200 ms until the wait ends -- and
+   * none at all under the `editor` engine, where the panel holds no bridge and
+   * `whatTheScreenSays` is `null` without touching anything.
    */
-  public async waitedFor(
+  private async _aSessionOrTheQuestion(
     what: string,
-    ready: () => boolean | Promise<boolean>,
-    ms: number
-  ): Promise<Waited> {
-    const polled = await this._poll<true>(async () => (await ready() ? true : null), ms);
+    idle: () => boolean | Promise<boolean>
+  ): Promise<WhatToDo> {
+    const polled = await this._poll<WhatToDo>(async () => {
+      const decided = whatToDoAboutTheScreen(this.whatTheScreenSays(), await idle());
+      return decided === 'wait' ? null : decided;
+    }, A_SESSION_STARTS_WITHIN_MS);
     if (polled.kind === 'died') {
-      this._giveUp(what, this._itDied(what, ms));
+      this._giveUp(what, this._itDied(what, A_SESSION_STARTS_WITHIN_MS));
     }
-    return polled.kind === 'there' ? 'reached' : 'elapsed';
+    return polled.kind === 'there' ? polled.value : 'wait';
   }
 
   /**
@@ -481,9 +590,9 @@ export class WatchedTerminal {
     if (said === null) {
       this._giveUp(
         'the session to start',
-        'no session started inside 15 s, and this engine hands out no screen beside a handle (§4.1), so nothing here'
-        + ' can tell a question from a slow start. A key is NOT being sent: sending one unseen is the defect of'
-        + ' 2026-09-08, and it answered `No, exit`. Under the double, set'
+        'the wait for a session ended with no session, and this engine hands out no screen beside a handle (§4.1),'
+        + ' so nothing here can tell a question from a slow start. A key is NOT being sent: sending one unseen is'
+        + ' the defect of 2026-09-08, and it answered `No, exit`. Under the double, set'
         + ' GRIPTERM_FAKE_CLAUDE_FOLDER_IS_ALREADY_TRUSTED for a run with no eyes; against the real CLI, trust the'
         + ' folder once by hand and run again'
       );
@@ -491,7 +600,7 @@ export class WatchedTerminal {
     if (!said.includes(THE_TRUSTING_CHOICE) || !said.includes(THE_CONFIRMING_LINE)) {
       this._giveUp(
         'the session to start',
-        'no session started inside 15 s, and what the terminal printed is not the question about trusting a folder'
+        'the wait for a session ended, and what the terminal printed is not the question about trusting a folder'
         + ` (it holds neither "${THE_TRUSTING_CHOICE}" nor "${THE_CONFIRMING_LINE}"). The screen is above; nothing`
         + ' was typed at it'
       );

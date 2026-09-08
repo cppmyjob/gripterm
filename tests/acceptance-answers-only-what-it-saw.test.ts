@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { readable, theChoiceUnderTheCursor } from './acceptance/watching-a-terminal';
+import { readable, theChoiceUnderTheCursor, whatToDoAboutTheScreen } from './acceptance/watching-a-terminal';
 
 /**
  * No acceptance suite sends a key it has not looked at the screen for, and the
@@ -118,7 +118,10 @@ const WITHIN_LINES = 12;
  * here rather than imported from either, so that a change on one side alone is a
  * red test and not a silent divergence.
  */
-const THE_MEASURED_FORM = ['No, exit', 'Yes, I trust this folder', 'Enter to confirm'];
+const THE_REFUSING_CHOICE = 'No, exit';
+const THE_TRUSTING_CHOICE = 'Yes, I trust this folder';
+const THE_CONFIRMING_LINE = 'Enter to confirm';
+const THE_MEASURED_FORM = [THE_REFUSING_CHOICE, THE_TRUSTING_CHOICE, THE_CONFIRMING_LINE];
 
 /**
  * A line that is talking about the code rather than being it.
@@ -295,5 +298,263 @@ describe('the frames those two drew, replayed into the reading that failed on on
     const first = `${ESC}[38;2;177;185;249m❯ No, exit${ESC}[m` + '\n' + '   Yes, I trust this folder';
 
     expect(theChoiceUnderTheCursor(readable(first, 200))).toBe('the refusing choice');
+  });
+});
+
+/**
+ * U+276F, the marker the prompt puts against the answer it is on.
+ *
+ * Written as an escape for the reason `watching-a-terminal.ts` gives at its own
+ * copy: a literal one in a source file is a glyph nobody can grep for by eye.
+ * The two byte frames above keep theirs literal because they are quoted
+ * evidence; everything below is built, and builds it from here.
+ */
+const THE_CURSOR_GLYPH = '\u276F';
+
+/** U+00B7, the separator the confirming line was measured with. */
+const A_MIDDLE_DOT = '\u00B7';
+
+/** As many lines of the tail as `WatchedTerminal.whatTheScreenSays` reads. */
+const LINES_READ = 200;
+
+/**
+ * The whole block, as BOTH sides draw it the first time.
+ *
+ * MEASURED 2026-09-08, CLI 2.1.260: this is the tail the instrument printed on
+ * the 15th second, quoted at the head of this file and at the head of
+ * `tests/acceptance/watching-a-terminal.ts`. It is the RENDERING and not the
+ * bytes, and that is said out loud -- of that FIRST drawing this repository holds
+ * no bytes at all, and of the REPAINT it holds `WHAT_THE_REAL_CLI_REDREW` and
+ * `WHAT_THE_DOUBLE_REDRAWS` above. The cases below therefore ask both: this block
+ * alone, and this block with those bytes on top of it, which is the tail a run
+ * really holds after its own arrow.
+ *
+ * One argument, and the two sides differ only in it: the folder each was looking
+ * at. That is not a shortcut -- `fake-claude.mjs` copies these words on purpose,
+ * and the rules above are what hold it to them.
+ */
+function theWholeQuestion(workspace: string): string {
+  return [
+    `Accessing workspace: ${workspace}`,
+    'Quick safety check: Is this a project you created or one you trust?',
+    '(Like your own code, a well-known open source project, or work from your team).',
+    `If not, take a moment to review what's in this folder first.`,
+    `Claude Code'll be able to read, edit, and execute files here.`,
+    'Security guide',
+    ` ${THE_CURSOR_GLYPH} ${THE_REFUSING_CHOICE}`,
+    `   ${THE_TRUSTING_CHOICE}`,
+    ` ${THE_CONFIRMING_LINE} ${A_MIDDLE_DOT} Esc to cancel`,
+  ].join('\n');
+}
+
+/** The real CLI's, with the workspace line as that run printed it. */
+const WHAT_THE_REAL_CLI_ASKED = theWholeQuestion(String.raw`c:\...\gripterm-acceptance\project`);
+
+/** The double's, whose folder is unique per run since Ш42 and whose words are not. */
+const WHAT_THE_DOUBLE_ASKS = theWholeQuestion(String.raw`C:\...\Temp\gripterm-acceptance\project-<this run's uuid>`);
+
+/**
+ * The same block, cut where the marker had not been drawn yet.
+ *
+ * THE CASE THE EARLY LOOK IS ABOUT. Until Ш42 the frame was read once, at the
+ * 15-second mark, and was therefore certain to be finished. It is read as soon as
+ * it can be read now, which means it can be read mid-drawing -- and the answering
+ * step REFUSES on a half-drawn one, with `the cursor is on nothing this can read`
+ * or with `what the terminal printed is not the question`. A long green would
+ * have become a fast red.
+ */
+function cutBeforeTheCursorWasPlaced(frame: string): string {
+  return frame.slice(0, frame.indexOf(THE_CURSOR_GLYPH));
+}
+
+/**
+ * And cut one chunk later: the marker is placed, both answers are on the screen,
+ * and the block is still not finished.
+ *
+ * The line that says which key confirms is written LAST of the four things the
+ * instrument steers by, so a tail holding it holds the whole block. This is the
+ * cut that tells a weaker condition from the one this file asks for: "both
+ * answers and a readable marker" alone would answer here, and the answering step
+ * would then refuse -- its own first look wants that line.
+ */
+function cutBeforeTheBlockWasFinished(frame: string): string {
+  return frame.slice(0, frame.indexOf(THE_CONFIRMING_LINE));
+}
+
+/**
+ * The frame the OLD rendering made of the repaint, kept because it is measured.
+ *
+ * 2026-09-08: the repaint addressed its rows with escape sequences instead of
+ * newlines, `readable` dropped them, and the two answers arrived as ONE line --
+ * ` No, exit(cursor)Yes, I trust this folder`, the last printable line of the run
+ * that refused. `readable` breaks rows now, so that repaint does not produce this
+ * shape any more; it is the shape a frame this code cannot read still has, and
+ * `theChoiceUnderTheCursor` answers `null` for it rather than guessing which of
+ * the two answers the marker belongs to. A screen like that has to be waited on
+ * and never answered: guessing the trusting one would press Enter on `No, exit`,
+ * which is the defect all of this exists to stop.
+ */
+const WHAT_A_FRAME_NOBODY_CAN_READ_LOOKS_LIKE = [
+  ` ${THE_CONFIRMING_LINE} ${A_MIDDLE_DOT} Esc to cancel`,
+  ` ${THE_REFUSING_CHOICE}${THE_CURSOR_GLYPH}${THE_TRUSTING_CHOICE}`,
+].join('\n');
+
+/**
+ * One row of a repaint, with the row beside it not on the tail.
+ *
+ * Built in the shape the repaints above were measured in -- an absolute row
+ * address, the marker, a column advance, the text -- and it is the case that says
+ * what "BOTH answers" is for. Everything the answering step itself asks of a
+ * frame is here: the line that says which key confirms, and a marker this can
+ * read on an answer it knows. The choice block still is not on the screen, and a
+ * condition that stopped at what the answering step asks would act on this.
+ */
+function halfARepaintShowingOnly(choice: string): string {
+  return ` ${THE_CONFIRMING_LINE} ${A_MIDDLE_DOT} Esc to cancel`
+    + `${ESC}[8;2H${THE_CURSOR_GLYPH}${ESC}[1C${choice}`;
+}
+
+/** The tail as `WatchedTerminal.whatTheScreenSays` hands it to the decision. */
+function theFrame(bytes: string): string {
+  return readable(bytes, LINES_READ);
+}
+
+describe('the decision the wait makes, now that it looks at the screen before the deadline', () => {
+  it('answers the whole frame the real CLI drew', () => {
+    expect(whatToDoAboutTheScreen(theFrame(WHAT_THE_REAL_CLI_ASKED), false)).toBe('answer what is on the screen');
+  });
+
+  it('answers that frame with the real CLI`s own repaint on top, which is the tail after an arrow', () => {
+    const tail = theFrame(WHAT_THE_REAL_CLI_ASKED + WHAT_THE_REAL_CLI_REDREW);
+
+    expect(whatToDoAboutTheScreen(tail, false)).toBe('answer what is on the screen');
+    expect(theChoiceUnderTheCursor(tail)).toBe('the trusting choice');
+  });
+
+  it('answers the whole frame the double draws', () => {
+    expect(whatToDoAboutTheScreen(theFrame(WHAT_THE_DOUBLE_ASKS), false)).toBe('answer what is on the screen');
+  });
+
+  it('answers that frame with the double`s own repaint on top', () => {
+    const tail = theFrame(WHAT_THE_DOUBLE_ASKS + WHAT_THE_DOUBLE_REDRAWS);
+
+    expect(whatToDoAboutTheScreen(tail, false)).toBe('answer what is on the screen');
+    expect(theChoiceUnderTheCursor(tail)).toBe('the trusting choice');
+  });
+
+  it('WAITS on the real CLI`s frame cut before the marker was drawn, rather than refusing on it', () => {
+    const cut = theFrame(cutBeforeTheCursorWasPlaced(WHAT_THE_REAL_CLI_ASKED));
+
+    expect(whatToDoAboutTheScreen(cut, false)).toBe('wait');
+    // What refusing on it would have been: the answering step reads this same
+    // tail, finds neither the trusting answer nor the confirming line, and says
+    // so. That refusal is right at the deadline and wrong before it.
+    expect(cut).not.toContain(THE_TRUSTING_CHOICE);
+    expect(cut).not.toContain(THE_CONFIRMING_LINE);
+    expect(theChoiceUnderTheCursor(cut)).toBeNull();
+  });
+
+  it('WAITS on the double`s frame cut at the same place', () => {
+    expect(whatToDoAboutTheScreen(theFrame(cutBeforeTheCursorWasPlaced(WHAT_THE_DOUBLE_ASKS)), false)).toBe('wait');
+  });
+
+  it('waits on a frame whose block is unfinished, although both answers and the marker are on it', () => {
+    const cut = theFrame(cutBeforeTheBlockWasFinished(WHAT_THE_REAL_CLI_ASKED));
+
+    expect(whatToDoAboutTheScreen(cut, false)).toBe('wait');
+    expect(cut).toContain(THE_REFUSING_CHOICE);
+    expect(cut).toContain(THE_TRUSTING_CHOICE);
+    expect(theChoiceUnderTheCursor(cut)).toBe('the refusing choice');
+  });
+
+  it('waits on half a repaint that shows only the trusting answer, although its marker reads perfectly', () => {
+    const half = theFrame(halfARepaintShowingOnly(THE_TRUSTING_CHOICE));
+
+    expect(whatToDoAboutTheScreen(half, false)).toBe('wait');
+    expect(half).not.toContain(THE_REFUSING_CHOICE);
+    expect(half).toContain(THE_CONFIRMING_LINE);
+    expect(theChoiceUnderTheCursor(half)).toBe('the trusting choice');
+  });
+
+  it('waits on the other half of it, which shows only the refusing answer', () => {
+    const half = theFrame(halfARepaintShowingOnly(THE_REFUSING_CHOICE));
+
+    expect(whatToDoAboutTheScreen(half, false)).toBe('wait');
+    expect(half).not.toContain(THE_TRUSTING_CHOICE);
+    expect(half).toContain(THE_CONFIRMING_LINE);
+    expect(theChoiceUnderTheCursor(half)).toBe('the refusing choice');
+  });
+
+  it('waits on a frame nobody can read the marker out of, rather than guessing which answer it is on', () => {
+    const unreadable = theFrame(WHAT_A_FRAME_NOBODY_CAN_READ_LOOKS_LIKE);
+
+    expect(whatToDoAboutTheScreen(unreadable, false)).toBe('wait');
+    expect(unreadable).toContain(THE_REFUSING_CHOICE);
+    expect(unreadable).toContain(THE_TRUSTING_CHOICE);
+    expect(unreadable).toContain(THE_CONFIRMING_LINE);
+    expect(theChoiceUnderTheCursor(unreadable)).toBeNull();
+  });
+
+  it('waits where there is no screen at all, which is the editor engine and is not a refusal', () => {
+    expect(whatToDoAboutTheScreen(null, false)).toBe('wait');
+  });
+
+  it('waits on a tail with nothing printable in it', () => {
+    expect(whatToDoAboutTheScreen(theFrame(''), false)).toBe('wait');
+  });
+
+  it('lets the session win over every one of those frames, so that nothing is typed at a terminal that started', () => {
+    const frames = [
+      theFrame(WHAT_THE_REAL_CLI_ASKED),
+      theFrame(WHAT_THE_DOUBLE_ASKS),
+      theFrame(cutBeforeTheCursorWasPlaced(WHAT_THE_REAL_CLI_ASKED)),
+      theFrame(WHAT_A_FRAME_NOBODY_CAN_READ_LOOKS_LIKE),
+    ];
+
+    expect(frames.map((frame) => whatToDoAboutTheScreen(frame, true))).toStrictEqual(frames.map(() => 'the session is up'));
+    expect(whatToDoAboutTheScreen(null, true)).toBe('the session is up');
+  });
+});
+
+/**
+ * Where the runner decides which folder it opens.
+ *
+ * **The defect this exists for, measured 2026-09-08 (Ш42).** Against the real
+ * `claude` the acceptance ran five times that day and not one of those runs was
+ * asked about trusting its folder: no `the cursor is on ...` line anywhere, and a
+ * terminal up in about 8 s against the 22.4 s of the run earlier the same day
+ * where the question WAS asked. The cause is in `tests/acceptance/run.mjs`, where
+ * `PROJECT` was a constant path and where `CLAUDE_CONFIG_DIR` is deliberately NOT
+ * moved under `GRIPTERM_ACCEPTANCE_AGENT=real`: a "yes, I trust this folder"
+ * answered once went into the profile of whoever ran it and stayed there, for
+ * that path, for good. So the answering path Ш39 built could never be walked
+ * against Claude Code again on that machine -- the instrument was built and made
+ * uncheckable on the same day.
+ *
+ * **Read as TEXT, and weak on purpose.** This says the path is not a constant. It
+ * cannot say that a run really gets a folder the CLI has not seen, which is a
+ * fact about somebody's profile and about a directory nothing here may look in.
+ * That half is a run against the real CLI and it is the orchestrator's to make.
+ * Crude in the safe direction, as its neighbours are: a path made unique some
+ * other way is not seen here, and one seen here really is unique.
+ */
+const THE_RUNNER = join('tests', 'acceptance', 'run.mjs');
+
+/** The line that decides it. */
+const THE_PROJECT_LINE = /^const PROJECT = .*$/mu;
+
+/** What a path unique per run is made of, and it was already imported there. */
+const A_FRESH_NAME = 'randomUUID';
+
+describe('the folder the acceptance opens, which a profile remembers being told to trust', () => {
+  it('decides it in one line, so that the rule below is about something', () => {
+    expect(present(THE_RUNNER)).toMatch(THE_PROJECT_LINE);
+  });
+
+  it('does not open the same path on every run', () => {
+    const [line] = THE_PROJECT_LINE.exec(present(THE_RUNNER)) ?? [];
+
+    expect(line).toBeDefined();
+    expect(line).toContain(A_FRESH_NAME);
   });
 });

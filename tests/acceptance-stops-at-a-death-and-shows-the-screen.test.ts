@@ -105,8 +105,8 @@ const THE_WATCHER = `from './watching-a-terminal'`;
 const A_DEADLINE_OF_ITS_OWN = /Date\.now\(\)\s*[+<>]|[<>]=?\s*Date\.now\(\)/u;
 
 /**
- * How every suite brings its session up, and the one place the 15-second look
- * lives since Ш39.
+ * How every suite brings its session up, and the one place the look at a
+ * terminal that has not started lives since Ш39.
  *
  * It used to be four copies of a look followed by a blind Enter. The Enter chose
  * `No, exit`, and both halves moved into the watcher; the suites now call this
@@ -114,7 +114,15 @@ const A_DEADLINE_OF_ITS_OWN = /Date\.now\(\)\s*[+<>]|[<>]=?\s*Date\.now\(\)/u;
  */
 const THROUGH_THE_WATCHER = 'theSessionStarts(';
 
-/** The look at the frame that no refusal covers, as the watcher labels it. */
+/**
+ * The look at the frame that no refusal covers, as the watcher labels it.
+ *
+ * ONE OF TWO SINCE Ш42, and this is the one the rule is about: the wait ends
+ * either on a question the watcher can act on -- which it prints under a label of
+ * its own -- or on the fifteen seconds running out with neither a session nor
+ * anything readable, which is this one. A run that ends there is the run nothing
+ * else explains, so this is the label worth holding to.
+ */
 const THE_LOOK_AT_FIFTEEN_SECONDS = `showTheScreen('at 15 s`;
 
 /** What a suite calls to put the terminal's own output on the run's output. */
@@ -177,7 +185,7 @@ describe('the acceptance suites, which used to wait 73 seconds for a process tha
     expect(byTheClock).toStrictEqual([]);
   });
 
-  it('takes the screen at the fifteenth second, in the one place that now does it for all four', () => {
+  it('takes the screen when the fifteen seconds run out, in the one place that does it for all four', () => {
     expect(theWatcher()).toContain(THE_LOOK_AT_FIFTEEN_SECONDS);
   });
 

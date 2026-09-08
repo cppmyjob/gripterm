@@ -614,7 +614,8 @@ const MISSING = [
       'above. THE FRAME Ш38 TAUGHT THE SUITES TO PRINT WAS PRINTED, and the cursor was on `No, exit`: the ' +
       'blind Enter was choosing "no, leave", which is why `claude` left with code 1 on the 17th second, three ' +
       'runs of three. So (1) the Enter is gone from all four suites -- `WatchedTerminal.theSessionStarts` reads ' +
-      'the screen at 15 s, moves the cursor onto `Yes, I trust this folder` with an `ESC [ B`, looks AGAIN, and ' +
+      'the screen (at 15 s when Ш39 wrote it; on every poll since Ш42, further down), moves the cursor onto ' +
+      '`Yes, I trust this folder` with an `ESC [ B`, looks AGAIN, and ' +
       'confirms only what the second look says is under the cursor; anything else on that screen is printed and ' +
       'the wait refuses with it. (2) The double now ASKS the measured question, so that answer is walked by ' +
       'every acceptance run under `own` instead of by one that costs turns, and by `tests/fake-claude.test.ts` ' +
@@ -643,10 +644,26 @@ const MISSING = [
       'walks the path a `real` one walks; and both frames are kept as bytes in ' +
       '`tests/acceptance-answers-only-what-it-saw.test.ts`, which replays them through the same two pure ' +
       'functions on every gate. MEASURED AFTER THAT, `own` against the double: GREEN, 38 s for the `rename` ' +
-      'criterion. WHAT IT COSTS, MEASURED AND DELIBERATELY NOT PAID FOR HERE: the first terminal of a run ' +
-      'takes 20.3 s against 4.3 s before Ш39, because the answer is decided at the 15-second mark Ш38 chose. ' +
-      'Whether the instrument should instead wait for `a session OR the question on the screen`, which would ' +
-      'cost neither the wait nor a blind key, is open and is the owner`s to weigh. ONE INSTRUMENT DEFECT WAS ' +
+      'criterion. WHAT IT COST, MEASURED: the first terminal of a run took 20.3 s against 4.3 s before Ш39, ' +
+      'because the answer was decided at the 15-second mark Ш38 chose. THE OWNER WEIGHED THAT ON 2026-09-08 ' +
+      'AND DECIDED TO DO IT (Ш42): the wait is `a session OR the question on the screen`, whichever comes ' +
+      'first, and the 20.3 s above is therefore the last number taken of the old shape -- NO NEW NUMBER IS ' +
+      'PRINTED HERE, because nothing in this repository has re-measured it and inventing one is the failure ' +
+      'this whole record exists against. THE RISK THAT MOVE CARRIES, AND IT IS THE WHOLE OF THE WORK: the ' +
+      'frame used to be read once, at 15 s, and was therefore certain to be finished; it is read early now and ' +
+      'can be caught MID-DRAWING, where the answering step refuses with `the cursor is on nothing this can ' +
+      'read`. A naive version of this change turns a slow green into a fast red. So the decision is a pure ' +
+      'function of (frame, has the session started) -- `whatToDoAboutTheScreen` in ' +
+      '`tests/acceptance/watching-a-terminal.ts` -- and it may act on a frame only when the choice block is ' +
+      'FINISHED (both answers AND the line that says which key confirms, which both sides were measured to ' +
+      'write last of the block) AND the marker is readable on exactly one of the two answers. Anything short ' +
+      'of that is waited on, and after 15 s of waiting everything is as it was: the frame is printed and the ' +
+      'refusal is the old one. `tests/acceptance-answers-only-what-it-saw.test.ts` replays both measured ' +
+      'frames whole, both cut before the marker was drawn, one cut before the block was finished, and the ' +
+      'unreadable shape of 2026-09-08, on every gate. NO KEY IS SENT ANY EARLIER THAN BEFORE relative to what ' +
+      'was seen: the answer is still two looks. WHAT IS NOT CLAIMED: that a run against the real CLI is ' +
+      'faster, or that the trust question comes back at all now that the folder is fresh each run -- both are ' +
+      'the owner`s run to make and neither is asserted in the code. ONE INSTRUMENT DEFECT WAS ' +
       'ESTABLISHED BY THIS RUN AND IS CORRECTED: the suites printed "answering the CLI trust prompt with ' +
       'Enter", which they cannot know -- they read the record`s state and see no prompt, and under `own` that ' +
       'line printed in both runs while no session ever came. All four said they were sending a blind Enter, and ' +
@@ -663,7 +680,8 @@ const MISSING = [
       'taste: `/clear` walks a healthy terminal through `ended` and out of it again (the state machine`s ' +
       'resurrection edge), so a refusal keyed on the record would have failed `p3-clear.test.ts` on a ' +
       'terminal that was never in any trouble. THE SUITES ALSO PRINT THE SCREEN NOW -- the tail the panel`s ' +
-      'bridge keeps, twice: at 15 s with no session started, and at every refusal -- so a ' +
+      'bridge keeps, twice: when the wait for a session ends, whether that is at the question or at the 15-second ' +
+      'deadline, and at every refusal -- so a ' +
       'run against the real CLI can be READ rather than guessed at. It is a byte tail and not a rendered ' +
       'frame, which the head of that file says at length. ' +
       'WALKED AGAINST THE REAL CLI AFTER BOTH FIXES, the evening of 2026-09-08, CLI 2.1.260 with ' +
@@ -678,7 +696,18 @@ const MISSING = [
       '`the cursor is on ...` line, and a suite came up in about 8 s against the 22.4 s measured the same ' +
       'day when the question WAS asked, because the real CLI already had trust for that folder recorded in ' +
       'the profile it ran under. So the answer Ш39 built is walked by every `own` run against the DOUBLE ' +
-      'and was NOT walked by these greens. ' +
+      'and was NOT walked by these greens. THAT SECOND ONE IS A DEFECT OF THE STAND AND IS CORRECTED IN Ш42, ' +
+      'the same day: `PROJECT` in `tests/acceptance/run.mjs` was a fixed path, and under ' +
+      '`GRIPTERM_ACCEPTANCE_AGENT=real` nothing moves `CLAUDE_CONFIG_DIR`, so one "yes, I trust this folder" ' +
+      'answered that morning made the question permanently answered for that path -- the instrument was built ' +
+      'and made uncheckable against Claude Code on one day. The folder is drawn fresh per run now (once, in ' +
+      'the runner`s own module, so that П2`s three sittings still open the SAME one). WHAT THAT COSTS, AND IT ' +
+      'IS PAID OUT OF A PERSON`S PROFILE: every `real` run writes a NEW record of trust into the profile of ' +
+      'whoever ran it, where there used to be one such record for ever, and nothing here reads, counts or ' +
+      'tidies them. Nothing accumulates on the disk side -- `prepare()` opens with `rmSync(BASE)`, which takes ' +
+      'every folder any earlier run left. The half nobody has checked: that the question really comes back. ' +
+      'It is text in a runner until a run against the real CLI says otherwise, and ' +
+      '`tests/acceptance-answers-only-what-it-saw.test.ts` can only hold the path to not being a constant. ' +
       '`against-the-real-cli.json` IS NOT TOUCHED FROM HERE AND WAS NEVER THIS RECORD`S TO TOUCH: the ' +
       'orchestrator writes that file in the same move that corrected these sentences, and what a walk of ' +
       'two criteria out of four does to the debt`s date is the owner`s question.',

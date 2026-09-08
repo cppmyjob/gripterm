@@ -48,7 +48,49 @@ import { buildFakeClaude } from './fake-claude/build.mjs';
 
 const REPO = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const BASE = join(tmpdir(), 'gripterm-acceptance');
-const PROJECT = join(BASE, 'project');
+/**
+ * The folder every window of this run opens, and it is a DIFFERENT one each run.
+ *
+ * **The defect this answers, measured 2026-09-08 (Ш42).** Ш39 taught the
+ * acceptance to read the CLI's question about trusting a folder and answer it.
+ * Five runs against the real `claude` 2.1.260 that same day never reached that
+ * question: no `the cursor is on ...` line in any of them, and a terminal up in
+ * about 8 s against the 22.4 s of the run where the question WAS asked. This
+ * constant was the reason. It was a fixed path, and `CLAUDE_CONFIG_DIR` is
+ * deliberately not moved under `GRIPTERM_ACCEPTANCE_AGENT=real` (see
+ * `CLAUDE_CONFIG` below), so the "yes, I trust this folder" answered once went
+ * into the profile of whoever ran it and stayed there FOR THAT PATH. The
+ * instrument was built and made uncheckable against Claude Code on the same day.
+ *
+ * **Once per run, and that is the constraint that decides where this lives.** П2
+ * closes the editor completely and opens it again, three sittings in three
+ * processes, and all three must open the SAME folder -- that is the criterion's
+ * whole subject. `prepare()` runs once, this module is loaded once, so the name
+ * is drawn once and every host and every editor below inherits it through
+ * `GRIPTERM_ACCEPTANCE_PROJECT` and through the command line. A name drawn per
+ * host would be П2 answered about three different projects.
+ *
+ * **WHAT IT COSTS, and it is a cost against a person's own profile.** Against the
+ * real CLI every run now meets a folder Claude Code has not seen, so it asks
+ * again -- and the answer this run gives writes a NEW record of trust into the
+ * profile of whoever ran it. There used to be one such record, written once and
+ * good for ever; there is now one per run, and nothing here reads, counts or
+ * tidies them. The exchange is deliberate: the alternative is an answering path
+ * that can never be walked against Claude Code twice on one machine. It is the
+ * same profile, and the same "nothing here tidies it", that
+ * `WatchedTerminal.theSessionStarts` already names as the price of answering at
+ * all.
+ *
+ * **Nothing accumulates on THIS side.** `prepare()` opens with
+ * `rmSync(BASE, ...)`, which takes the whole directory and every folder any
+ * earlier run left in it. Checked by running it, 2026-09-08.
+ *
+ * **What is NOT claimed here.** That the question really comes back against the
+ * real CLI, or that a run is any faster for it. Both are facts about somebody's
+ * profile and about a run this repository has not made since; the orchestrator's
+ * run is what settles them.
+ */
+const PROJECT = join(BASE, `project-${randomUUID()}`);
 const STORE = join(BASE, 'store');
 const USER_DATA = join(BASE, 'user-data');
 const EXTENSIONS = join(BASE, 'extensions');
@@ -142,7 +184,12 @@ const THE_TAB_IS_THE_EDITOR_S =
  * the way 2.1.228 wrote it (Ш40). WHAT THE GREEN DOES NOT COVER: two criteria of
  * the four were walked, `rename` and П3, while П2 and О1 were not; and none of
  * those runs reached the trust question at all, because the real CLI already had
- * trust for that folder recorded in the profile it ran under.
+ * trust for that folder recorded in the profile it ran under. THAT LAST
+ * SENTENCE IS WHY `PROJECT` IS DRAWN FRESH EVERY RUN SINCE Ш42, the same day:
+ * a fixed folder made an answered question a permanently answered one, and the
+ * path Ш39 built unwalkable against Claude Code on this machine. What it costs is
+ * written where the change is, at `PROJECT` above. Whether the question really
+ * comes back is a run nobody has made yet.
  * `tools/gate.mjs` carries the whole of it, red and green, with the dates and
  * the numbers.
  *

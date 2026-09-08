@@ -64,9 +64,15 @@ const DEFAULT_LAUNCH_LOCATION: LaunchLocation = 'group';
  * -- and that now happens to people who configured nothing. `gripterm.launch.mode:
  * shell` is refused by this engine and falls back the same way. The channel to
  * the Claude Code extension comes up only by hand (`/ide`) and only one agent
- * holds it. The acceptance a person walks by hand has never once been walked
- * under `own`, and `tests/acceptance/run.mjs` therefore pins `editor` and says
- * so as a debt. `gripterm.launch.location` does not reach this engine at all, so
+ * holds it. **One item of this list was still saying something false a week after
+ * it stopped being true, and it is corrected here (2026-09-08, Ш42; found by
+ * Ш41).** It read: "the acceptance a person walks by hand has never once been
+ * walked under `own`, and `tests/acceptance/run.mjs` therefore pins `editor` and
+ * says so as a debt". Both halves were wrong by then. That runner has chosen its
+ * engine with `GRIPTERM_ACCEPTANCE_ENGINE ?? 'own'` since 2026-08-31 and pins
+ * nothing; the acceptance has been walked under `own` from that day, and on
+ * 2026-09-08 it was walked under `own` against the real `claude` 2.1.260 and
+ * passed. `gripterm.launch.location` does not reach this engine at all, so
  * its default now applies to nobody who has not chosen `editor`.
  *
  * **`editor` is not going anywhere.** It is the way back, whole (O5), it is what
